@@ -15,8 +15,18 @@ npm run build
 
 ```sh
 i-love-urdf validate --urdf robot.urdf
+i-love-urdf analyze --urdf robot.urdf
+i-love-urdf diff --left before.urdf --right after.urdf
 i-love-urdf pretty-print --urdf robot.urdf --out robot.pretty.urdf
 i-love-urdf normalize-axes --urdf robot.urdf --out robot.axes.urdf
+i-love-urdf remove-joints --urdf robot.urdf --joints wrist_joint,finger_joint --out robot.trimmed.urdf
+i-love-urdf reassign-joint --urdf robot.urdf --joint elbow_joint --parent upper_arm --child forearm --out robot.rewired.urdf
+i-love-urdf set-material-color --urdf robot.urdf --link base_link --material base_red --color '#ff0033' --out robot.red.urdf
+i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
+i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
+i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
+i-love-urdf rename-joint --urdf robot.urdf --joint joint_a --name shoulder_joint --out robot.renamed.urdf
+i-love-urdf rename-link --urdf robot.urdf --link link_a --name shoulder_link --out robot.renamed.urdf
 ```
 
 ## Example
@@ -43,6 +53,7 @@ const formatted = prettyPrintURDF(urdfXml);
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
+- CLI: validation, analysis, diffing, transform commands, conversion commands, rename commands
 - Validation: structural and semantic URDF validation
 
 ## Runtime Note

@@ -35,4 +35,34 @@ if (!meshes.urdfContent.includes("package://smoke_robot_description")) {
   throw new Error("i-love-urdf fix-mesh-paths smoke test failed");
 }
 
+const renamedJoint = lib.renameJointInUrdf(urdf, "j", "hinge_joint");
+if (!renamedJoint.success || !renamedJoint.content.includes('joint name="hinge_joint"')) {
+  throw new Error("i-love-urdf rename-joint library smoke test failed");
+}
+
+const renamedLink = lib.renameLinkInUrdf(urdf, "tip", "tool0");
+if (!renamedLink.success || !renamedLink.content.includes('child link="tool0"')) {
+  throw new Error("i-love-urdf rename-link library smoke test failed");
+}
+
+const analysis = lib.analyzeUrdf(urdf);
+if (analysis.robotName !== "smoke_robot" || analysis.linkNames.length !== 3) {
+  throw new Error("i-love-urdf analyze smoke test failed");
+}
+
+const diff = lib.compareUrdfs(urdf, renamedJoint.content);
+if (diff.areEqual || diff.differenceCount < 1) {
+  throw new Error("i-love-urdf diff smoke test failed");
+}
+
+const meshAssets = lib.updateMeshPathsToAssetsInUrdf(urdf);
+if (!meshAssets.success || !meshAssets.content.includes('mesh filename="assets/abs/path/mesh.stl"')) {
+  throw new Error("i-love-urdf mesh-to-assets smoke test failed");
+}
+
+const mjcf = lib.convertURDFToMJCF(urdf);
+if (!mjcf.mjcfContent.includes("<mujoco")) {
+  throw new Error("i-love-urdf urdf-to-mjcf smoke test failed");
+}
+
 console.log("i-love-urdf smoke test passed.");

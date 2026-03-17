@@ -5,27 +5,69 @@ import * as path from "node:path";
 import * as process from "node:process";
 import { JSDOM } from "jsdom";
 import {
+  analyzeUrdf,
   canonicalOrderURDF,
+  compareUrdfs,
+  convertURDFToMJCF,
+  convertURDFToXacro,
   fixMeshPaths,
   normalizeJointAxes,
   parseMeshReference,
   prettyPrintURDF,
+  removeJointsFromUrdf,
+  renameJointInUrdf,
+  renameLinkInUrdf,
   rotateRobot90Degrees,
+  updateJointLinksInUrdf,
+  updateMaterialColorInUrdf,
+  updateMeshPathsToAssetsInUrdf,
   validateUrdf,
 } from "./index";
 import { parseXml } from "./xmlDom";
 
+const SUPPORTED_COMMANDS = [
+  "validate",
+  "analyze",
+  "diff",
+  "fix-mesh-paths",
+  "mesh-refs",
+  "canonical-order",
+  "pretty-print",
+  "normalize-axes",
+  "rotate-90",
+  "remove-joints",
+  "reassign-joint",
+  "set-material-color",
+  "mesh-to-assets",
+  "urdf-to-mjcf",
+  "urdf-to-xacro",
+  "rename-joint",
+  "rename-link",
+] as const;
+
+type SupportedCommandName = (typeof SUPPORTED_COMMANDS)[number];
 type CommandName =
   | "validate"
+  | "analyze"
+  | "diff"
   | "fix-mesh-paths"
   | "mesh-refs"
   | "canonical-order"
   | "pretty-print"
   | "normalize-axes"
   | "rotate-90"
+  | "remove-joints"
+  | "reassign-joint"
+  | "set-material-color"
+  | "mesh-to-assets"
+  | "urdf-to-mjcf"
+  | "urdf-to-xacro"
+  | "rename-joint"
+  | "rename-link"
   | "help";
 
 type ArgMap = Map<string, string | boolean>;
+const SUPPORTED_COMMAND_SET = new Set<string>(SUPPORTED_COMMANDS);
 
 const installDomGlobals = () => {
   if (typeof globalThis.DOMParser !== "undefined" && typeof globalThis.XMLSerializer !== "undefined") {
@@ -45,16 +87,9 @@ const writeText = (filePath: string, content: string) => {
 
 const parseArgs = (argv: string[]): { rawCommand: string; command: CommandName; args: ArgMap } => {
   const [, , rawCommand = "help", ...rest] = argv;
-  const command =
-    rawCommand === "validate" ||
-    rawCommand === "fix-mesh-paths" ||
-    rawCommand === "mesh-refs" ||
-    rawCommand === "canonical-order" ||
-    rawCommand === "pretty-print" ||
-    rawCommand === "normalize-axes" ||
-    rawCommand === "rotate-90"
-      ? rawCommand
-      : "help";
+  const command = SUPPORTED_COMMAND_SET.has(rawCommand)
+    ? (rawCommand as SupportedCommandName)
+    : "help";
   const args: ArgMap = new Map();
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -73,11 +108,15 @@ const parseArgs = (argv: string[]): { rawCommand: string; command: CommandName; 
   return { rawCommand, command, args };
 };
 
+const fail = (message: string): never => {
+  console.error(message);
+  process.exit(2);
+};
+
 const requireStringArg = (args: ArgMap, key: string): string => {
   const value = args.get(key);
   if (!value || value === true) {
-    console.error(`Missing required argument --${key}`);
-    process.exit(2);
+    fail(`Missing required argument --${key}`);
   }
   return String(value);
 };
@@ -93,10 +132,28 @@ const getOptionalNumberArg = (args: ArgMap, key: string): number | undefined => 
   if (value === undefined) return undefined;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
-    console.error(`Invalid numeric argument --${key}: ${value}`);
-    process.exit(2);
+    fail(`Invalid numeric argument --${key}: ${value}`);
   }
   return parsed;
+};
+
+const getDelimitedStringArg = (args: ArgMap, primaryKey: string, fallbackKey?: string): string[] => {
+  const value =
+    getOptionalStringArg(args, primaryKey) ??
+    (fallbackKey ? getOptionalStringArg(args, fallbackKey) : undefined);
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+};
+
+const requireHexColorArg = (args: ArgMap, key: string): string => {
+  const value = requireStringArg(args, key).trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
+    fail(`Invalid hex color for --${key}: ${value}. Expected #RRGGBB.`);
+  }
+  return value;
 };
 
 const writeOutIfRequested = (outPath: string | undefined, content: string) => {
@@ -111,12 +168,22 @@ const printHelp = () => {
       "",
       "Commands:",
       "  validate --urdf <path>",
+      "  analyze --urdf <path>",
+      "  diff --left <path> --right <path>",
       "  fix-mesh-paths --urdf <path> [--package <name>] [--out <path>]",
       "  mesh-refs --urdf <path>",
       "  canonical-order --urdf <path> [--out <path>]",
       "  pretty-print --urdf <path> [--indent <n>] [--out <path>]",
       "  normalize-axes --urdf <path> [--out <path>]",
       "  rotate-90 --urdf <path> --axis <x|y|z> [--out <path>]",
+      "  remove-joints --urdf <path> --joints <a,b,c> [--out <path>]",
+      "  reassign-joint --urdf <path> --joint <name> --parent <link> --child <link> [--out <path>]",
+      "  set-material-color --urdf <path> --link <name> --material <name> --color <#RRGGBB> [--out <path>]",
+      "  mesh-to-assets --urdf <path> [--out <path>]",
+      "  urdf-to-mjcf --urdf <path> [--out <path>]",
+      "  urdf-to-xacro --urdf <path> [--out <path>]",
+      "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]",
+      "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
       "",
       "All commands print JSON to stdout.",
     ].join("\n")
@@ -142,16 +209,35 @@ const run = () => {
     return;
   }
 
+  if (command === "diff") {
+    const leftPath = requireStringArg(args, "left");
+    const rightPath = requireStringArg(args, "right");
+    const result = compareUrdfs(readText(leftPath), readText(rightPath));
+    console.log(
+      JSON.stringify(
+        { ...result, leftPath, rightPath },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
   const urdfPath = getOptionalStringArg(args, "urdf");
   if (!urdfPath) {
     printHelp();
     process.exit(2);
   }
-
   const urdfContent = readText(urdfPath);
 
   if (command === "validate") {
     const result = validateUrdf(urdfContent);
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "analyze") {
+    const result = analyzeUrdf(urdfContent);
     console.log(JSON.stringify(result, null, 2));
     return;
   }
@@ -208,6 +294,84 @@ const run = () => {
     const rotated = rotateRobot90Degrees(urdfContent, axisRaw);
     writeOutIfRequested(outPath, rotated);
     console.log(JSON.stringify({ urdfContent: rotated, axis: axisRaw, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "remove-joints") {
+    const outPath = getOptionalStringArg(args, "out");
+    const jointNames = getDelimitedStringArg(args, "joints", "joint");
+    if (jointNames.length === 0) {
+      fail("remove-joints requires --joints with at least one joint name");
+    }
+    const result = removeJointsFromUrdf(urdfContent, jointNames);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "reassign-joint") {
+    const outPath = getOptionalStringArg(args, "out");
+    const jointName = requireStringArg(args, "joint");
+    const parentLink = requireStringArg(args, "parent");
+    const childLink = requireStringArg(args, "child");
+    const result = updateJointLinksInUrdf(urdfContent, jointName, parentLink, childLink);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "set-material-color") {
+    const outPath = getOptionalStringArg(args, "out");
+    const linkName = requireStringArg(args, "link");
+    const materialName = requireStringArg(args, "material");
+    const colorHex = requireHexColorArg(args, "color");
+    const result = updateMaterialColorInUrdf(urdfContent, linkName, materialName, colorHex);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "mesh-to-assets") {
+    const outPath = getOptionalStringArg(args, "out");
+    const result = updateMeshPathsToAssetsInUrdf(urdfContent);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "urdf-to-mjcf") {
+    const outPath = getOptionalStringArg(args, "out");
+    const result = convertURDFToMJCF(urdfContent);
+    writeOutIfRequested(outPath, result.mjcfContent);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "urdf-to-xacro") {
+    const outPath = getOptionalStringArg(args, "out");
+    const result = convertURDFToXacro(urdfContent);
+    writeOutIfRequested(outPath, result.xacroContent);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "rename-joint") {
+    const outPath = getOptionalStringArg(args, "out");
+    const oldJointName = requireStringArg(args, "joint");
+    const newJointName = requireStringArg(args, "name");
+    const result = renameJointInUrdf(urdfContent, oldJointName, newJointName);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "rename-link") {
+    const outPath = getOptionalStringArg(args, "out");
+    const oldLinkName = requireStringArg(args, "link");
+    const newLinkName = requireStringArg(args, "name");
+    const result = renameLinkInUrdf(urdfContent, oldLinkName, newLinkName);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
     return;
   }
 

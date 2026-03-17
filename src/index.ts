@@ -9,6 +9,7 @@ export * from "./parsing/getJointLinks";
 
 export * from "./analysis/analyzeUrdf";
 export * from "./transforms/urdfTransforms";
+export * from "./transforms/urdfEditing";
 export * from "./convert/urdfToMJCF";
 export * from "./convert/urdfToXacro";
 export * from "./formats/extensionSupport";
