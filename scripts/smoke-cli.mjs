@@ -65,4 +65,9 @@ if (!mjcf.mjcfContent.includes("<mujoco")) {
   throw new Error("i-love-urdf urdf-to-mjcf smoke test failed");
 }
 
+const repoRef = lib.parseGitHubRepositoryReference("https://github.com/acme/robot-repo/tree/main/robots/arm");
+if (!repoRef || repoRef.owner !== "acme" || repoRef.repo !== "robot-repo" || repoRef.ref !== "main" || repoRef.path !== "robots/arm") {
+  throw new Error("i-love-urdf GitHub repository parsing smoke test failed");
+}
+
 console.log("i-love-urdf smoke test passed.");

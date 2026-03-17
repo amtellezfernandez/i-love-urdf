@@ -35,6 +35,7 @@ i-love-urdf set-material-color --urdf robot.urdf --link base_link --material bas
 i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
 i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
+i-love-urdf inspect-repo --github owner/repo
 i-love-urdf rename-joint --urdf robot.urdf --joint joint_a --name shoulder_joint --out robot.renamed.urdf
 i-love-urdf rename-link --urdf robot.urdf --link link_a --name shoulder_link --out robot.renamed.urdf
 ```
@@ -46,13 +47,17 @@ import {
   parseURDF,
   validateUrdf,
   convertURDFToMJCF,
+  inspectGitHubRepositoryUrdfs,
   prettyPrintURDF,
 } from "i-love-urdf";
 
-const parsed = parseURDF(urdfXml);
-const validation = validateUrdf(urdfXml);
-const converted = convertURDFToMJCF(urdfXml);
-const formatted = prettyPrintURDF(urdfXml);
+async function main() {
+  const parsed = parseURDF(urdfXml);
+  const validation = validateUrdf(urdfXml);
+  const converted = convertURDFToMJCF(urdfXml);
+  const formatted = prettyPrintURDF(urdfXml);
+  const repoSummary = await inspectGitHubRepositoryUrdfs({ owner: "owner", repo: "robot-repo" });
+}
 ```
 
 ## Current API Areas
@@ -61,10 +66,10 @@ const formatted = prettyPrintURDF(urdfXml);
 - Analysis: inertials, collisions, mesh reference analysis
 - Conversion: URDF to MJCF, URDF to XACRO, XACRO request/response helpers
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
-- Repository: candidate discovery, package/dependency name extraction, repository package helpers
+- Repository: candidate discovery, package/dependency name extraction, repository package helpers, GitHub repo inspection
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
-- CLI: validation, analysis, diffing, transform commands, conversion commands, rename commands
+- CLI: validation, analysis, diffing, transform commands, conversion commands, rename commands, GitHub repo inspection
 - Validation: structural and semantic URDF validation
 
 ## Runtime Note

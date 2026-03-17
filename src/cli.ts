@@ -11,8 +11,10 @@ import {
   convertURDFToMJCF,
   convertURDFToXacro,
   fixMeshPaths,
+  inspectGitHubRepositoryUrdfs,
   normalizeJointAxes,
   parseMeshReference,
+  parseGitHubRepositoryReference,
   prettyPrintURDF,
   removeJointsFromUrdf,
   renameJointInUrdf,
@@ -43,6 +45,7 @@ const SUPPORTED_COMMANDS = [
   "urdf-to-xacro",
   "rename-joint",
   "rename-link",
+  "inspect-repo",
 ] as const;
 
 type SupportedCommandName = (typeof SUPPORTED_COMMANDS)[number];
@@ -64,6 +67,7 @@ type CommandName =
   | "urdf-to-xacro"
   | "rename-joint"
   | "rename-link"
+  | "inspect-repo"
   | "help";
 
 type ArgMap = Map<string, string | boolean>;
@@ -184,6 +188,7 @@ const printHelp = () => {
       "  urdf-to-xacro --urdf <path> [--out <path>]",
       "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]",
       "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
+      "  inspect-repo --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
       "",
       "All commands print JSON to stdout.",
     ].join("\n")
@@ -200,12 +205,46 @@ const extractMeshRefs = (urdfContent: string) => {
     .map((ref) => parseMeshReference(ref));
 };
 
-const run = () => {
+const run = async () => {
   const { rawCommand, command, args } = parseArgs(process.argv);
   installDomGlobals();
 
   if (rawCommand === "help" || rawCommand === "--help" || rawCommand === "-h") {
     printHelp();
+    return;
+  }
+
+  if (command === "inspect-repo") {
+    const github = requireStringArg(args, "github");
+    const parsed = parseGitHubRepositoryReference(github);
+    if (!parsed) {
+      fail("Invalid --github value. Expected owner/repo or a GitHub repository URL.");
+    }
+
+    const outPath = getOptionalStringArg(args, "out");
+    const pathOverride = getOptionalStringArg(args, "path");
+    const refOverride = getOptionalStringArg(args, "ref");
+    const accessToken =
+      getOptionalStringArg(args, "token") ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GH_TOKEN;
+    const maxCandidatesToInspect = getOptionalNumberArg(args, "max-candidates");
+    const concurrency = getOptionalNumberArg(args, "concurrency");
+    const result = await inspectGitHubRepositoryUrdfs(
+      {
+        ...parsed,
+        path: pathOverride ?? parsed.path,
+        ref: refOverride ?? parsed.ref,
+      },
+      {
+        accessToken,
+        maxCandidatesToInspect,
+        concurrency,
+      }
+    );
+    const payload = JSON.stringify(result, null, 2);
+    writeOutIfRequested(outPath, payload);
+    console.log(payload);
     return;
   }
 
@@ -380,4 +419,9 @@ const run = () => {
   process.exit(2);
 };
 
-run();
+run().catch((error) => {
+  if (error instanceof Error) {
+    fail(error.message);
+  }
+  fail("Unknown CLI failure");
+});
