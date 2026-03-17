@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": false,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,52 @@
+{
+  "name": "i-love-urdf",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "private": false,
+  "description": "Core URDF parsing, validation, transform, mesh, and conversion utilities.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "i-love-urdf": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p ./tsconfig.build.json"
+  },
+  "dependencies": {
+    "jsdom": "^22.1.0"
+  },
+  "keywords": [
+    "urdf",
+    "robotics",
+    "xacro",
+    "mjcf",
+    "parser"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amtellezfernandez/i-love-urdf.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amtellezfernandez/i-love-urdf/issues"
+  },
+  "homepage": "https://github.com/amtellezfernandez/i-love-urdf",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./src": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
+}

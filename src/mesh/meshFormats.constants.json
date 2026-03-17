@@ -1,0 +1,12 @@
+{
+  "supportedMeshExtensions": [".stl", ".glb", ".gltf", ".obj", ".dae"],
+  "additionalMeshResourceExtensions": [
+    ".bin",
+    ".mtl",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".ktx2"
+  ]
+}
