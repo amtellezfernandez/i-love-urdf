@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as process from "node:process";
 import { JSDOM } from "jsdom";
+import { inspectLocalRepositoryUrdfs } from "./repository/localRepositoryInspection";
 import {
   analyzeUrdf,
   canonicalOrderURDF,
@@ -188,7 +189,7 @@ const printHelp = () => {
       "  urdf-to-xacro --urdf <path> [--out <path>]",
       "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]",
       "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
-      "  inspect-repo --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
+      "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
       "",
       "All commands print JSON to stdout.",
     ].join("\n")
@@ -215,33 +216,48 @@ const run = async () => {
   }
 
   if (command === "inspect-repo") {
-    const github = requireStringArg(args, "github");
-    const parsed = parseGitHubRepositoryReference(github);
-    if (!parsed) {
-      fail("Invalid --github value. Expected owner/repo or a GitHub repository URL.");
+    const github = getOptionalStringArg(args, "github");
+    const local = getOptionalStringArg(args, "local");
+    if ((github ? 1 : 0) + (local ? 1 : 0) !== 1) {
+      fail("inspect-repo requires exactly one of --github or --local.");
     }
-
     const outPath = getOptionalStringArg(args, "out");
-    const pathOverride = getOptionalStringArg(args, "path");
-    const refOverride = getOptionalStringArg(args, "ref");
-    const accessToken =
-      getOptionalStringArg(args, "token") ||
-      process.env.GITHUB_TOKEN ||
-      process.env.GH_TOKEN;
     const maxCandidatesToInspect = getOptionalNumberArg(args, "max-candidates");
     const concurrency = getOptionalNumberArg(args, "concurrency");
-    const result = await inspectGitHubRepositoryUrdfs(
-      {
-        ...parsed,
-        path: pathOverride ?? parsed.path,
-        ref: refOverride ?? parsed.ref,
-      },
-      {
-        accessToken,
-        maxCandidatesToInspect,
-        concurrency,
-      }
-    );
+    const result = local
+      ? await inspectLocalRepositoryUrdfs(
+          { path: local },
+          {
+            maxCandidatesToInspect,
+            concurrency,
+          }
+        )
+      : await (() => {
+          const parsed = parseGitHubRepositoryReference(github || "");
+          if (!parsed) {
+            fail("Invalid --github value. Expected owner/repo or a GitHub repository URL.");
+          }
+
+          const pathOverride = getOptionalStringArg(args, "path");
+          const refOverride = getOptionalStringArg(args, "ref");
+          const accessToken =
+            getOptionalStringArg(args, "token") ||
+            process.env.GITHUB_TOKEN ||
+            process.env.GH_TOKEN;
+
+          return inspectGitHubRepositoryUrdfs(
+            {
+              ...parsed,
+              path: pathOverride ?? parsed.path,
+              ref: refOverride ?? parsed.ref,
+            },
+            {
+              accessToken,
+              maxCandidatesToInspect,
+              concurrency,
+            }
+          );
+        })();
     const payload = JSON.stringify(result, null, 2);
     writeOutIfRequested(outPath, payload);
     console.log(payload);

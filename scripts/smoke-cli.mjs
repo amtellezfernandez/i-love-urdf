@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { JSDOM } from "jsdom";
 
@@ -9,6 +11,7 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 execFileSync("npm", ["run", "build"], { stdio: "inherit", cwd: root, shell: true });
 
 const lib = await import(path.join(root, "dist", "index.js"));
+const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.DOMParser = dom.window.DOMParser;
@@ -68,6 +71,15 @@ if (!mjcf.mjcfContent.includes("<mujoco")) {
 const repoRef = lib.parseGitHubRepositoryReference("https://github.com/acme/robot-repo/tree/main/robots/arm");
 if (!repoRef || repoRef.owner !== "acme" || repoRef.repo !== "robot-repo" || repoRef.ref !== "main" || repoRef.path !== "robots/arm") {
   throw new Error("i-love-urdf GitHub repository parsing smoke test failed");
+}
+
+const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), "i-love-urdf-smoke-"));
+fs.mkdirSync(path.join(tempRepo, "meshes"), { recursive: true });
+fs.writeFileSync(path.join(tempRepo, "robot.urdf"), urdf, "utf8");
+fs.writeFileSync(path.join(tempRepo, "meshes", "mesh.stl"), "solid mesh\nendsolid mesh\n", "utf8");
+const localSummary = await localLib.inspectLocalRepositoryUrdfs({ path: tempRepo });
+if (localSummary.candidateCount < 1 || localSummary.primaryCandidatePath !== "robot.urdf") {
+  throw new Error("i-love-urdf local repository inspection smoke test failed");
 }
 
 console.log("i-love-urdf smoke test passed.");

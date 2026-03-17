@@ -1,19 +1,10 @@
+import { normalizeRepositoryPath } from "./repositoryMeshResolution";
 import {
-  buildPackageRootsFromRepositoryFiles,
-  normalizeRepositoryPath,
-  resolveRepositoryMeshReferences,
-} from "./repositoryMeshResolution";
-import {
-  collectMeshReferencedPackageNamesFromUrdf,
-  collectPackageNamesFromText,
-  detectUnsupportedMeshFormats,
-  extractMeshReferencesFromUrdf,
-  findRepositoryUrdfCandidates,
-  hasRenderableUrdfGeometry,
-  type RepositoryUrdfCandidate,
-} from "./repositoryUrdfDiscovery";
-import { extractExtension, isSupportedMeshExtension } from "../mesh/meshFormats";
-import { normalizeMeshPathForMatch, parseMeshReference } from "../mesh/meshPaths";
+  inspectRepositoryFiles,
+  type InspectRepositoryFilesOptions,
+  type RepositoryCandidateInspection,
+  type RepositoryInspectionSummary,
+} from "./repositoryInspection";
 
 const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_ACCEPT_HEADER = "application/vnd.github.v3+json";
@@ -56,32 +47,18 @@ export type GitHubRepositoryFile = {
   encoding?: "sha";
 };
 
-export type GitHubRepositoryCandidateInspection = RepositoryUrdfCandidate & {
-  inspectionMode: "urdf" | "xacro-source";
-  hasRenderableGeometry?: boolean;
-  meshReferenceCount?: number;
-  unresolvedMeshReferenceCount?: number;
-  referencedPackages: string[];
-};
+export type GitHubRepositoryCandidateInspection = RepositoryCandidateInspection;
 
-export type GitHubRepositoryInspectionResult = {
+export type GitHubRepositoryInspectionResult = RepositoryInspectionSummary & {
   owner: string;
   repo: string;
   path: string | null;
   ref: string;
   repositoryUrl: string;
-  totalEntries: number;
-  totalFiles: number;
-  candidateCount: number;
-  inspectedCandidateCount: number;
-  primaryCandidatePath: string | null;
-  candidates: GitHubRepositoryCandidateInspection[];
 };
 
-export type InspectGitHubRepositoryOptions = {
+export type InspectGitHubRepositoryOptions = InspectRepositoryFilesOptions & {
   accessToken?: string;
-  maxCandidatesToInspect?: number;
-  concurrency?: number;
 };
 
 const sanitizeRepoSegment = (value: string): string => value.replace(/\.git$/i, "").trim();
@@ -365,124 +342,21 @@ export const fetchGitHubTextFile = async (
   return decodeBase64ToUtf8(data.content);
 };
 
-const inspectRepositoryCandidate = async (
-  reference: GitHubRepositoryReference,
-  candidate: RepositoryUrdfCandidate,
-  files: GitHubRepositoryFile[],
-  accessToken?: string
-): Promise<GitHubRepositoryCandidateInspection> => {
-  const file = files.find((entry) => entry.type === "file" && entry.path === candidate.path);
-  const baseResult: GitHubRepositoryCandidateInspection = {
-    ...candidate,
-    inspectionMode: candidate.isXacro ? "xacro-source" : "urdf",
-    referencedPackages: [],
-  };
-
-  if (!file) {
-    return baseResult;
-  }
-
-  const text = await fetchGitHubTextFile(
-    reference.owner,
-    reference.repo,
-    file.path,
-    file.sha,
-    accessToken
-  );
-
-  const referencedPackages = Array.from(
-    new Set([
-      ...collectPackageNamesFromText(text),
-      ...(candidate.isXacro ? [] : collectMeshReferencedPackageNamesFromUrdf(text)),
-    ])
-  ).sort();
-
-  if (candidate.isXacro) {
-    return {
-      ...baseResult,
-      referencedPackages,
-    };
-  }
-
-  const packageRoots = buildPackageRootsFromRepositoryFiles(files);
-  const meshReferences = extractMeshReferencesFromUrdf(text);
-  const { matchByReference } = resolveRepositoryMeshReferences(candidate.path, text, files, {
-    packageRoots,
-  });
-  const unmatchedMeshReferences = meshReferences.filter((meshRef) => {
-    const refInfo = parseMeshReference(meshRef);
-    const normalized = normalizeMeshPathForMatch(refInfo.path || refInfo.raw);
-    const ext = extractExtension(normalized);
-    return Boolean(ext && isSupportedMeshExtension(ext) && !matchByReference.has(meshRef));
-  });
-  const unsupported = detectUnsupportedMeshFormats(text);
-
-  return {
-    ...baseResult,
-    referencedPackages,
-    hasRenderableGeometry: hasRenderableUrdfGeometry(text),
-    meshReferenceCount: meshReferences.length,
-    hasUnsupportedFormats: unsupported.hasUnsupported,
-    unsupportedFormats: unsupported.hasUnsupported ? unsupported.formats : undefined,
-    unmatchedMeshReferences: unmatchedMeshReferences.length > 0 ? unmatchedMeshReferences : undefined,
-    unresolvedMeshReferenceCount: unmatchedMeshReferences.length,
-  };
-};
-
-const inspectTopCandidates = async (
-  reference: GitHubRepositoryReference,
-  candidates: RepositoryUrdfCandidate[],
-  files: GitHubRepositoryFile[],
-  options: InspectGitHubRepositoryOptions
-): Promise<GitHubRepositoryCandidateInspection[]> => {
-  const maxCandidatesToInspect = Math.max(
-    0,
-    Number(options.maxCandidatesToInspect ?? 12) || 12
-  );
-  const concurrency = Math.max(1, Number(options.concurrency ?? 4) || 4);
-  const candidatesToInspect =
-    maxCandidatesToInspect > 0 ? candidates.slice(0, maxCandidatesToInspect) : [];
-  const untouchedCandidates: GitHubRepositoryCandidateInspection[] = candidates
-    .slice(candidatesToInspect.length)
-    .map((candidate) => ({
-      ...candidate,
-      inspectionMode: candidate.isXacro ? "xacro-source" : "urdf",
-      referencedPackages: [],
-    }));
-  const inspected = new Array<GitHubRepositoryCandidateInspection>(candidatesToInspect.length);
-  let cursor = 0;
-
-  const workers = Array.from(
-    { length: Math.min(concurrency, candidatesToInspect.length) },
-    async () => {
-      while (true) {
-        const index = cursor;
-        cursor += 1;
-        if (index >= candidatesToInspect.length) return;
-        inspected[index] = await inspectRepositoryCandidate(
-          reference,
-          candidatesToInspect[index],
-          files,
-          options.accessToken
-        );
-      }
-    }
-  );
-
-  await Promise.all(workers);
-  return [...inspected, ...untouchedCandidates];
-};
-
 export const inspectGitHubRepositoryUrdfs = async (
   reference: GitHubRepositoryReference,
   options: InspectGitHubRepositoryOptions = {}
 ): Promise<GitHubRepositoryInspectionResult> => {
   const { ref, files } = await fetchGitHubRepositoryFiles(reference, options.accessToken);
-  const candidates = findRepositoryUrdfCandidates(files);
-  const inspectedCandidates = await inspectTopCandidates(
-    { ...reference, ref },
-    candidates,
+  const summary = await inspectRepositoryFiles(
     files,
+    (_candidate, file) =>
+      fetchGitHubTextFile(
+        reference.owner,
+        reference.repo,
+        file.path,
+        file.sha,
+        options.accessToken
+      ),
     options
   );
 
@@ -492,14 +366,6 @@ export const inspectGitHubRepositoryUrdfs = async (
     path: normalizeRepositoryPath(reference.path || "") || null,
     ref,
     repositoryUrl: `https://github.com/${reference.owner}/${reference.repo}`,
-    totalEntries: files.length,
-    totalFiles: files.filter((file) => file.type === "file").length,
-    candidateCount: candidates.length,
-    inspectedCandidateCount: Math.min(
-      candidates.length,
-      Math.max(0, Number(options.maxCandidatesToInspect ?? 12) || 12)
-    ),
-    primaryCandidatePath: candidates[0]?.path ?? null,
-    candidates: inspectedCandidates,
+    ...summary,
   };
 };
