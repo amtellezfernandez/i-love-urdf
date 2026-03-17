@@ -61,6 +61,7 @@ const formatted = prettyPrintURDF(urdfXml);
 - Analysis: inertials, collisions, mesh reference analysis
 - Conversion: URDF to MJCF, URDF to XACRO, XACRO request/response helpers
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
+- Repository: candidate discovery, package/dependency name extraction, repository package helpers
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
 - CLI: validation, analysis, diffing, transform commands, conversion commands, rename commands

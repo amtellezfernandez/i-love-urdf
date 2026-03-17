@@ -18,6 +18,7 @@ export * from "./mesh/meshPaths";
 export * from "./mesh/meshFormats";
 export * from "./mesh/fixMeshPaths";
 export * from "./repository/repositoryMeshResolution";
+export * from "./repository/repositoryUrdfDiscovery";
 
 export * from "./utils/prettyPrintURDF";
 export * from "./utils/canonicalOrdering";
