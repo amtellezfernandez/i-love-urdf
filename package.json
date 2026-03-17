@@ -13,7 +13,8 @@
     "i-love-urdf": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p ./tsconfig.build.json"
+    "build": "tsc -p ./tsconfig.build.json",
+    "smoke": "node ./scripts/smoke-cli.mjs"
   },
   "dependencies": {
     "jsdom": "^22.1.0"
