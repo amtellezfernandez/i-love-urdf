@@ -9,6 +9,7 @@ This repository is the code-first home for the URDF toolkit. The website lives s
 Some parts of `i-love-urdf` are adapted from upstream code and that should stay explicit.
 
 - `i-love-urdf` is the extracted and renamed continuation of the `pretty-urdf` package that originally lived inside `urdf-studio`: <https://github.com/amtellezfernandez/urdf-studio/tree/main/pretty-urdf>
+- `urdf-studio` now consumes `i-love-urdf` as the active shared package instead of continuing to depend on `pretty-urdf`
 - Several edit-oriented helpers now exposed here were ported from the `urdf-studio` web editor: <https://github.com/amtellezfernandez/urdf-studio/tree/main/web/src/features/urdf/editor>
 - The MJCF converter in `src/convert/urdfToMJCF.ts` follows the structure used by `urdf2mjcf`: <https://github.com/kscalelabs/urdf2mjcf>
 - If more upstream code is brought into this repository, keep that attribution visible here and in `i-love-urdf-web`.
