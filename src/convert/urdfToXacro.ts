@@ -101,6 +101,21 @@ interface NumberOccurrence {
   element: Element;
 }
 
+const STRICT_NUMERIC_SEQUENCE_PATTERN =
+  /^-?\d+\.?\d*(?:[eE][-+]?\d+)?(?:\s+-?\d+\.?\d*(?:[eE][-+]?\d+)?)*$/;
+
+const SUPPORTED_NUMERIC_ATTRIBUTE_CONTEXTS: Record<string, Set<string>> = {
+  box: new Set(["size"]),
+  cylinder: new Set(["radius", "length"]),
+  sphere: new Set(["radius"]),
+  origin: new Set(["xyz", "rpy"]),
+  axis: new Set(["xyz"]),
+  mass: new Set(["value"]),
+  inertia: new Set(["ixx", "ixy", "ixz", "iyy", "iyz", "izz"]),
+  limit: new Set(["lower", "upper", "effort", "velocity"]),
+  mesh: new Set(["scale"]),
+};
+
 /**
  * Extracts all numeric values from the AST
  */
@@ -110,6 +125,9 @@ function extractAllNumbers(node: XacroNode, path: string = ""): NumberOccurrence
 
   // Extract numbers from attributes
   for (const [attrName, attrValue] of Object.entries(node.attributes)) {
+    if (!isParameterizableNumericAttribute(node.tag, attrName, attrValue)) {
+      continue;
+    }
     const numbers = extractNumbersFromString(attrValue);
     for (const num of numbers) {
       occurrences.push({
@@ -158,6 +176,20 @@ function extractNumbersFromString(str: string): ExtractedNumber[] {
   }
 
   return numbers;
+}
+
+function isParameterizableNumericAttribute(tag: string, attrName: string, attrValue: string): boolean {
+  const supportedAttrs = SUPPORTED_NUMERIC_ATTRIBUTE_CONTEXTS[tag];
+  if (!supportedAttrs || !supportedAttrs.has(attrName)) {
+    return false;
+  }
+
+  const normalizedValue = attrValue.trim();
+  if (!normalizedValue) {
+    return false;
+  }
+
+  return STRICT_NUMERIC_SEQUENCE_PATTERN.test(normalizedValue);
 }
 
 /**
@@ -319,6 +351,9 @@ function substituteValues(
   for (const element of allElements) {
     // Process attributes
     for (const attr of element.attributes) {
+      if (!isParameterizableNumericAttribute(element.tagName, attr.name, attr.value)) {
+        continue;
+      }
       let newValue = attr.value;
       let modified = false;
 
@@ -350,8 +385,9 @@ function substituteValues(
  * Replaces a specific numeric value in a string with a property reference
  */
 function replaceValue(str: string, oldValue: string, newValue: string): string {
-  // Replace only the first occurrence to maintain correspondence
-  return str.replace(oldValue, newValue);
+  const escapedValue = oldValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(^|\\s)${escapedValue}(?=\\s|$)`);
+  return str.replace(pattern, (match, leadingWhitespace) => `${leadingWhitespace}${newValue}`);
 }
 
 // ============================================================================
@@ -365,18 +401,24 @@ interface StructuralHash {
 }
 
 /**
- * Computes a structural hash of an element (ignoring specific attribute values)
+ * Computes a structural hash of an element.
+ * Only the root element's own "name" attribute is ignored so macros are only
+ * generated for subtrees that are otherwise identical.
  */
-function computeStructuralHash(node: XacroNode): string {
+function computeStructuralHash(node: XacroNode, depth: number = 0): string {
   const parts: string[] = [node.tag];
 
-  // Add attribute names (not values) to hash
-  const attrNames = Object.keys(node.attributes).sort();
-  parts.push(attrNames.join(","));
+  const attrEntries = Object.entries(node.attributes)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([attrName, attrValue]) =>
+      depth === 0 && attrName === "name" ? `${attrName}=__PARAM__` : `${attrName}=${attrValue}`
+    );
+  parts.push(attrEntries.join(","));
+  parts.push(`text=${node.text}`);
 
   // Add children hashes recursively
   for (const child of node.children) {
-    parts.push(computeStructuralHash(child));
+    parts.push(computeStructuralHash(child, depth + 1));
   }
 
   return parts.join("|");
@@ -438,39 +480,20 @@ function generateMacros(repeatedGroups: Map<string, XacroNode[]>): XacroMacro[] 
     }
     usedNames.add(macroName);
 
-    // Determine parameters (attributes that differ between instances)
-    const params = new Set<string>(["name"]); // name is always a parameter
-
-    // Compare attributes across all instances
-    const allAttrNames = new Set<string>();
-    for (const node of nodes) {
-      for (const attrName of Object.keys(node.attributes)) {
-        allAttrNames.add(attrName);
-      }
-    }
-
-    for (const attrName of allAttrNames) {
-      const values = new Set<string>();
-      for (const node of nodes) {
-        values.add(node.attributes[attrName] || "");
-      }
-      if (values.size > 1) {
-        params.add(attrName);
-      }
-    }
+    const params = firstNode.attributes.name !== undefined ? ["name"] : [];
 
     // Create template (using first instance as base)
-    const template = createMacroTemplate(firstNode, params);
+    const template = createMacroTemplate(firstNode, new Set(params));
 
     // Create instances
     const instances: MacroInstance[] = nodes.map((node) => ({
       originalElement: node.element,
-      paramValues: extractParamValues(node, params),
+      paramValues: extractParamValues(node, new Set(params)),
     }));
 
     macros.push({
       name: macroName,
-      params: Array.from(params),
+      params,
       template,
       instances,
     });
@@ -483,7 +506,6 @@ function generateMacros(repeatedGroups: Map<string, XacroNode[]>): XacroMacro[] 
  * Creates a macro template from a node
  */
 function createMacroTemplate(node: XacroNode, params: Set<string>): string {
-  const lines: string[] = [];
   const indent = "    ";
 
   function renderNode(n: XacroNode, depth: number): string {
@@ -492,7 +514,7 @@ function createMacroTemplate(node: XacroNode, params: Set<string>): string {
 
     // Add attributes (parameterize those in params set)
     for (const [attrName, attrValue] of Object.entries(n.attributes)) {
-      if (params.has(attrName)) {
+      if (depth === 0 && params.has(attrName)) {
         result += ` ${attrName}="\${${attrName}}"`;
       } else {
         result += ` ${attrName}="${attrValue}"`;

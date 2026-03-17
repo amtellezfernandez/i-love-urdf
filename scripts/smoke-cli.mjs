@@ -32,6 +32,15 @@ const transmissionUrdf =
   "<actuator name=\"motor\"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>" +
   "<mechanicalReduction>1</mechanicalReduction></actuator></transmission></robot>";
 
+const xacroRegressionUrdf =
+  "<robot name=\"so101_robot\"><link name=\"arm_link_1\">" +
+  "<visual><origin xyz=\"1 0 0\" rpy=\"0 0 0\"/><geometry>" +
+  "<mesh filename=\"assets/sts3215_03a_v1.stl\" scale=\"1 1 1\"/></geometry>" +
+  "<material name=\"sts3215\"/></visual></link>" +
+  "<link name=\"arm_link_2\"><visual><origin xyz=\"1 0 0\" rpy=\"0 0 0\"/><geometry>" +
+  "<mesh filename=\"assets/sts3215_03a_v1.stl\" scale=\"1 1 1\"/></geometry>" +
+  "<material name=\"sts3215\"/></visual></link></robot>";
+
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
   throw new Error("i-love-urdf validate smoke test failed");
@@ -101,9 +110,21 @@ if (!mjcf.mjcfContent.includes("<mujoco")) {
   throw new Error("i-love-urdf urdf-to-mjcf smoke test failed");
 }
 
-const xacro = lib.convertURDFToXacro(urdf);
+const xacro = lib.convertURDFToXacro(xacroRegressionUrdf);
 if (!xacro.xacroContent.includes("xacro:property")) {
   throw new Error("i-love-urdf urdf-to-xacro smoke test failed");
+}
+if (!xacro.xacroContent.includes('robot name="so101_robot"')) {
+  throw new Error("i-love-urdf urdf-to-xacro robot name regression smoke test failed");
+}
+if (!xacro.xacroContent.includes('mesh filename="assets/sts3215_03a_v1.stl"')) {
+  throw new Error("i-love-urdf urdf-to-xacro mesh filename regression smoke test failed");
+}
+if (!xacro.xacroContent.includes('material name="sts3215"')) {
+  throw new Error("i-love-urdf urdf-to-xacro material name regression smoke test failed");
+}
+if (xacro.xacroContent.includes('name="so${') || xacro.xacroContent.includes('filename="assets/${')) {
+  throw new Error("i-love-urdf urdf-to-xacro unsafe substitution regression smoke test failed");
 }
 
 const repoRef = lib.parseGitHubRepositoryReference("https://github.com/acme/robot-repo/tree/main/robots/arm");
