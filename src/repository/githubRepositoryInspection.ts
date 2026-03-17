@@ -1,5 +1,10 @@
 import { normalizeRepositoryPath } from "./repositoryMeshResolution";
 import {
+  fixMissingMeshReferencesInRepository,
+  type FixMissingMeshReferencesOptions,
+  type FixMissingMeshReferencesResult,
+} from "./fixMissingMeshReferences";
+import {
   inspectRepositoryFiles,
   type InspectRepositoryFilesOptions,
   type RepositoryCandidateInspection,
@@ -59,6 +64,20 @@ export type GitHubRepositoryInspectionResult = RepositoryInspectionSummary & {
 
 export type InspectGitHubRepositoryOptions = InspectRepositoryFilesOptions & {
   accessToken?: string;
+};
+
+export type RepairGitHubRepositoryOptions = FixMissingMeshReferencesOptions & {
+  accessToken?: string;
+  urdfPath?: string;
+};
+
+export type GitHubRepositoryMeshRepairResult = FixMissingMeshReferencesResult & {
+  owner: string;
+  repo: string;
+  path: string | null;
+  ref: string;
+  urdfPath: string;
+  repositoryUrl: string;
 };
 
 const sanitizeRepoSegment = (value: string): string => value.replace(/\.git$/i, "").trim();
@@ -367,5 +386,49 @@ export const inspectGitHubRepositoryUrdfs = async (
     ref,
     repositoryUrl: `https://github.com/${reference.owner}/${reference.repo}`,
     ...summary,
+  };
+};
+
+export const repairGitHubRepositoryMeshReferences = async (
+  reference: GitHubRepositoryReference,
+  options: RepairGitHubRepositoryOptions = {}
+): Promise<GitHubRepositoryMeshRepairResult> => {
+  const { ref, files } = await fetchGitHubRepositoryFiles(reference, options.accessToken);
+  const normalizedUrdfPath = normalizeRepositoryPath(options.urdfPath ?? reference.path ?? "");
+  if (!normalizedUrdfPath) {
+    throw new Error(
+      "GitHub repository repair requires --urdf unless the GitHub reference already points to a URDF or Xacro file."
+    );
+  }
+
+  const targetFile = files.find(
+    (file) => file.type === "file" && normalizeRepositoryPath(file.path) === normalizedUrdfPath
+  );
+  if (!targetFile) {
+    throw new Error(`GitHub file not found in repository tree: ${normalizedUrdfPath}`);
+  }
+
+  const urdfContent = await fetchGitHubTextFile(
+    reference.owner,
+    reference.repo,
+    targetFile.path,
+    targetFile.sha,
+    options.accessToken
+  );
+  const result = fixMissingMeshReferencesInRepository(
+    urdfContent,
+    targetFile.path,
+    files,
+    options
+  );
+
+  return {
+    owner: reference.owner,
+    repo: reference.repo,
+    path: normalizeRepositoryPath(reference.path || "") || null,
+    ref,
+    urdfPath: targetFile.path,
+    repositoryUrl: `https://github.com/${reference.owner}/${reference.repo}`,
+    ...result,
   };
 };

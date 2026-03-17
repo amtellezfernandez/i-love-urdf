@@ -20,6 +20,7 @@ export * from "./mesh/fixMeshPaths";
 export * from "./repository/repositoryMeshResolution";
 export * from "./repository/repositoryInspection";
 export * from "./repository/repositoryUrdfDiscovery";
+export * from "./repository/fixMissingMeshReferences";
 export * from "./repository/githubRepositoryInspection";
 
 export * from "./utils/prettyPrintURDF";

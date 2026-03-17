@@ -82,4 +82,28 @@ if (localSummary.candidateCount < 1 || localSummary.primaryCandidatePath !== "ro
   throw new Error("i-love-urdf local repository inspection smoke test failed");
 }
 
+const brokenRepoUrdf =
+  "<robot name=\"smoke_robot\"><link name=\"mesh_link\"><visual><geometry>" +
+  "<mesh filename=\"mesh.stl\"/></geometry></visual></link></robot>";
+fs.mkdirSync(path.join(tempRepo, "urdf"), { recursive: true });
+fs.writeFileSync(path.join(tempRepo, "urdf", "robot.urdf"), brokenRepoUrdf, "utf8");
+
+const repairedLib = lib.fixMissingMeshReferencesInRepository(brokenRepoUrdf, "urdf/robot.urdf", [
+  { path: "urdf", type: "dir" },
+  { path: "urdf/robot.urdf", type: "file" },
+  { path: "meshes", type: "dir" },
+  { path: "meshes/mesh.stl", type: "file" },
+]);
+if (!repairedLib.success || !repairedLib.content.includes('mesh filename="../meshes/mesh.stl"')) {
+  throw new Error("i-love-urdf repo mesh repair library smoke test failed");
+}
+
+const repairedLocal = await localLib.repairLocalRepositoryMeshReferences(
+  { path: tempRepo },
+  { urdfPath: "urdf/robot.urdf" }
+);
+if (!repairedLocal.success || repairedLocal.corrections.length !== 1) {
+  throw new Error("i-love-urdf local mesh repair smoke test failed");
+}
+
 console.log("i-love-urdf smoke test passed.");

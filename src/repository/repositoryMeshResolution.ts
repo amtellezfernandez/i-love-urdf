@@ -258,6 +258,117 @@ const getPackageRootCandidates = (
   return Array.from(roots).filter(Boolean);
 };
 
+export const resolveRepositoryFileReference = <T extends RepositoryFileEntry>(
+  urdfPath: string,
+  meshRef: string,
+  files: T[],
+  options?: {
+    packageRoots?: Record<string, string[]>;
+    supportedMeshExtensions?: readonly string[];
+    meshDirOverride?: string;
+  }
+): T | null => {
+  if (!meshRef) return null;
+  if (
+    meshRef.startsWith("http://") ||
+    meshRef.startsWith("https://") ||
+    meshRef.startsWith("data:")
+  ) {
+    return null;
+  }
+
+  const lowerCaseFileMap = new Map<string, T>();
+  files.forEach((file) => {
+    if (file.type !== "file") return;
+    const normalized = normalizeRepositoryPath(file.path);
+    lowerCaseFileMap.set(normalized.toLowerCase(), file);
+  });
+
+  const packageRoots = options?.packageRoots ?? buildPackageRootsFromRepositoryFiles(files);
+  const supportedMeshExtensions =
+    options?.supportedMeshExtensions ?? SUPPORTED_MESH_EXTENSIONS;
+  const meshDirOverride = normalizeMeshPathForMatch(options?.meshDirOverride ?? "");
+  const urdfDir = repositoryDirname(urdfPath);
+  const parentDir = repositoryDirname(urdfDir);
+
+  const refInfo = parseMeshReference(meshRef);
+  if (refInfo.isAbsoluteFile) {
+    return null;
+  }
+
+  const rawPath = refInfo.path || refInfo.raw;
+  const normalizedPath = normalizeMeshPathForMatch(rawPath);
+  const candidates: string[] = [];
+  const addCandidate = (candidate: string) => {
+    if (!candidate) return;
+    if (!candidates.includes(candidate)) candidates.push(candidate);
+  };
+
+  if (refInfo.scheme === "package" && refInfo.packageName) {
+    const roots = getPackageRootCandidates(refInfo.packageName, packageRoots, urdfPath);
+    roots.forEach((root) => {
+      const combined = normalizedPath ? `${root}/${normalizedPath}` : `${root}/${rawPath}`;
+      addCandidate(combined);
+    });
+    if (normalizedPath) {
+      addCandidate(`${urdfDir}/${normalizedPath}`);
+      if (parentDir) {
+        addCandidate(`${parentDir}/${normalizedPath}`);
+      }
+      if (normalizedPath.startsWith("meshes/") || normalizedPath.startsWith("assets/")) {
+        if (parentDir) {
+          addCandidate(`${parentDir}/${normalizedPath}`);
+        }
+      }
+      if (!normalizedPath.includes("/")) {
+        addCandidate(`${urdfDir}/meshes/${normalizedPath}`);
+        addCandidate(`${urdfDir}/assets/${normalizedPath}`);
+        if (parentDir) {
+          addCandidate(`${parentDir}/meshes/${normalizedPath}`);
+          addCandidate(`${parentDir}/assets/${normalizedPath}`);
+        }
+      }
+    }
+  } else {
+    const combined = normalizedPath ? `${urdfDir}/${normalizedPath}` : `${urdfDir}/${rawPath}`;
+    addCandidate(combined);
+    if (meshDirOverride) {
+      addCandidate(`${urdfDir}/${meshDirOverride}/${normalizedPath || rawPath}`);
+    }
+    if (
+      normalizedPath &&
+      (normalizedPath.startsWith("meshes/") || normalizedPath.startsWith("assets/"))
+    ) {
+      addCandidate(`${parentDir}/${normalizedPath}`);
+    }
+    if (normalizedPath && !normalizedPath.includes("/")) {
+      addCandidate(`${urdfDir}/meshes/${normalizedPath}`);
+      addCandidate(`${urdfDir}/assets/${normalizedPath}`);
+      if (parentDir) {
+        addCandidate(`${parentDir}/meshes/${normalizedPath}`);
+        addCandidate(`${parentDir}/assets/${normalizedPath}`);
+      }
+    }
+  }
+
+  addCandidate(normalizedPath || rawPath);
+
+  let file = findFileByCandidates(candidates, lowerCaseFileMap);
+  if (!file && (normalizedPath || rawPath)) {
+    const extensionCandidates = buildExtensionCandidates(
+      normalizedPath || rawPath,
+      supportedMeshExtensions
+    );
+    const expanded: string[] = [];
+    candidates.forEach((candidate) => {
+      expanded.push(...buildExtensionCandidates(candidate, supportedMeshExtensions));
+    });
+    file = findFileByCandidates([...extensionCandidates, ...expanded], lowerCaseFileMap);
+  }
+
+  return file;
+};
+
 export const resolveRepositoryMeshReferences = <T extends RepositoryFileEntry>(
   urdfPath: string,
   urdfText: string,
@@ -272,12 +383,6 @@ export const resolveRepositoryMeshReferences = <T extends RepositoryFileEntry>(
   unresolved: string[];
 } => {
   const meshReferences = analyzeUrdf(urdfText).meshReferences;
-  const lowerCaseFileMap = new Map<string, T>();
-  files.forEach((file) => {
-    if (file.type !== "file") return;
-    const normalized = normalizeRepositoryPath(file.path);
-    lowerCaseFileMap.set(normalized.toLowerCase(), file);
-  });
 
   const packageRoots =
     options?.packageRoots ?? buildPackageRootsFromRepositoryFiles(files);
@@ -309,81 +414,11 @@ export const resolveRepositoryMeshReferences = <T extends RepositoryFileEntry>(
     ) {
       continue;
     }
-
-    const refInfo = parseMeshReference(meshRef);
-    if (refInfo.isAbsoluteFile) {
-      continue;
-    }
-
-    const rawPath = refInfo.path || refInfo.raw;
-    const normalizedPath = normalizeMeshPathForMatch(rawPath);
-    const candidates: string[] = [];
-    const addCandidate = (candidate: string) => {
-      if (!candidate) return;
-      if (!candidates.includes(candidate)) candidates.push(candidate);
-    };
-
-    if (refInfo.scheme === "package" && refInfo.packageName) {
-      const roots = getPackageRootCandidates(refInfo.packageName, packageRoots, urdfPath);
-      roots.forEach((root) => {
-        const combined = normalizedPath ? `${root}/${normalizedPath}` : `${root}/${rawPath}`;
-        addCandidate(combined);
-      });
-      if (normalizedPath) {
-        addCandidate(`${urdfDir}/${normalizedPath}`);
-        if (parentDir) {
-          addCandidate(`${parentDir}/${normalizedPath}`);
-        }
-        if (normalizedPath.startsWith("meshes/") || normalizedPath.startsWith("assets/")) {
-          if (parentDir) {
-            addCandidate(`${parentDir}/${normalizedPath}`);
-          }
-        }
-        if (!normalizedPath.includes("/")) {
-          addCandidate(`${urdfDir}/meshes/${normalizedPath}`);
-          addCandidate(`${urdfDir}/assets/${normalizedPath}`);
-          if (parentDir) {
-            addCandidate(`${parentDir}/meshes/${normalizedPath}`);
-            addCandidate(`${parentDir}/assets/${normalizedPath}`);
-          }
-        }
-      }
-    } else {
-      const combined = normalizedPath ? `${urdfDir}/${normalizedPath}` : `${urdfDir}/${rawPath}`;
-      addCandidate(combined);
-      if (meshDirOverride) {
-        addCandidate(`${urdfDir}/${meshDirOverride}/${normalizedPath || rawPath}`);
-      }
-      if (
-        normalizedPath &&
-        (normalizedPath.startsWith("meshes/") || normalizedPath.startsWith("assets/"))
-      ) {
-        addCandidate(`${parentDir}/${normalizedPath}`);
-      }
-      if (normalizedPath && !normalizedPath.includes("/")) {
-        addCandidate(`${urdfDir}/meshes/${normalizedPath}`);
-        addCandidate(`${urdfDir}/assets/${normalizedPath}`);
-        if (parentDir) {
-          addCandidate(`${parentDir}/meshes/${normalizedPath}`);
-          addCandidate(`${parentDir}/assets/${normalizedPath}`);
-        }
-      }
-    }
-
-    addCandidate(normalizedPath || rawPath);
-
-    let file = findFileByCandidates(candidates, lowerCaseFileMap);
-    if (!file && (normalizedPath || rawPath)) {
-      const extensionCandidates = buildExtensionCandidates(
-        normalizedPath || rawPath,
-        supportedMeshExtensions
-      );
-      const expanded: string[] = [];
-      candidates.forEach((candidate) => {
-        expanded.push(...buildExtensionCandidates(candidate, supportedMeshExtensions));
-      });
-      file = findFileByCandidates([...extensionCandidates, ...expanded], lowerCaseFileMap);
-    }
+    const file = resolveRepositoryFileReference(urdfPath, meshRef, files, {
+      packageRoots,
+      supportedMeshExtensions,
+      meshDirOverride,
+    });
 
     if (file) {
       addMatch(meshRef, file);

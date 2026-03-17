@@ -4,7 +4,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as process from "node:process";
 import { JSDOM } from "jsdom";
-import { inspectLocalRepositoryUrdfs } from "./repository/localRepositoryInspection";
+import {
+  inspectLocalRepositoryUrdfs,
+  repairLocalRepositoryMeshReferences,
+} from "./repository/localRepositoryInspection";
 import {
   analyzeUrdf,
   canonicalOrderURDF,
@@ -17,6 +20,7 @@ import {
   parseMeshReference,
   parseGitHubRepositoryReference,
   prettyPrintURDF,
+  repairGitHubRepositoryMeshReferences,
   removeJointsFromUrdf,
   renameJointInUrdf,
   renameLinkInUrdf,
@@ -47,6 +51,7 @@ const SUPPORTED_COMMANDS = [
   "rename-joint",
   "rename-link",
   "inspect-repo",
+  "repair-mesh-refs",
 ] as const;
 
 type SupportedCommandName = (typeof SUPPORTED_COMMANDS)[number];
@@ -69,6 +74,7 @@ type CommandName =
   | "rename-joint"
   | "rename-link"
   | "inspect-repo"
+  | "repair-mesh-refs"
   | "help";
 
 type ArgMap = Map<string, string | boolean>;
@@ -190,6 +196,7 @@ const printHelp = () => {
       "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]",
       "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
       "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
+      "  repair-mesh-refs --local <repo|urdf-path> | --github <owner/repo|url> [--urdf <repo-path>] [--ref <branch>] [--path <subdir>] [--token <token>] [--out <path>]",
       "",
       "All commands print JSON to stdout.",
     ].join("\n")
@@ -261,6 +268,53 @@ const run = async () => {
     const payload = JSON.stringify(result, null, 2);
     writeOutIfRequested(outPath, payload);
     console.log(payload);
+    return;
+  }
+
+  if (command === "repair-mesh-refs") {
+    const github = getOptionalStringArg(args, "github");
+    const local = getOptionalStringArg(args, "local");
+    if ((github ? 1 : 0) + (local ? 1 : 0) !== 1) {
+      fail("repair-mesh-refs requires exactly one of --github or --local.");
+    }
+
+    const requestedUrdfPath = getOptionalStringArg(args, "urdf");
+    const outPath = getOptionalStringArg(args, "out");
+    const result = local
+      ? await repairLocalRepositoryMeshReferences(
+          { path: local },
+          {
+            urdfPath: requestedUrdfPath,
+          }
+        )
+      : await (() => {
+          const parsed = parseGitHubRepositoryReference(github || "");
+          if (!parsed) {
+            fail("Invalid --github value. Expected owner/repo or a GitHub repository URL.");
+          }
+
+          const pathOverride = getOptionalStringArg(args, "path");
+          const refOverride = getOptionalStringArg(args, "ref");
+          const accessToken =
+            getOptionalStringArg(args, "token") ||
+            process.env.GITHUB_TOKEN ||
+            process.env.GH_TOKEN;
+
+          return repairGitHubRepositoryMeshReferences(
+            {
+              ...parsed,
+              path: pathOverride ?? parsed.path,
+              ref: refOverride ?? parsed.ref,
+            },
+            {
+              accessToken,
+              urdfPath: requestedUrdfPath,
+            }
+          );
+        })();
+
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
     return;
   }
 

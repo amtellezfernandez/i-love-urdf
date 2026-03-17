@@ -37,9 +37,16 @@ i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
 i-love-urdf inspect-repo --local ./my-robot-repo
 i-love-urdf inspect-repo --github owner/repo
+i-love-urdf repair-mesh-refs --local ./my-robot-repo --urdf robots/arm.urdf --out robots/arm.fixed.urdf
+i-love-urdf repair-mesh-refs --github owner/repo --urdf robots/arm.urdf --out robots/arm.fixed.urdf
 i-love-urdf rename-joint --urdf robot.urdf --joint joint_a --name shoulder_joint --out robot.renamed.urdf
 i-love-urdf rename-link --urdf robot.urdf --link link_a --name shoulder_link --out robot.renamed.urdf
 ```
+
+Repository flow:
+
+1. `inspect-repo` to identify likely URDF/Xacro entrypoints.
+2. Use the returned candidate path with `repair-mesh-refs`, `validate`, `urdf-to-mjcf`, or any other command.
 
 ## Example
 
@@ -51,6 +58,7 @@ import {
   inspectGitHubRepositoryUrdfs,
   inspectRepositoryFiles,
   prettyPrintURDF,
+  repairGitHubRepositoryMeshReferences,
 } from "i-love-urdf";
 import { inspectLocalRepositoryUrdfs } from "i-love-urdf/local";
 
@@ -61,6 +69,10 @@ async function main() {
   const formatted = prettyPrintURDF(urdfXml);
   const localSummary = await inspectLocalRepositoryUrdfs({ path: "./my-robot-repo" });
   const repoSummary = await inspectGitHubRepositoryUrdfs({ owner: "owner", repo: "robot-repo" });
+  const repaired = await repairGitHubRepositoryMeshReferences(
+    { owner: "owner", repo: "robot-repo" },
+    { urdfPath: "robots/arm.urdf" }
+  );
   const customSummary = await inspectRepositoryFiles(files, readTextForMySource);
 }
 ```
@@ -71,10 +83,10 @@ async function main() {
 - Analysis: inertials, collisions, mesh reference analysis
 - Conversion: URDF to MJCF, URDF to XACRO, XACRO request/response helpers
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
-- Repository: candidate discovery, package/dependency name extraction, repository package helpers, generic source inspection, GitHub repo inspection
+- Repository: candidate discovery, package/dependency name extraction, repository package helpers, generic source inspection, local/GitHub repo inspection, repo-aware mesh reference repair
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
-- CLI: validation, analysis, diffing, transform commands, conversion commands, rename commands, local/GitHub repo inspection
+- CLI: validation, analysis, diffing, transform commands, conversion commands, rename commands, local/GitHub repo inspection, repo-aware mesh repair
 - Validation: structural and semantic URDF validation
 
 ## Runtime Note
