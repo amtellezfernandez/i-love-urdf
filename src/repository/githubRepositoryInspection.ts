@@ -50,6 +50,9 @@ export type GitHubRepositoryFile = {
   size?: number;
   sha?: string;
   encoding?: "sha";
+  sourceOwner?: string;
+  sourceRepo?: string;
+  sourcePath?: string;
 };
 
 export type GitHubRepositoryCandidateInspection = RepositoryCandidateInspection;
@@ -171,18 +174,21 @@ const readGitHubJson = async <T>(
   return (await response.json()) as T;
 };
 
-const decodeBase64ToUtf8 = (base64: string): string => {
+const decodeBase64ToBytes = (base64: string): Uint8Array => {
   const cleaned = base64.replace(/\s/g, "");
   if (typeof Buffer !== "undefined") {
-    return Buffer.from(cleaned, "base64").toString("utf8");
+    return new Uint8Array(Buffer.from(cleaned, "base64"));
   }
   const binary = globalThis.atob(cleaned);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return new TextDecoder().decode(bytes);
+  return bytes;
 };
+
+const decodeBase64ToUtf8 = (base64: string): string =>
+  new TextDecoder().decode(decodeBase64ToBytes(base64));
 
 export const parseGitHubRepositoryReference = (
   value: string
@@ -345,6 +351,17 @@ export const fetchGitHubTextFile = async (
   blobSha?: string,
   accessToken?: string
 ): Promise<string> => {
+  const bytes = await fetchGitHubFileBytes(owner, repo, filePath, blobSha, accessToken);
+  return new TextDecoder().decode(bytes);
+};
+
+export const fetchGitHubFileBytes = async (
+  owner: string,
+  repo: string,
+  filePath: string,
+  blobSha?: string,
+  accessToken?: string
+): Promise<Uint8Array> => {
   const endpoint = blobSha
     ? `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/git/blobs/${blobSha}`
     : `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/contents/${filePath}`;
@@ -358,7 +375,7 @@ export const fetchGitHubTextFile = async (
     throw new Error(`Unsupported GitHub content encoding for ${filePath}.`);
   }
 
-  return decodeBase64ToUtf8(data.content);
+  return decodeBase64ToBytes(data.content);
 };
 
 export const inspectGitHubRepositoryUrdfs = async (

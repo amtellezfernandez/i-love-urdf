@@ -80,7 +80,9 @@ const walkLocalRepository = async (
   }
 };
 
-const collectLocalRepositoryFiles = async (absoluteRootPath: string): Promise<LocalRepositoryFile[]> => {
+export const collectLocalRepositoryFiles = async (
+  absoluteRootPath: string
+): Promise<LocalRepositoryFile[]> => {
   const entries: LocalRepositoryFile[] = [];
   await walkLocalRepository(absoluteRootPath, absoluteRootPath, entries);
   return entries;

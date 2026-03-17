@@ -12,6 +12,7 @@ execFileSync("npm", ["run", "build"], { stdio: "inherit", cwd: root, shell: true
 
 const lib = await import(path.join(root, "dist", "index.js"));
 const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
+const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.DOMParser = dom.window.DOMParser;
@@ -187,6 +188,47 @@ if (
   !repairedWrongPath.content.includes('mesh filename="meshes/mesh.stl"')
 ) {
   throw new Error("i-love-urdf wrong-path mesh repair smoke test failed");
+}
+
+const xacroRuntime = await xacroNode.probeXacroRuntime({
+  pythonExecutable: process.env.I_LOVE_URDF_XACRO_PYTHON,
+});
+if (xacroRuntime.available) {
+  fs.writeFileSync(
+    path.join(tempRepo, "package.xml"),
+    "<package><name>smoke_robot</name></package>",
+    "utf8"
+  );
+  fs.mkdirSync(path.join(tempRepo, "include"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempRepo, "include", "shared.xacro"),
+    "<?xml version=\"1.0\"?>\n" +
+      "<robot xmlns:xacro=\"http://www.ros.org/wiki/xacro\">\n" +
+      "  <xacro:macro name=\"shared_link\" params=\"suffix\">\n" +
+      "    <link name=\"shared_${suffix}\"/>\n" +
+      "  </xacro:macro>\n" +
+      "</robot>\n",
+    "utf8"
+  );
+  fs.writeFileSync(
+    path.join(tempRepo, "robot.urdf.xacro"),
+    "<?xml version=\"1.0\"?>\n" +
+      "<robot name=\"smoke_robot\" xmlns:xacro=\"http://www.ros.org/wiki/xacro\">\n" +
+      "  <xacro:include filename=\"$(find smoke_robot)/include/shared.xacro\"/>\n" +
+      "  <link name=\"base\"/>\n" +
+      "  <xacro:shared_link suffix=\"tip\"/>\n" +
+      "</robot>\n",
+    "utf8"
+  );
+
+  const expanded = await xacroNode.expandLocalXacroToUrdf({
+    xacroPath: path.join(tempRepo, "robot.urdf.xacro"),
+    rootPath: tempRepo,
+    pythonExecutable: process.env.I_LOVE_URDF_XACRO_PYTHON,
+  });
+  if (!expanded.urdf.includes('link name="shared_tip"')) {
+    throw new Error("i-love-urdf xacro-to-urdf smoke test failed");
+  }
 }
 
 console.log("i-love-urdf smoke test passed.");

@@ -31,6 +31,10 @@ import {
   validateUrdf,
 } from "./index";
 import { parseXml } from "./xmlDom";
+import {
+  expandGitHubRepositoryXacro,
+  expandLocalXacroToUrdf,
+} from "./xacro/xacroNode";
 
 const SUPPORTED_COMMANDS = [
   "validate",
@@ -48,6 +52,7 @@ const SUPPORTED_COMMANDS = [
   "mesh-to-assets",
   "urdf-to-mjcf",
   "urdf-to-xacro",
+  "xacro-to-urdf",
   "rename-joint",
   "rename-link",
   "inspect-repo",
@@ -71,6 +76,7 @@ type CommandName =
   | "mesh-to-assets"
   | "urdf-to-mjcf"
   | "urdf-to-xacro"
+  | "xacro-to-urdf"
   | "rename-joint"
   | "rename-link"
   | "inspect-repo"
@@ -159,6 +165,33 @@ const getDelimitedStringArg = (args: ArgMap, primaryKey: string, fallbackKey?: s
     .filter((item) => item.length > 0);
 };
 
+const getKeyValueArg = (args: ArgMap, primaryKey: string, fallbackKey?: string): Record<string, string> => {
+  const value =
+    getOptionalStringArg(args, primaryKey) ??
+    (fallbackKey ? getOptionalStringArg(args, fallbackKey) : undefined);
+  if (!value) return {};
+
+  const pairs = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  const result: Record<string, string> = {};
+  for (const pair of pairs) {
+    const separatorIndex = pair.indexOf("=");
+    if (separatorIndex <= 0) {
+      fail(`Invalid key=value pair: ${pair}`);
+    }
+    const key = pair.slice(0, separatorIndex).trim();
+    const mappedValue = pair.slice(separatorIndex + 1).trim();
+    if (!key) {
+      fail(`Invalid key=value pair: ${pair}`);
+    }
+    result[key] = mappedValue;
+  }
+  return result;
+};
+
 const requireHexColorArg = (args: ArgMap, key: string): string => {
   const value = requireStringArg(args, key).trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
@@ -193,6 +226,9 @@ const printHelp = () => {
       "  mesh-to-assets --urdf <path> [--out <path>]",
       "  urdf-to-mjcf --urdf <path> [--out <path>]",
       "  urdf-to-xacro --urdf <path> [--out <path>]",
+      "  xacro-to-urdf --xacro <path> [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+      "  xacro-to-urdf --local <repo> --xacro <repo-path> [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+      "  xacro-to-urdf --github <owner/repo|url> --xacro <repo-path> [--ref <branch>] [--path <subdir>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]",
       "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
       "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
@@ -268,6 +304,72 @@ const run = async () => {
     const payload = JSON.stringify(result, null, 2);
     writeOutIfRequested(outPath, payload);
     console.log(payload);
+    return;
+  }
+
+  if (command === "xacro-to-urdf") {
+    const github = getOptionalStringArg(args, "github");
+    const local = getOptionalStringArg(args, "local");
+    if ((github ? 1 : 0) + (local ? 1 : 0) > 1) {
+      fail("xacro-to-urdf accepts at most one of --github or --local.");
+    }
+
+    const xacroPath = requireStringArg(args, "xacro");
+    const outPath = getOptionalStringArg(args, "out");
+    const runtimeOptions = {
+      pythonExecutable: getOptionalStringArg(args, "python"),
+      wheelPath: getOptionalStringArg(args, "wheel"),
+    };
+    const runtimeArgs = getKeyValueArg(args, "args", "arg");
+    const useInorder = !Boolean(args.get("no-inorder"));
+
+    const result = local
+      ? await expandLocalXacroToUrdf({
+          xacroPath: path.resolve(local, xacroPath),
+          rootPath: local,
+          args: runtimeArgs,
+          useInorder,
+          ...runtimeOptions,
+        })
+      : github
+        ? await (() => {
+            const parsed = parseGitHubRepositoryReference(github || "");
+            if (!parsed) {
+              fail("Invalid --github value. Expected owner/repo or a GitHub repository URL.");
+            }
+
+            const pathOverride = getOptionalStringArg(args, "path");
+            const refOverride = getOptionalStringArg(args, "ref");
+            const accessToken =
+              getOptionalStringArg(args, "token") ||
+              process.env.GITHUB_TOKEN ||
+              process.env.GH_TOKEN;
+
+            return expandGitHubRepositoryXacro(
+              {
+                ...parsed,
+                path: pathOverride ?? parsed.path,
+                ref: refOverride ?? parsed.ref,
+              },
+              {
+                targetPath: xacroPath,
+                accessToken,
+                args: runtimeArgs,
+                useInorder,
+                ...runtimeOptions,
+              }
+            );
+          })()
+        : await expandLocalXacroToUrdf({
+            xacroPath,
+            rootPath: getOptionalStringArg(args, "root"),
+            args: runtimeArgs,
+            useInorder,
+            ...runtimeOptions,
+          });
+
+    writeOutIfRequested(outPath, result.urdf);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
     return;
   }
 

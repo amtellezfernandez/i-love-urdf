@@ -1,6 +1,6 @@
 {
   "name": "i-love-urdf",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "commonjs",
   "private": false,
   "description": "Core URDF parsing, validation, transform, mesh, and conversion utilities.",
@@ -13,7 +13,7 @@
     "i-love-urdf": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p ./tsconfig.build.json",
+    "build": "tsc -p ./tsconfig.build.json && node ./scripts/postbuild.mjs",
     "prepare": "npm run build",
     "smoke": "node ./scripts/smoke-cli.mjs"
   },
@@ -47,6 +47,10 @@
     "./local": {
       "types": "./dist/repository/localRepositoryInspection.d.ts",
       "default": "./dist/repository/localRepositoryInspection.js"
+    },
+    "./xacro-node": {
+      "types": "./dist/xacro/xacroNode.d.ts",
+      "default": "./dist/xacro/xacroNode.js"
     },
     "./src": "./src/index.ts",
     "./package.json": "./package.json"

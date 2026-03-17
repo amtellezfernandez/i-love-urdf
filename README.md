@@ -35,6 +35,9 @@ i-love-urdf set-material-color --urdf robot.urdf --link base_link --material bas
 i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
 i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
+i-love-urdf xacro-to-urdf --xacro robot.urdf.xacro --python /path/to/python --out robot.urdf
+i-love-urdf xacro-to-urdf --local ./my-robot-repo --xacro robots/arm.urdf.xacro --python /path/to/python --out robots/arm.urdf
+i-love-urdf xacro-to-urdf --github owner/repo --xacro robots/arm.urdf.xacro --python /path/to/python --out robots/arm.urdf
 i-love-urdf inspect-repo --local ./my-robot-repo
 i-love-urdf inspect-repo --github owner/repo
 i-love-urdf repair-mesh-refs --local ./my-robot-repo --urdf robots/arm.urdf --out robots/arm.fixed.urdf
@@ -61,6 +64,7 @@ import {
   repairGitHubRepositoryMeshReferences,
 } from "i-love-urdf";
 import { inspectLocalRepositoryUrdfs } from "i-love-urdf/local";
+import { expandLocalXacroToUrdf } from "i-love-urdf/xacro-node";
 
 async function main() {
   const parsed = parseURDF(urdfXml);
@@ -73,6 +77,11 @@ async function main() {
     { owner: "owner", repo: "robot-repo" },
     { urdfPath: "robots/arm.urdf" }
   );
+  const expanded = await expandLocalXacroToUrdf({
+    xacroPath: "./robot.urdf.xacro",
+    rootPath: ".",
+    pythonExecutable: "/path/to/python",
+  });
   const customSummary = await inspectRepositoryFiles(files, readTextForMySource);
 }
 ```
@@ -81,7 +90,7 @@ async function main() {
 
 - Parsing: URDF document parsing, link/joint/sensor helpers, link name extraction
 - Analysis: inertials, collisions, mesh reference analysis
-- Conversion: URDF to MJCF, URDF to XACRO, XACRO request/response helpers
+- Conversion: URDF to MJCF, URDF to XACRO, runtime-backed XACRO to URDF, XACRO request/response helpers
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
 - Repository: candidate discovery, package/dependency name extraction, repository package helpers, generic source inspection, local/GitHub repo inspection, repo-aware mesh reference repair
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
@@ -92,3 +101,17 @@ async function main() {
 ## Runtime Note
 
 Some XML-oriented APIs rely on `DOMParser` and `XMLSerializer`. Browsers already provide these globals. In Node.js environments, install DOM globals before calling those APIs.
+
+`xacro-to-urdf` is different: it is runtime-backed and needs a Python Xacro runtime. The CLI and the `i-love-urdf/xacro-node` API can use either:
+
+- a Python interpreter with `xacro` installed
+- a vendored `xacrodoc` wheel pointed to by `I_LOVE_URDF_XACRODOC_WHEEL`
+
+For local verification in this workspace, I used:
+
+```sh
+i-love-urdf xacro-to-urdf \
+  --xacro robot.urdf.xacro \
+  --python /home/am/dev/urdf-studio/.venv/bin/python \
+  --out robot.urdf
+```
