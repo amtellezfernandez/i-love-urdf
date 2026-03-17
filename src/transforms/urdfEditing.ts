@@ -2,12 +2,20 @@ import { parseURDF, serializeURDF } from "../parsing/urdfParser";
 import { sanitizeUrdfName } from "../utils/urdfNames";
 import type { UrdfTransformResult } from "./urdfTransforms";
 
-const findNamedElement = (
-  document: Document,
+const getRobotElement = (document: Document): Element | null =>
+  document.querySelector("robot");
+
+const getDirectChildrenByTag = (
+  parent: Element,
+  tagName: string,
+): Element[] => Array.from(parent.children).filter((element) => element.tagName === tagName);
+
+const findNamedDirectChild = (
+  parent: Element,
   tagName: string,
   name: string
 ): Element | null =>
-  Array.from(document.querySelectorAll(tagName)).find(
+  getDirectChildrenByTag(parent, tagName).find(
     (element) => element.getAttribute("name") === name
   ) ?? null;
 
@@ -45,7 +53,12 @@ export const renameJointInUrdf = (
     return { success: false, content: urdfContent, error: parsed.error };
   }
 
-  const joint = findNamedElement(parsed.document, "joint", oldJointName);
+  const robot = getRobotElement(parsed.document);
+  if (!robot) {
+    return { success: false, content: urdfContent, error: "No <robot> element found" };
+  }
+
+  const joint = findNamedDirectChild(robot, "joint", oldJointName);
   if (!joint) {
     return {
       success: false,
@@ -54,7 +67,7 @@ export const renameJointInUrdf = (
     };
   }
 
-  if (findNamedElement(parsed.document, "joint", sanitizedNewName)) {
+  if (findNamedDirectChild(robot, "joint", sanitizedNewName)) {
     return {
       success: false,
       content: urdfContent,
@@ -66,6 +79,11 @@ export const renameJointInUrdf = (
   parsed.document.querySelectorAll("mimic").forEach((mimic) => {
     if (mimic.getAttribute("joint") === oldJointName) {
       mimic.setAttribute("joint", sanitizedNewName);
+    }
+  });
+  robot.querySelectorAll("transmission joint").forEach((jointRef) => {
+    if (jointRef.getAttribute("name") === oldJointName) {
+      jointRef.setAttribute("name", sanitizedNewName);
     }
   });
 
@@ -95,7 +113,12 @@ export const renameLinkInUrdf = (
     return { success: false, content: urdfContent, error: parsed.error };
   }
 
-  const link = findNamedElement(parsed.document, "link", oldLinkName);
+  const robot = getRobotElement(parsed.document);
+  if (!robot) {
+    return { success: false, content: urdfContent, error: "No <robot> element found" };
+  }
+
+  const link = findNamedDirectChild(robot, "link", oldLinkName);
   if (!link) {
     return {
       success: false,
@@ -104,7 +127,7 @@ export const renameLinkInUrdf = (
     };
   }
 
-  if (findNamedElement(parsed.document, "link", sanitizedNewName)) {
+  if (findNamedDirectChild(robot, "link", sanitizedNewName)) {
     return {
       success: false,
       content: urdfContent,

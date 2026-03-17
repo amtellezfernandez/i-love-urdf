@@ -125,6 +125,22 @@ const buildExtensionCandidates = (value: string): string[] => {
   return SUPPORTED_MESH_EXTENSIONS.map((ext) => (dir ? `${dir}/${base}${ext}` : `${base}${ext}`));
 };
 
+const findUniqueFileByBasename = <T extends RepositoryFileEntry>(
+  files: T[],
+  value: string
+): T | null => {
+  const basename = normalizeMeshPathForMatch(value).split("/").filter(Boolean).pop()?.toLowerCase();
+  if (!basename) return null;
+
+  const matches = files.filter((file) => {
+    if (file.type !== "file") return false;
+    const fileBasename = normalizeRepositoryPath(file.path).split("/").filter(Boolean).pop()?.toLowerCase();
+    return fileBasename === basename;
+  });
+
+  return matches.length === 1 ? matches[0] : null;
+};
+
 export const fixMissingMeshReferencesInRepository = <T extends RepositoryFileEntry>(
   urdfContent: string,
   urdfPath: string,
@@ -211,7 +227,7 @@ export const fixMissingMeshReferencesInRepository = <T extends RepositoryFileEnt
       buildExtensionCandidates(normalizedPath).forEach(addCandidate);
     }
 
-    const resolvedFile = candidates
+    let resolvedFile = candidates
       .map((candidate) =>
         resolveRepositoryFileReference(urdfPath, candidate, files, {
           packageRoots,
@@ -219,6 +235,10 @@ export const fixMissingMeshReferencesInRepository = <T extends RepositoryFileEnt
         })
       )
       .find((file): file is T => Boolean(file));
+
+    if (!resolvedFile) {
+      resolvedFile = findUniqueFileByBasename(files, normalizedPath || rawPath);
+    }
 
     if (!resolvedFile) {
       unresolved.push(filename);

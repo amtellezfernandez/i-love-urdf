@@ -16,6 +16,12 @@ const collectNames = (elements: Element[], attr: string): string[] =>
     .map((el) => el.getAttribute(attr) || "")
     .filter((name) => name.length > 0);
 
+const getDirectChildrenByTag = (parent: Element, tagName: string): Element[] =>
+  Array.from(parent.children).filter((child) => child.tagName === tagName);
+
+const findDirectChildByTag = (parent: Element, tagName: string): Element | null =>
+  getDirectChildrenByTag(parent, tagName)[0] ?? null;
+
 export const validateUrdf = (urdfContent: string): UrdfValidationResult => {
   const xmlDoc = parseXml(urdfContent);
   const parserError = xmlDoc.querySelector("parsererror");
@@ -47,12 +53,13 @@ export const validateUrdf = (urdfContent: string): UrdfValidationResult => {
   const issues: UrdfValidationIssue[] = [];
   const robot = robots[0];
 
-  const links = Array.from(robot.querySelectorAll("link"));
+  const links = getDirectChildrenByTag(robot, "link");
   if (links.length === 0) {
     issues.push({ level: "error", message: "URDF has no <link> elements." });
   }
 
-  const joints = Array.from(robot.querySelectorAll("joint"));
+  const joints = getDirectChildrenByTag(robot, "joint");
+  const transmissions = getDirectChildrenByTag(robot, "transmission");
 
   const linkNames = collectNames(links, "name");
   const jointNames = collectNames(joints, "name");
@@ -74,10 +81,11 @@ export const validateUrdf = (urdfContent: string): UrdfValidationResult => {
   }
 
   const linkNameSet = new Set(linkNames);
+  const jointNameSet = new Set(jointNames);
   joints.forEach((joint) => {
     const jointName = joint.getAttribute("name") || "joint";
-    const parent = joint.querySelector("parent")?.getAttribute("link") || "";
-    const child = joint.querySelector("child")?.getAttribute("link") || "";
+    const parent = findDirectChildByTag(joint, "parent")?.getAttribute("link") || "";
+    const child = findDirectChildByTag(joint, "child")?.getAttribute("link") || "";
     if (!parent || !linkNameSet.has(parent)) {
       issues.push({
         level: "error",
@@ -90,6 +98,27 @@ export const validateUrdf = (urdfContent: string): UrdfValidationResult => {
         message: `Joint '${jointName}' references missing child link '${child}'.`,
       });
     }
+  });
+
+  transmissions.forEach((transmission) => {
+    const transmissionName = transmission.getAttribute("name") || "transmission";
+    const transmissionJoints = Array.from(transmission.querySelectorAll("joint"));
+    transmissionJoints.forEach((jointRef) => {
+      const jointName = jointRef.getAttribute("name") || "";
+      if (!jointName) {
+        issues.push({
+          level: "error",
+          message: `Transmission '${transmissionName}' has a <joint> element without a name.`,
+        });
+        return;
+      }
+      if (!jointNameSet.has(jointName)) {
+        issues.push({
+          level: "error",
+          message: `Transmission '${transmissionName}' references missing joint '${jointName}'.`,
+        });
+      }
+    });
   });
 
   return {

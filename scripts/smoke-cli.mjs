@@ -23,9 +23,23 @@ const urdf =
   "<axis xyz=\"1 1 0\"/></joint><link name=\"mesh_link\"><visual><geometry>" +
   "<mesh filename=\"/abs/path/mesh.stl\"/></geometry></visual></link></robot>";
 
+const transmissionUrdf =
+  "<robot name=\"transmission_robot\"><link name=\"base\"/><link name=\"tip\"/>" +
+  "<joint name=\"j\" type=\"revolute\"><parent link=\"base\"/><child link=\"tip\"/>" +
+  "<axis xyz=\"0 0 1\"/></joint>" +
+  "<transmission name=\"j_trans\"><type>transmission_interface/SimpleTransmission</type>" +
+  "<joint name=\"j\"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>" +
+  "<actuator name=\"motor\"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>" +
+  "<mechanicalReduction>1</mechanicalReduction></actuator></transmission></robot>";
+
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
   throw new Error("i-love-urdf validate smoke test failed");
+}
+
+const transmissionValidate = lib.validateUrdf(transmissionUrdf);
+if (!transmissionValidate.isValid) {
+  throw new Error("i-love-urdf transmission-aware validate smoke test failed");
 }
 
 const axes = lib.normalizeJointAxes(urdf);
@@ -43,9 +57,28 @@ if (!renamedJoint.success || !renamedJoint.content.includes('joint name="hinge_j
   throw new Error("i-love-urdf rename-joint library smoke test failed");
 }
 
+const renamedTransmissionJoint = lib.renameJointInUrdf(transmissionUrdf, "j", "hinge_joint");
+if (
+  !renamedTransmissionJoint.success ||
+  !renamedTransmissionJoint.content.includes('joint name="hinge_joint" type="revolute"') ||
+  !renamedTransmissionJoint.content.includes('<transmission name="j_trans">') ||
+  !renamedTransmissionJoint.content.includes('<joint name="hinge_joint">')
+) {
+  throw new Error("i-love-urdf transmission-aware rename-joint smoke test failed");
+}
+
 const renamedLink = lib.renameLinkInUrdf(urdf, "tip", "tool0");
 if (!renamedLink.success || !renamedLink.content.includes('child link="tool0"')) {
   throw new Error("i-love-urdf rename-link library smoke test failed");
+}
+
+const removedTransmissionJoint = lib.removeJointsFromUrdf(transmissionUrdf, ["j"]);
+if (
+  !removedTransmissionJoint.success ||
+  removedTransmissionJoint.content.includes('joint name="j" type="revolute"') ||
+  removedTransmissionJoint.content.includes('<transmission name="j_trans">')
+) {
+  throw new Error("i-love-urdf transmission-aware remove-joints smoke test failed");
 }
 
 const analysis = lib.analyzeUrdf(urdf);
@@ -66,6 +99,11 @@ if (!meshAssets.success || !meshAssets.content.includes('mesh filename="assets/a
 const mjcf = lib.convertURDFToMJCF(urdf);
 if (!mjcf.mjcfContent.includes("<mujoco")) {
   throw new Error("i-love-urdf urdf-to-mjcf smoke test failed");
+}
+
+const xacro = lib.convertURDFToXacro(urdf);
+if (!xacro.xacroContent.includes("xacro:property")) {
+  throw new Error("i-love-urdf urdf-to-xacro smoke test failed");
 }
 
 const repoRef = lib.parseGitHubRepositoryReference("https://github.com/acme/robot-repo/tree/main/robots/arm");
@@ -104,6 +142,23 @@ const repairedLocal = await localLib.repairLocalRepositoryMeshReferences(
 );
 if (!repairedLocal.success || repairedLocal.corrections.length !== 1) {
   throw new Error("i-love-urdf local mesh repair smoke test failed");
+}
+
+const wrongPathRepoUrdf =
+  "<robot name=\"smoke_robot\"><link name=\"mesh_link\"><visual><geometry>" +
+  "<mesh filename=\"wrongdir/mesh.stl\"/></geometry></visual></link></robot>";
+fs.writeFileSync(path.join(tempRepo, "robot-wrongdir.urdf"), wrongPathRepoUrdf, "utf8");
+
+const repairedWrongPath = await localLib.repairLocalRepositoryMeshReferences(
+  { path: tempRepo },
+  { urdfPath: "robot-wrongdir.urdf" }
+);
+if (
+  !repairedWrongPath.success ||
+  repairedWrongPath.corrections.length !== 1 ||
+  !repairedWrongPath.content.includes('mesh filename="meshes/mesh.stl"')
+) {
+  throw new Error("i-love-urdf wrong-path mesh repair smoke test failed");
 }
 
 console.log("i-love-urdf smoke test passed.");

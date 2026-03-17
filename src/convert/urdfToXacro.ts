@@ -61,6 +61,8 @@ function buildAST(element: Element, parent: XacroNode | null = null): XacroNode 
     attributes[attr.name] = attr.value;
   }
 
+  const textNodeType = element.ownerDocument?.defaultView?.Node?.TEXT_NODE ?? 3;
+
   const node: XacroNode = {
     tag: element.tagName,
     attributes,
@@ -72,7 +74,7 @@ function buildAST(element: Element, parent: XacroNode | null = null): XacroNode 
 
   // Get direct text content (not from children)
   for (const child of element.childNodes) {
-    if (child.nodeType === Node.TEXT_NODE) {
+    if (child.nodeType === textNodeType) {
       const text = child.textContent?.trim() || "";
       if (text) node.text += text;
     }

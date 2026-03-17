@@ -8,6 +8,21 @@ export type UrdfTransformResult = {
   removed?: string[];
 };
 
+const getRobotElement = (document: Document): Element | null =>
+  document.querySelector("robot");
+
+const getDirectChildrenByTag = (parent: Element, tagName: string): Element[] =>
+  Array.from(parent.children).filter((element) => element.tagName === tagName);
+
+const findNamedDirectChild = (
+  parent: Element,
+  tagName: string,
+  name: string
+): Element | null =>
+  getDirectChildrenByTag(parent, tagName).find(
+    (element) => element.getAttribute("name") === name
+  ) ?? null;
+
 const hexToRgba = (hex: string): [number, number, number, number] => {
   const normalized = hex.trim();
   const r = parseInt(normalized.slice(1, 3), 16) / 255;
@@ -31,14 +46,38 @@ export const removeJointsFromUrdf = (
     return { success: false, content: urdfContent, error: parsed.error };
   }
 
+  const robot = getRobotElement(parsed.document);
+  if (!robot) {
+    return { success: false, content: urdfContent, error: "No <robot> element found" };
+  }
+
   const removed: string[] = [];
+  const removedSet = new Set<string>();
   jointNames.forEach((jointName) => {
-    const joint = parsed.document.querySelector(`joint[name="${jointName}"]`);
+    const joint = findNamedDirectChild(robot, "joint", jointName);
     if (joint) {
       joint.remove();
       removed.push(jointName);
+      removedSet.add(jointName);
     }
   });
+
+  if (removedSet.size > 0) {
+    getDirectChildrenByTag(robot, "transmission").forEach((transmission) => {
+      const referencesRemovedJoint = Array.from(transmission.querySelectorAll("joint")).some(
+        (jointRef) => removedSet.has(jointRef.getAttribute("name") || "")
+      );
+      if (referencesRemovedJoint) {
+        transmission.remove();
+      }
+    });
+
+    parsed.document.querySelectorAll("mimic").forEach((mimic) => {
+      if (removedSet.has(mimic.getAttribute("joint") || "")) {
+        mimic.remove();
+      }
+    });
+  }
 
   return { success: true, content: serializeURDF(parsed.document), removed };
 };
@@ -58,7 +97,12 @@ export const updateJointLinksInUrdf = (
     return { success: false, content: urdfContent, error: parsed.error };
   }
 
-  const joint = parsed.document.querySelector(`joint[name="${jointName}"]`);
+  const robot = getRobotElement(parsed.document);
+  if (!robot) {
+    return { success: false, content: urdfContent, error: "No <robot> element found" };
+  }
+
+  const joint = findNamedDirectChild(robot, "joint", jointName);
   if (!joint) {
     return {
       success: false,
