@@ -116,6 +116,14 @@ const SUPPORTED_NUMERIC_ATTRIBUTE_CONTEXTS: Record<string, Set<string>> = {
   mesh: new Set(["scale"]),
 };
 
+const isIdentityLikeNumericValue = (value: string): boolean => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return false;
+  }
+  return numericValue === 0 || numericValue === 1 || numericValue === -1;
+};
+
 /**
  * Extracts all numeric values from the AST
  */
@@ -286,39 +294,47 @@ function generateProperties(
   const usedNames = new Set<string>();
 
   for (const [value, occurrences] of numberGroups) {
-    if (occurrences.length >= threshold) {
-      // Determine the best name based on contexts
-      const contextCounts = new Map<string, number>();
-      for (const occ of occurrences) {
-        const count = contextCounts.get(occ.context) || 0;
-        contextCounts.set(occ.context, count + 1);
-      }
-
-      // Find most common context
-      let bestContext = "param";
-      let maxCount = 0;
-      for (const [context, count] of contextCounts) {
-        if (count > maxCount) {
-          maxCount = count;
-          bestContext = context;
-        }
-      }
-
-      // Ensure unique name
-      let name = bestContext;
-      let counter = 1;
-      while (usedNames.has(name)) {
-        name = `${bestContext}_${counter++}`;
-      }
-      usedNames.add(name);
-
-      properties.push({
-        name,
-        value,
-        count: occurrences.length,
-        contexts: [...new Set(occurrences.map((o) => o.context))],
-      });
+    if (occurrences.length < threshold) {
+      continue;
     }
+
+    // Literal identity-ish values create noisy Xacro like ${yaw} for every zero.
+    // Keep them inline unless a future, more targeted parameterization strategy exists.
+    if (isIdentityLikeNumericValue(value)) {
+      continue;
+    }
+
+    // Determine the best name based on contexts
+    const contextCounts = new Map<string, number>();
+    for (const occ of occurrences) {
+      const count = contextCounts.get(occ.context) || 0;
+      contextCounts.set(occ.context, count + 1);
+    }
+
+    // Find most common context
+    let bestContext = "param";
+    let maxCount = 0;
+    for (const [context, count] of contextCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        bestContext = context;
+      }
+    }
+
+    // Ensure unique name
+    let name = bestContext;
+    let counter = 1;
+    while (usedNames.has(name)) {
+      name = `${bestContext}_${counter++}`;
+    }
+    usedNames.add(name);
+
+    properties.push({
+      name,
+      value,
+      count: occurrences.length,
+      contexts: [...new Set(occurrences.map((o) => o.context))],
+    });
   }
 
   // Sort by count (most used first)

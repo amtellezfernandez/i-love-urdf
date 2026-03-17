@@ -35,10 +35,10 @@ const transmissionUrdf =
 const xacroRegressionUrdf =
   "<robot name=\"so101_robot\"><link name=\"arm_link_1\">" +
   "<visual><origin xyz=\"1 0 0\" rpy=\"0 0 0\"/><geometry>" +
-  "<mesh filename=\"assets/sts3215_03a_v1.stl\" scale=\"1 1 1\"/></geometry>" +
+  "<mesh filename=\"assets/sts3215_03a_v1.stl\" scale=\"0.001 0.001 0.001\"/></geometry>" +
   "<material name=\"sts3215\"/></visual></link>" +
   "<link name=\"arm_link_2\"><visual><origin xyz=\"1 0 0\" rpy=\"0 0 0\"/><geometry>" +
-  "<mesh filename=\"assets/sts3215_03a_v1.stl\" scale=\"1 1 1\"/></geometry>" +
+  "<mesh filename=\"assets/sts3215_03a_v1.stl\" scale=\"0.001 0.001 0.001\"/></geometry>" +
   "<material name=\"sts3215\"/></visual></link></robot>";
 
 const validate = lib.validateUrdf(urdf);
@@ -125,6 +125,9 @@ if (!xacro.xacroContent.includes('material name="sts3215"')) {
 }
 if (xacro.xacroContent.includes('name="so${') || xacro.xacroContent.includes('filename="assets/${')) {
   throw new Error("i-love-urdf urdf-to-xacro unsafe substitution regression smoke test failed");
+}
+if (xacro.xacroContent.includes("${yaw}") || xacro.xacroContent.includes('name="yaw" value="0"')) {
+  throw new Error("i-love-urdf urdf-to-xacro identity-value regression smoke test failed");
 }
 
 const repoRef = lib.parseGitHubRepositoryReference("https://github.com/acme/robot-repo/tree/main/robots/arm");
