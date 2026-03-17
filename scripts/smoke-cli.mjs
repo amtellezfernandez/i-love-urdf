@@ -135,9 +135,13 @@ if (!repoRef || repoRef.owner !== "acme" || repoRef.repo !== "robot-repo" || rep
 const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), "i-love-urdf-smoke-"));
 fs.mkdirSync(path.join(tempRepo, "meshes"), { recursive: true });
 fs.writeFileSync(path.join(tempRepo, "robot.urdf"), urdf, "utf8");
+fs.writeFileSync(path.join(tempRepo, "._robot.urdf"), "not a urdf", "utf8");
 fs.writeFileSync(path.join(tempRepo, "meshes", "mesh.stl"), "solid mesh\nendsolid mesh\n", "utf8");
 const localSummary = await localLib.inspectLocalRepositoryUrdfs({ path: tempRepo });
-if (localSummary.candidateCount < 1 || localSummary.primaryCandidatePath !== "robot.urdf") {
+if (
+  localSummary.candidateCount !== 1 ||
+  localSummary.primaryCandidatePath !== "robot.urdf"
+) {
   throw new Error("i-love-urdf local repository inspection smoke test failed");
 }
 

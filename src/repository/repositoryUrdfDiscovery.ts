@@ -28,6 +28,20 @@ export type RepositoryUrdfCandidate = {
   isXacro?: boolean;
 };
 
+const hasPathSegment = (repositoryPath: string, expectedSegment: string): boolean =>
+  repositoryPath
+    .split("/")
+    .filter(Boolean)
+    .some((segment) => segment.toLowerCase() === expectedSegment.toLowerCase());
+
+const isIgnorableRepositoryMetadataFile = <T extends RepositoryNamedFileEntry>(file: T): boolean => {
+  const loweredName = file.name.toLowerCase();
+  if (loweredName.startsWith("._")) return true;
+  if (loweredName === ".ds_store") return true;
+  if (hasPathSegment(file.path, "__macosx")) return true;
+  return false;
+};
+
 const findMeshFolder = <T extends RepositoryNamedFileEntry>(
   files: T[],
   dirPath: string
@@ -98,6 +112,7 @@ export const findRepositoryUrdfCandidates = <T extends RepositoryNamedFileEntry>
 ): RepositoryUrdfCandidate[] => {
   const candidateFiles = files.filter((file) => {
     if (file.type !== "file") return false;
+    if (isIgnorableRepositoryMetadataFile(file)) return false;
     const lowered = file.name.toLowerCase();
     return lowered.endsWith(".urdf") || isXacroPath(lowered);
   });
