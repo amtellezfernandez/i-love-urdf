@@ -72,6 +72,12 @@ const mjcf = convertLoadedSourceToMJCF(loaded);
 console.log(validation.isValid, mjcf.stats.bodiesCreated);
 ```
 
+For browser bundlers, use the browser-safe entrypoint:
+
+```ts
+import { parseURDF, prettyPrintURDF } from "i-love-urdf/browser";
+```
+
 ## XACRO Runtime
 
 `xacro-to-urdf` needs a Python XACRO runtime.

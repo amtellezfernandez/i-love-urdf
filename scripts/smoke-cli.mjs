@@ -14,6 +14,7 @@ execFileSync(process.execPath, [path.join(root, "scripts", "build-package.mjs")]
 });
 
 const lib = await import(path.join(root, "dist", "index.js"));
+const browserLib = await import(path.join(root, "dist", "browser.mjs"));
 const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
 const loadSourceNode = await import(path.join(root, "dist", "sources", "loadSourceNode.js"));
 const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
@@ -98,6 +99,15 @@ const syntheticCylinderBounds = {
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
   throw new Error("ilu validate smoke test failed");
+}
+
+const browserParsed = browserLib.parseURDF(urdf);
+if (
+  !browserParsed.isValid ||
+  browserLib.prettyPrintURDF(urdf).length === 0 ||
+  browserLib.normalizeMeshPathForMatch("meshes\\part.stl") !== "meshes/part.stl"
+) {
+  throw new Error("ilu browser entry smoke test failed");
 }
 
 const transmissionValidate = lib.validateUrdf(transmissionUrdf);
