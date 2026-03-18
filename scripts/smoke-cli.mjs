@@ -109,6 +109,14 @@ if (
 ) {
   throw new Error("ilu browser entry smoke test failed");
 }
+if (
+  lib.resolveRepositoryXacroTargetPath(
+    [{ path: "ur_description/urdf/ur10.urdf.xacro", type: "file" }],
+    "ur_description/urdf/ur10.xacro"
+  ) !== "ur_description/urdf/ur10.urdf.xacro"
+) {
+  throw new Error("ilu repository xacro target resolution smoke test failed");
+}
 
 const transmissionValidate = lib.validateUrdf(transmissionUrdf);
 if (!transmissionValidate.isValid) {

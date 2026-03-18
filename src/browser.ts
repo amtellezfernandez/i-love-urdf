@@ -85,6 +85,9 @@ export {
   fixMeshPaths,
 } from "./mesh/fixMeshPaths";
 export {
+  resolveRepositoryXacroTargetPath,
+} from "./repository/repositoryUrdfDiscovery";
+export {
   buildRepositoryFileEntriesFromPaths,
   buildPackageRootsFromRepositoryFiles,
   extractPackageNameFromPackageXml,

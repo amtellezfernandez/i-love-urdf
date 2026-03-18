@@ -50,6 +50,7 @@ const expectedExports = [
   "parseMeshReference",
   "normalizeMeshPathForMatch",
   "fixMeshPaths",
+  "resolveRepositoryXacroTargetPath",
   "buildRepositoryFileEntriesFromPaths",
   "buildPackageRootsFromRepositoryFiles",
   "extractPackageNameFromPackageXml",
@@ -111,6 +112,13 @@ if (!safeParsed.success || !safeParsed.document) {
 }
 if (!imported.findNamedUrdfElement(safeParsed.document, "joint", "fixed_joint")) {
   throw new Error("Browser entry named-element lookup failed its smoke assertion.");
+}
+const resolvedXacroTarget = imported.resolveRepositoryXacroTargetPath(
+  [{ path: "ur_description/urdf/ur10.urdf.xacro", type: "file" }],
+  "ur_description/urdf/ur10.xacro"
+);
+if (resolvedXacroTarget !== "ur_description/urdf/ur10.urdf.xacro") {
+  throw new Error("Browser entry xacro target resolution failed its smoke assertion.");
 }
 
 console.log("ilu browser entry check passed.");

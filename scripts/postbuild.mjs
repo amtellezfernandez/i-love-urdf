@@ -42,6 +42,7 @@ const browserExports = [
   "parseMeshReference",
   "normalizeMeshPathForMatch",
   "fixMeshPaths",
+  "resolveRepositoryXacroTargetPath",
   "buildRepositoryFileEntriesFromPaths",
   "buildPackageRootsFromRepositoryFiles",
   "extractPackageNameFromPackageXml",

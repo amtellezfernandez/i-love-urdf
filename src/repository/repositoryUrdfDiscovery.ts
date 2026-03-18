@@ -9,6 +9,7 @@ import { normalizeMeshPathForMatch, parseMeshReference } from "../mesh/meshPaths
 import {
   type RepositoryFileEntry,
   buildPackageRootsFromRepositoryFiles,
+  normalizeRepositoryPath,
   repositoryDirname,
 } from "./repositoryMeshResolution";
 import { isUrdfXacroPath, isXacroPath } from "../xacro/xacroContract";
@@ -124,6 +125,59 @@ const scoreRepositoryUrdfCandidate = (candidate: RepositoryUrdfCandidate): numbe
 
   if (candidate.isXacro) score -= 2;
   return score;
+};
+
+const findRepositoryFileByPath = <T extends RepositoryFileEntry>(
+  files: T[],
+  targetPath: string
+): T | null => {
+  const normalizedTarget = normalizeMeshPathForMatch(targetPath);
+  if (!normalizedTarget) return null;
+  return (
+    files.find(
+      (file) =>
+        file.type === "file" && normalizeMeshPathForMatch(file.path) === normalizedTarget
+    ) ?? null
+  );
+};
+
+const buildRepositoryXacroTargetPathCandidates = (targetPath: string): string[] => {
+  const normalizedTarget = normalizeRepositoryPath(targetPath);
+  if (!normalizedTarget) return [];
+  const candidates = new Set<string>([normalizedTarget]);
+  const fileName = normalizedTarget.split("/").pop() || normalizedTarget;
+  if (!isXacroPath(fileName)) {
+    return Array.from(candidates);
+  }
+
+  const directory = repositoryDirname(normalizedTarget);
+  const prefix = directory ? `${directory}/` : "";
+  const stem = fileName.replace(/(\.urdf)?\.xacro$/i, "");
+
+  if (isUrdfXacroPath(fileName)) {
+    candidates.add(`${prefix}${stem}.xacro`);
+  } else {
+    candidates.add(`${prefix}${stem}.urdf.xacro`);
+  }
+
+  return Array.from(candidates);
+};
+
+export const resolveRepositoryXacroTargetPath = <T extends RepositoryFileEntry>(
+  files: T[],
+  targetPath: string
+): string => {
+  const exactMatch = findRepositoryFileByPath(files, targetPath);
+  if (exactMatch) return exactMatch.path;
+
+  for (const candidatePath of buildRepositoryXacroTargetPathCandidates(targetPath)) {
+    const candidate = findRepositoryFileByPath(files, candidatePath);
+    if (candidate) {
+      return candidate.path;
+    }
+  }
+
+  return targetPath;
 };
 
 export const findRepositoryUrdfCandidates = <T extends RepositoryNamedFileEntry>(
