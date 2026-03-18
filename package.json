@@ -22,7 +22,7 @@
     "smoke": "node ./scripts/smoke-cli.mjs"
   },
   "dependencies": {
-    "jsdom": "^22.1.0"
+    "jsdom": "^29.0.0"
   },
   "keywords": [
     "urdf",
