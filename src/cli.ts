@@ -19,7 +19,6 @@ import {
   normalizeJointAxes,
   parseMeshReference,
   parseGitHubRepositoryReference,
-  prepareMujocoMeshes,
   prettyPrintURDF,
   repairGitHubRepositoryMeshReferences,
   removeJointsFromUrdf,
@@ -31,6 +30,8 @@ import {
   updateMeshPathsToAssetsInUrdf,
   validateUrdf,
 } from "./index";
+import { DEFAULT_MESH_COMPRESSION_MAX_FACES, compressMeshes } from "./mesh/mujocoMeshPrep";
+import { inspectMeshes } from "./mesh/mujocoMeshPrep";
 import { parseXml } from "./xmlDom";
 import {
   expandGitHubRepositoryXacro,
@@ -64,7 +65,8 @@ const SUPPORTED_COMMANDS = [
   "rename-link",
   "inspect-repo",
   "repair-mesh-refs",
-  "prepare-mujoco-meshes",
+  "inspect-meshes",
+  "compress-meshes",
 ] as const;
 
 type SupportedCommandName = (typeof SUPPORTED_COMMANDS)[number];
@@ -92,7 +94,8 @@ type CommandName =
   | "rename-link"
   | "inspect-repo"
   | "repair-mesh-refs"
-  | "prepare-mujoco-meshes"
+  | "inspect-meshes"
+  | "compress-meshes"
   | "help";
 
 type ArgMap = Map<string, string | boolean>;
@@ -116,8 +119,9 @@ const writeText = (filePath: string, content: string) => {
 
 const parseArgs = (argv: string[]): { rawCommand: string; command: CommandName; args: ArgMap } => {
   const [, , rawCommand = "help", ...rest] = argv;
-  const command = SUPPORTED_COMMAND_SET.has(rawCommand)
-    ? (rawCommand as SupportedCommandName)
+  const normalizedCommand = rawCommand === "prepare-mujoco-meshes" ? "compress-meshes" : rawCommand;
+  const command = SUPPORTED_COMMAND_SET.has(normalizedCommand)
+    ? (normalizedCommand as SupportedCommandName)
     : "help";
   const args: ArgMap = new Map();
 
@@ -204,6 +208,23 @@ const getKeyValueArg = (args: ArgMap, primaryKey: string, fallbackKey?: string):
   return result;
 };
 
+const getNumericKeyValueArg = (
+  args: ArgMap,
+  primaryKey: string,
+  fallbackKey?: string
+): Record<string, number> => {
+  const raw = getKeyValueArg(args, primaryKey, fallbackKey);
+  const numeric: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      fail(`Invalid numeric value for ${key}: ${value}`);
+    }
+    numeric[key] = parsed;
+  }
+  return numeric;
+};
+
 const requireHexColorArg = (args: ArgMap, key: string): string => {
   const value = requireStringArg(args, key).trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
@@ -215,6 +236,67 @@ const requireHexColorArg = (args: ArgMap, key: string): string => {
 const writeOutIfRequested = (outPath: string | undefined, content: string) => {
   if (!outPath) return;
   writeText(outPath, content);
+};
+
+const inspectLocalMjcfMeshRisks = (urdfPath: string, urdfContent: string): string[] => {
+  const doc = parseXml(urdfContent);
+  const urdfDir = path.dirname(path.resolve(urdfPath));
+  const riskyMeshes = new Map<string, { meshPath: string; faceCount: number; meshDir: string }>();
+
+  for (const meshElement of Array.from(doc.querySelectorAll("mesh"))) {
+    const rawRef = meshElement.getAttribute("filename");
+    if (!rawRef) continue;
+    const parsedRef = parseMeshReference(rawRef);
+    const refPath = parsedRef.path || parsedRef.raw;
+    const lowerRefPath = refPath.toLowerCase();
+    if (!lowerRefPath.endsWith(".stl")) continue;
+
+    let absoluteMeshPath = "";
+    if (parsedRef.scheme === "file" && parsedRef.isAbsoluteFile) {
+      absoluteMeshPath = parsedRef.path;
+    } else if (parsedRef.scheme === null || (parsedRef.scheme === "file" && !parsedRef.isAbsoluteFile)) {
+      absoluteMeshPath = path.resolve(urdfDir, refPath);
+    } else {
+      continue;
+    }
+
+    if (!fs.existsSync(absoluteMeshPath) || !fs.statSync(absoluteMeshPath).isFile()) {
+      continue;
+    }
+
+    const buffer = fs.readFileSync(absoluteMeshPath);
+    if (buffer.length < 84) continue;
+    const faceCount = buffer.readUInt32LE(80);
+    if (faceCount <= DEFAULT_MESH_COMPRESSION_MAX_FACES) continue;
+
+    riskyMeshes.set(absoluteMeshPath, {
+      meshPath: absoluteMeshPath,
+      faceCount,
+      meshDir: path.dirname(absoluteMeshPath),
+    });
+  }
+
+  if (riskyMeshes.size === 0) {
+    return [];
+  }
+
+  const riskyMeshList = Array.from(riskyMeshes.values());
+  if (riskyMeshList.length === 0) {
+    return [];
+  }
+
+  const meshDirs = Array.from(new Set(riskyMeshList.map((mesh) => mesh.meshDir)));
+  const commandHint =
+    meshDirs.length === 1
+      ? ` Inspect: i-love-urdf inspect-meshes --mesh-dir ${meshDirs[0]}. Fix: i-love-urdf compress-meshes --mesh-dir ${meshDirs[0]} --in-place`
+      : " Inspect those mesh directories with inspect-meshes, then run compress-meshes on the ones that contain the failing STL files.";
+  const meshSummary = riskyMeshList
+    .slice(0, 3)
+    .map((mesh) => `${path.basename(mesh.meshPath)} (${mesh.faceCount} faces)`)
+    .join(", ");
+  return [
+    `Detected ${riskyMeshList.length} STL mesh${riskyMeshList.length === 1 ? "" : "es"} above the likely MuJoCo face limit of ${DEFAULT_MESH_COMPRESSION_MAX_FACES}. MuJoCo will likely fail to load them: ${meshSummary}.${commandHint}`,
+  ];
 };
 
 const printHelp = () => {
@@ -249,7 +331,8 @@ const printHelp = () => {
       "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
       "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
       "  repair-mesh-refs --local <repo|urdf-path> | --github <owner/repo|url> [--urdf <repo-path>] [--ref <branch>] [--path <subdir>] [--token <token>] [--out <path>]",
-      "  prepare-mujoco-meshes --mesh-dir <path> [--max-faces <n>] [--in-place | --out-dir <path>]",
+      "  inspect-meshes --mesh-dir <path> [--max-faces <n>] [--meshes <a.stl,b.stl>] [--limits <a.stl=100000,b.stl=50000>]",
+      "  compress-meshes --mesh-dir <path> [--max-faces <n>] [--meshes <a.stl,b.stl>] [--limits <a.stl=100000,b.stl=50000>] [--in-place | --out-dir <path>]",
       "",
       "All commands print JSON to stdout.",
     ].join("\n")
@@ -527,17 +610,36 @@ const run = async () => {
     return;
   }
 
-  if (command === "prepare-mujoco-meshes") {
+  if (command === "inspect-meshes") {
+    const meshDir = requireStringArg(args, "mesh-dir");
+    const maxFaces = getOptionalNumberArg(args, "max-faces");
+    const meshes = getDelimitedStringArg(args, "meshes", "mesh");
+    const limits = getNumericKeyValueArg(args, "limits", "limit");
+    const result = inspectMeshes({
+      meshDir,
+      maxFaces,
+      meshes,
+      limits,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "compress-meshes") {
     const meshDir = requireStringArg(args, "mesh-dir");
     const outDir = getOptionalStringArg(args, "out-dir");
     const inPlace = Boolean(args.get("in-place"));
     const maxFaces = getOptionalNumberArg(args, "max-faces");
+    const meshes = getDelimitedStringArg(args, "meshes", "mesh");
+    const limits = getNumericKeyValueArg(args, "limits", "limit");
     if (inPlace && outDir) {
-      fail("prepare-mujoco-meshes accepts either --in-place or --out-dir, not both.");
+      fail("compress-meshes accepts either --in-place or --out-dir, not both.");
     }
-    const result = prepareMujocoMeshes({
+    const result = compressMeshes({
       meshDir,
       maxFaces,
+      meshes,
+      limits,
       inPlace,
       outDir,
     });
@@ -678,6 +780,7 @@ const run = async () => {
   if (command === "urdf-to-mjcf") {
     const outPath = getOptionalStringArg(args, "out");
     const result = convertURDFToMJCF(urdfContent);
+    result.warnings.push(...inspectLocalMjcfMeshRisks(urdfPath, urdfContent));
     writeOutIfRequested(outPath, result.mjcfContent);
     console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
     return;

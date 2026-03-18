@@ -8,12 +8,15 @@ import {
 } from "./stlBinary";
 
 export const DEFAULT_MUJOCO_MAX_STL_FACES = 200_000;
+export const DEFAULT_MESH_COMPRESSION_MAX_FACES = DEFAULT_MUJOCO_MAX_STL_FACES;
 
 export interface MujocoMeshPrepOptions {
   meshDir: string;
   maxFaces?: number;
   inPlace?: boolean;
   outDir?: string;
+  meshes?: string[];
+  limits?: Record<string, number>;
 }
 
 export interface MujocoMeshPrepResultEntry {
@@ -36,6 +39,39 @@ export interface MujocoMeshPrepResult {
   results: MujocoMeshPrepResultEntry[];
 }
 
+export type CompressMeshesOptions = MujocoMeshPrepOptions;
+export type CompressMeshesResultEntry = MujocoMeshPrepResultEntry;
+export type CompressMeshesResult = MujocoMeshPrepResult;
+
+export interface InspectMeshesOptions {
+  meshDir: string;
+  maxFaces?: number;
+  meshes?: string[];
+  limits?: Record<string, number>;
+}
+
+export interface InspectMeshesResultEntry {
+  path: string;
+  format: string;
+  faceCount: number;
+  byteLength: number;
+  isBinary: boolean;
+  targetMaxFaces: number;
+  overLimit: boolean;
+  reason: string | null;
+}
+
+export interface InspectMeshesResult {
+  meshDir: string;
+  maxFaces: number;
+  inspected: number;
+  matched: number;
+  overLimit: number;
+  requestedMeshes: string[];
+  missingMeshes: string[];
+  results: InspectMeshesResultEntry[];
+}
+
 const listFilesRecursive = (rootDir: string): string[] => {
   const results: string[] = [];
   const walk = (dirPath: string) => {
@@ -54,14 +90,117 @@ const listFilesRecursive = (rootDir: string): string[] => {
   return results;
 };
 
-export function prepareMujocoMeshes(options: MujocoMeshPrepOptions): MujocoMeshPrepResult {
+const normalizeRelativeMeshPath = (relativePath: string): string =>
+  relativePath.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/^\/+/, "");
+
+const buildRequestedMeshSet = (meshes?: string[]): Set<string> | null => {
+  if (!meshes || meshes.length === 0) return null;
+  const normalized = meshes
+    .map((mesh) => normalizeRelativeMeshPath(mesh))
+    .filter((mesh) => mesh.length > 0)
+    .map((mesh) => mesh.toLowerCase());
+  return new Set(normalized);
+};
+
+const getTargetMaxFaces = (
+  relativePath: string,
+  defaultMaxFaces: number,
+  limits?: Record<string, number>
+): number => {
+  if (!limits) return defaultMaxFaces;
+  const normalizedPath = normalizeRelativeMeshPath(relativePath).toLowerCase();
+  for (const [rawPath, rawLimit] of Object.entries(limits)) {
+    if (normalizeRelativeMeshPath(rawPath).toLowerCase() === normalizedPath) {
+      const parsedLimit = Number(rawLimit);
+      if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
+        return parsedLimit;
+      }
+    }
+  }
+  return defaultMaxFaces;
+};
+
+export function inspectMeshes(options: InspectMeshesOptions): InspectMeshesResult {
+  const meshDir = path.resolve(options.meshDir);
+  const maxFaces = options.maxFaces ?? DEFAULT_MESH_COMPRESSION_MAX_FACES;
+  const requestedMeshes = options.meshes?.map((mesh) => normalizeRelativeMeshPath(mesh)) ?? [];
+  const requestedMeshSet = buildRequestedMeshSet(options.meshes);
+
+  if (!fs.existsSync(meshDir) || !fs.statSync(meshDir).isDirectory()) {
+    throw new Error(`Mesh directory does not exist: ${meshDir}`);
+  }
+
+  const results: InspectMeshesResultEntry[] = [];
+  let matched = 0;
+  let overLimit = 0;
+  const foundRequested = new Set<string>();
+
+  for (const absolutePath of listFilesRecursive(meshDir)) {
+    const relativePath = normalizeRelativeMeshPath(path.relative(meshDir, absolutePath));
+    const extension = path.extname(relativePath).toLowerCase();
+    if (extension !== ".stl") {
+      continue;
+    }
+
+    const normalizedLower = relativePath.toLowerCase();
+    if (requestedMeshSet && !requestedMeshSet.has(normalizedLower)) {
+      continue;
+    }
+    matched += 1;
+    foundRequested.add(normalizedLower);
+
+    const metadata = inspectBinaryStlFile(absolutePath);
+    const targetMaxFaces = getTargetMaxFaces(relativePath, maxFaces, options.limits);
+    const entry: InspectMeshesResultEntry = {
+      path: relativePath,
+      format: "stl",
+      faceCount: metadata.faceCount,
+      byteLength: metadata.byteLength,
+      isBinary: metadata.isBinary,
+      targetMaxFaces,
+      overLimit: false,
+      reason: null,
+    };
+
+    if (!metadata.isBinary) {
+      entry.reason = "Unsupported STL format. Expected a valid binary STL.";
+      results.push(entry);
+      continue;
+    }
+
+    entry.overLimit = metadata.faceCount > targetMaxFaces;
+    if (entry.overLimit) {
+      overLimit += 1;
+      entry.reason = `Above target face limit: ${metadata.faceCount} > ${targetMaxFaces}.`;
+    }
+
+    results.push(entry);
+  }
+
+  const missingMeshes = requestedMeshes.filter(
+    (mesh) => !foundRequested.has(normalizeRelativeMeshPath(mesh).toLowerCase())
+  );
+
+  return {
+    meshDir,
+    maxFaces,
+    inspected: results.length,
+    matched,
+    overLimit,
+    requestedMeshes,
+    missingMeshes,
+    results,
+  };
+}
+
+export function compressMeshes(options: CompressMeshesOptions): CompressMeshesResult {
   const meshDir = path.resolve(options.meshDir);
   const outDir = options.outDir ? path.resolve(options.outDir) : undefined;
-  const maxFaces = options.maxFaces ?? DEFAULT_MUJOCO_MAX_STL_FACES;
+  const maxFaces = options.maxFaces ?? DEFAULT_MESH_COMPRESSION_MAX_FACES;
   const shouldWrite = Boolean(options.inPlace || outDir);
 
   if (options.inPlace && outDir) {
-    throw new Error("prepareMujocoMeshes accepts either inPlace or outDir, not both.");
+    throw new Error("compressMeshes accepts either inPlace or outDir, not both.");
   }
   if (!fs.existsSync(meshDir) || !fs.statSync(meshDir).isDirectory()) {
     throw new Error(`Mesh directory does not exist: ${meshDir}`);
@@ -72,50 +211,48 @@ export function prepareMujocoMeshes(options: MujocoMeshPrepOptions): MujocoMeshP
     fs.cpSync(meshDir, outDir, { recursive: true });
   }
 
+  const inspection = inspectMeshes({
+    meshDir,
+    maxFaces,
+    meshes: options.meshes,
+    limits: options.limits,
+  });
+
   const results: MujocoMeshPrepResultEntry[] = [];
-  let overLimit = 0;
   let rewritten = 0;
 
-  for (const absolutePath of listFilesRecursive(meshDir)) {
-    const relativePath = path.relative(meshDir, absolutePath);
-    const extension = path.extname(relativePath).toLowerCase();
-    if (extension !== ".stl") {
-      continue;
-    }
-
-    const metadata = inspectBinaryStlFile(absolutePath);
-    const targetPath = outDir ? path.join(outDir, relativePath) : absolutePath;
+  for (const inspectionEntry of inspection.results) {
+    const absolutePath = path.join(meshDir, inspectionEntry.path);
+    const targetPath = outDir ? path.join(outDir, inspectionEntry.path) : absolutePath;
     const entry: MujocoMeshPrepResultEntry = {
-      path: relativePath,
+      path: inspectionEntry.path,
       format: "stl",
-      faceCountBefore: metadata.faceCount,
-      faceCountAfter: metadata.faceCount,
+      faceCountBefore: inspectionEntry.faceCount,
+      faceCountAfter: inspectionEntry.faceCount,
       changed: false,
       divisions: null,
-      reason: null,
+      reason: inspectionEntry.reason,
     };
 
-    if (!metadata.isBinary) {
-      entry.reason = "Unsupported STL format. Expected a valid binary STL.";
+    if (!inspectionEntry.isBinary) {
       results.push(entry);
       continue;
     }
 
-    if (metadata.faceCount > maxFaces) {
-      overLimit += 1;
+    if (inspectionEntry.overLimit) {
       if (shouldWrite) {
         const mesh = readBinaryStl(absolutePath);
-        const simplified = chooseSimplifiedBinaryStl(mesh.triangles, maxFaces);
+        const simplified = chooseSimplifiedBinaryStl(mesh.triangles, inspectionEntry.targetMaxFaces);
         writeBinaryStl(targetPath, mesh.header, simplified.triangles);
         entry.faceCountAfter = simplified.faceCount;
-        entry.changed = simplified.faceCount !== metadata.faceCount;
+        entry.changed = simplified.faceCount !== inspectionEntry.faceCount;
         entry.divisions = Number.isFinite(simplified.divisions) ? simplified.divisions : null;
         rewritten += entry.changed ? 1 : 0;
-        if (simplified.faceCount > maxFaces) {
-          entry.reason = `Still above MuJoCo face limit after simplification: ${simplified.faceCount} > ${maxFaces}.`;
+        if (simplified.faceCount > inspectionEntry.targetMaxFaces) {
+          entry.reason = `Still above target face limit after simplification: ${simplified.faceCount} > ${inspectionEntry.targetMaxFaces}.`;
+        } else {
+          entry.reason = null;
         }
-      } else {
-        entry.reason = `Over MuJoCo STL face limit: ${metadata.faceCount} > ${maxFaces}.`;
       }
     }
 
@@ -126,9 +263,11 @@ export function prepareMujocoMeshes(options: MujocoMeshPrepOptions): MujocoMeshP
     meshDir,
     targetDir: outDir ?? (options.inPlace ? meshDir : null),
     maxFaces,
-    inspected: results.length,
-    overLimit,
+    inspected: inspection.inspected,
+    overLimit: inspection.overLimit,
     rewritten,
     results,
   };
 }
+
+export const prepareMujocoMeshes = compressMeshes;

@@ -14,7 +14,7 @@ const lib = await import(path.join(root, "dist", "index.js"));
 const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
 const loadSourceNode = await import(path.join(root, "dist", "sources", "loadSourceNode.js"));
 const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
-const mujocoMeshPrep = await import(path.join(root, "dist", "mesh", "mujocoMeshPrep.js"));
+const meshNode = await import(path.join(root, "dist", "mesh", "meshNode.js"));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.DOMParser = dom.window.DOMParser;
@@ -220,13 +220,27 @@ for (const triangle of triangleData) {
 }
 fs.writeFileSync(binaryMeshPath, triangleRecords);
 
-const mujocoMeshPrepResult = mujocoMeshPrep.prepareMujocoMeshes({
+const meshInspection = meshNode.inspectMeshes({
   meshDir: path.join(tempRepo, "meshes"),
   maxFaces: 1,
+  meshes: ["binary.stl"],
+});
+if (
+  meshInspection.overLimit !== 1 ||
+  meshInspection.missingMeshes.length !== 0 ||
+  meshInspection.results[0]?.targetMaxFaces !== 1
+) {
+  throw new Error("i-love-urdf inspect-meshes smoke test failed");
+}
+
+const mujocoMeshPrepResult = meshNode.compressMeshes({
+  meshDir: path.join(tempRepo, "meshes"),
+  maxFaces: 1,
+  meshes: ["binary.stl"],
 });
 if (
   mujocoMeshPrepResult.overLimit !== 1 ||
-  !mujocoMeshPrepResult.results[0]?.reason?.includes("MuJoCo STL face limit")
+  !mujocoMeshPrepResult.results[0]?.reason?.includes("Above target face limit")
 ) {
   throw new Error("i-love-urdf MuJoCo mesh prep smoke test failed");
 }
@@ -313,7 +327,8 @@ if (
   !cliSource.includes("setup-xacro-runtime") ||
   !cliSource.includes("load-source") ||
   !cliSource.includes("--entry <repo-path>") ||
-  !cliSource.includes("prepare-mujoco-meshes")
+  !cliSource.includes("compress-meshes") ||
+  !cliSource.includes("inspect-meshes")
 ) {
   throw new Error("i-love-urdf CLI surface smoke test failed");
 }

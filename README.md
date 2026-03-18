@@ -41,7 +41,9 @@ i-love-urdf reassign-joint --urdf robot.urdf --joint elbow_joint --parent upper_
 i-love-urdf set-material-color --urdf robot.urdf --link base_link --material base_red --color '#ff0033' --out robot.red.urdf
 i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
 i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
-i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes --in-place
+i-love-urdf inspect-meshes --mesh-dir ./meshes
+i-love-urdf compress-meshes --mesh-dir ./meshes --in-place
+i-love-urdf compress-meshes --mesh-dir ./meshes --meshes heavy.stl --limits heavy.stl=100000 --out-dir ./meshes.optimized
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
 i-love-urdf load-source --path ./robot.urdf
 i-love-urdf load-source --path ./robot.urdf.xacro --out robot.urdf
@@ -69,7 +71,7 @@ MuJoCo flow:
 
 1. `load-source` or `xacro-to-urdf` to get a resolved URDF.
 2. `urdf-to-mjcf` to generate MJCF.
-3. `prepare-mujoco-meshes` on the mesh directory if any STL assets are too heavy for MuJoCo.
+3. If `urdf-to-mjcf` warns about heavy STL assets, run `inspect-meshes` or `compress-meshes` on the mesh directory and try again.
 
 ## Example
 
@@ -114,7 +116,7 @@ async function main() {
 - Analysis: inertials, collisions, mesh reference analysis
 - Conversion: URDF to MJCF, URDF to XACRO, runtime-backed XACRO to URDF, XACRO request/response helpers
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
-- MuJoCo prep: binary STL inspection and MuJoCo mesh-face-limit repair for heavy mesh sets
+- Mesh compression: binary STL inspection and target-face-limit repair for heavy mesh sets
 - Repository: candidate discovery, package/dependency name extraction, repository package helpers, generic source inspection, local/GitHub repo inspection, repo-aware mesh reference repair
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
@@ -142,17 +144,20 @@ import { loadSourceFromPath, loadSourceFromGitHub } from "i-love-urdf/load-sourc
 
 ## MuJoCo Mesh Prep
 
-MuJoCo rejects STL meshes above its face limit. `prepare-mujoco-meshes` scans a mesh directory and rewrites only the over-limit binary STL files.
+MuJoCo rejects STL meshes above its face limit. `inspect-meshes` shows current STL face counts and target limits. `compress-meshes` rewrites only the STL files above their target face limits.
 
 Examples:
 
 ```sh
-i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes
-i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes --in-place
-i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes --out-dir ./meshes.mujoco
+i-love-urdf inspect-meshes --mesh-dir ./meshes
+i-love-urdf inspect-meshes --mesh-dir ./meshes --limits heavy.stl=100000
+i-love-urdf compress-meshes --mesh-dir ./meshes
+i-love-urdf compress-meshes --mesh-dir ./meshes --in-place
+i-love-urdf compress-meshes --mesh-dir ./meshes --meshes heavy.stl --limits heavy.stl=100000 --in-place
+i-love-urdf compress-meshes --mesh-dir ./meshes --out-dir ./meshes.mujoco
 ```
 
-The no-write form is a dry run. `--in-place` rewrites the mesh directory directly. `--out-dir` copies the full mesh tree and only rewrites the heavy STL files in the output directory.
+The no-write form is a dry run. `--in-place` rewrites the mesh directory directly. `--out-dir` copies the full mesh tree and only rewrites the heavy STL files in the output directory. `--meshes` limits the operation to specific STL files, and `--limits` lets you override the target face count per mesh. If you do not pass `--limits`, the default target is the MuJoCo face limit.
 
 ## Runtime Note
 

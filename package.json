@@ -57,6 +57,10 @@
       "types": "./dist/sources/loadSourceNode.d.ts",
       "default": "./dist/sources/loadSourceNode.js"
     },
+    "./mesh-node": {
+      "types": "./dist/mesh/meshNode.d.ts",
+      "default": "./dist/mesh/meshNode.js"
+    },
     "./src": "./src/index.ts",
     "./package.json": "./package.json"
   },
