@@ -209,6 +209,14 @@ if (xacroRuntime.available) {
   );
   fs.mkdirSync(path.join(tempRepo, "include"), { recursive: true });
   fs.writeFileSync(
+    path.join(tempRepo, "materials.xacro"),
+    "<?xml version=\"1.0\"?>\n" +
+      "<robot xmlns:xacro=\"http://www.ros.org/wiki/xacro\">\n" +
+      "  <material name=\"silver\"/>\n" +
+      "</robot>\n",
+    "utf8"
+  );
+  fs.writeFileSync(
     path.join(tempRepo, "include", "shared.xacro"),
     "<?xml version=\"1.0\"?>\n" +
       "<robot xmlns:xacro=\"http://www.ros.org/wiki/xacro\">\n" +
@@ -223,11 +231,18 @@ if (xacroRuntime.available) {
     "<?xml version=\"1.0\"?>\n" +
       "<robot name=\"smoke_robot\" xmlns:xacro=\"http://www.ros.org/wiki/xacro\">\n" +
       "  <xacro:include filename=\"$(find smoke_robot)/include/shared.xacro\"/>\n" +
+      "  <xacro:include filename=\"$(find smoke_robot)/materials.xacro\"/>\n" +
       "  <link name=\"base\"/>\n" +
+      "  <link name=\"mesh_link\"><visual><geometry><mesh filename=\"file://$(find smoke_robot)/meshes/mesh.stl\"/></geometry></visual></link>\n" +
       "  <xacro:shared_link suffix=\"tip\"/>\n" +
       "</robot>\n",
     "utf8"
   );
+
+  const xacroSummary = await localLib.inspectLocalRepositoryUrdfs({ path: tempRepo });
+  if (xacroSummary.candidates.some((candidate) => candidate.path === "materials.xacro")) {
+    throw new Error("i-love-urdf xacro candidate filtering smoke test failed");
+  }
 
   const expanded = await xacroNode.expandLocalXacroToUrdf({
     xacroPath: path.join(tempRepo, "robot.urdf.xacro"),
@@ -236,6 +251,12 @@ if (xacroRuntime.available) {
   });
   if (!expanded.urdf.includes('link name="shared_tip"')) {
     throw new Error("i-love-urdf xacro-to-urdf smoke test failed");
+  }
+  if (
+    expanded.urdf.includes("i-love-urdf-xacro-") ||
+    !expanded.urdf.includes('mesh filename="meshes/mesh.stl"')
+  ) {
+    throw new Error("i-love-urdf expanded xacro mesh-path stabilization smoke test failed");
   }
 
   const loadedXacroRepo = await loadSourceNode.loadSourceFromPath({
@@ -246,10 +267,20 @@ if (xacroRuntime.available) {
   if (loadedXacroRepo.entryFormat !== "xacro" || !loadedXacroRepo.urdf.includes('link name="shared_tip"')) {
     throw new Error("i-love-urdf load-source xacro repository smoke test failed");
   }
+  if (
+    loadedXacroRepo.urdf.includes("i-love-urdf-xacro-") ||
+    !loadedXacroRepo.urdf.includes('mesh filename="meshes/mesh.stl"')
+  ) {
+    throw new Error("i-love-urdf load-source xacro mesh-path stabilization smoke test failed");
+  }
 }
 
 const cliSource = fs.readFileSync(path.join(root, "dist", "cli.js"), "utf8");
-if (!cliSource.includes("setup-xacro-runtime") || !cliSource.includes("load-source")) {
+if (
+  !cliSource.includes("setup-xacro-runtime") ||
+  !cliSource.includes("load-source") ||
+  !cliSource.includes("--entry <repo-path>")
+) {
   throw new Error("i-love-urdf CLI surface smoke test failed");
 }
 

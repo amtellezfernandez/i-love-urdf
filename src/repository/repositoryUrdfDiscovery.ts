@@ -42,6 +42,25 @@ const isIgnorableRepositoryMetadataFile = <T extends RepositoryNamedFileEntry>(f
   return false;
 };
 
+const isSupportXacroFile = (fileName: string): boolean => {
+  const lowered = fileName.toLowerCase();
+  if (!isXacroPath(lowered) || isUrdfXacroPath(lowered)) return false;
+  const stem = lowered.replace(/\.xacro$/i, "");
+  return (
+    stem === "material" ||
+    stem === "materials" ||
+    stem === "gazebo" ||
+    stem === "trans" ||
+    stem === "transmission" ||
+    stem === "transmissions" ||
+    stem === "macro" ||
+    stem === "macros" ||
+    stem === "include" ||
+    stem === "includes" ||
+    stem === "common"
+  );
+};
+
 const findMeshFolder = <T extends RepositoryNamedFileEntry>(
   files: T[],
   dirPath: string
@@ -114,6 +133,7 @@ export const findRepositoryUrdfCandidates = <T extends RepositoryNamedFileEntry>
     if (file.type !== "file") return false;
     if (isIgnorableRepositoryMetadataFile(file)) return false;
     const lowered = file.name.toLowerCase();
+    if (isSupportXacroFile(lowered)) return false;
     return lowered.endsWith(".urdf") || isXacroPath(lowered);
   });
 

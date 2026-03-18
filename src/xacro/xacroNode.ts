@@ -29,6 +29,7 @@ import {
   createXacroFilePayloadFromBytes,
   type XacroExpandRequestPayload,
 } from "./xacroContract";
+import { stabilizeExpandedXacroUrdf } from "./stabilizeExpandedXacroUrdf";
 
 export type XacroRuntimeName = "python-xacro" | "vendored-xacrodoc";
 
@@ -434,6 +435,7 @@ export const expandLocalXacroToUrdf = async (
     }
   );
   const result = await expandXacroRequestPayload(payload, options);
+  const stabilized = stabilizeExpandedXacroUrdf(result.urdf, relativeXacroPath, files);
 
   return {
     source: "local",
@@ -441,6 +443,7 @@ export const expandLocalXacroToUrdf = async (
     xacroPath: relativeXacroPath,
     inspectedPath: absoluteXacroPath,
     ...result,
+    urdf: stabilized.urdf,
   };
 };
 
@@ -594,6 +597,7 @@ export const expandGitHubRepositoryXacro = async (
     }
   );
   const result = await expandXacroRequestPayload(payload, options);
+  const stabilized = stabilizeExpandedXacroUrdf(result.urdf, normalizedTargetPath, resolvedFiles);
 
   return {
     source: "github",
@@ -604,5 +608,6 @@ export const expandGitHubRepositoryXacro = async (
     targetPath: normalizedTargetPath,
     repositoryUrl: `https://github.com/${reference.owner}/${reference.repo}`,
     ...result,
+    urdf: stabilized.urdf,
   };
 };

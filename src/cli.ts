@@ -240,8 +240,8 @@ const printHelp = () => {
       "  load-source --path <local-file-or-dir> [--entry <repo-path>] [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  load-source --github <owner/repo|url> [--entry <repo-path>] [--ref <branch>] [--subdir <path>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  xacro-to-urdf --xacro <path> [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
-      "  xacro-to-urdf --local <repo> --xacro <repo-path> [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
-      "  xacro-to-urdf --github <owner/repo|url> --xacro <repo-path> [--ref <branch>] [--path <subdir>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+      "  xacro-to-urdf --local <repo> --entry <repo-path> [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+      "  xacro-to-urdf --github <owner/repo|url> --entry <repo-path> [--ref <branch>] [--path <subdir>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]",
       "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
       "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
@@ -267,6 +267,11 @@ const run = async () => {
   installDomGlobals();
 
   if (rawCommand === "help" || rawCommand === "--help" || rawCommand === "-h") {
+    printHelp();
+    return;
+  }
+
+  if (args.has("help")) {
     printHelp();
     return;
   }
@@ -327,7 +332,10 @@ const run = async () => {
       fail("xacro-to-urdf accepts at most one of --github or --local.");
     }
 
-    const xacroPath = requireStringArg(args, "xacro");
+    const xacroPath = getOptionalStringArg(args, "xacro") ?? getOptionalStringArg(args, "entry");
+    if (!xacroPath) {
+      fail("Missing required argument --xacro (or --entry for repository sources).");
+    }
     const outPath = getOptionalStringArg(args, "out");
     const runtimeOptions = {
       pythonExecutable: getOptionalStringArg(args, "python"),
