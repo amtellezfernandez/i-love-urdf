@@ -14,12 +14,16 @@ Requirements:
 - Corepack
 
 ```sh
+# use the pinned Node first (.nvmrc / .node-version)
 corepack enable
 pnpm install
 pnpm build
 pnpm setup:xacro
-ilu probe-xacro-runtime
+pnpm exec ilu probe-xacro-runtime
 ```
+
+From a repo checkout, run the CLI as `pnpm exec ilu ...`.
+Use plain `ilu ...` only when the package is installed as a real CLI in your environment.
 
 ## Common CLI Commands
 
@@ -71,8 +75,8 @@ console.log(validation.isValid, mjcf.stats.bodiesCreated);
 `pnpm setup:xacro` creates a managed runtime under `.i-love-urdf/xacro-runtime`.
 
 ```sh
-ilu probe-xacro-runtime
-ilu setup-xacro-runtime
+pnpm exec ilu probe-xacro-runtime
+pnpm exec ilu setup-xacro-runtime
 ```
 
 ## License
