@@ -44,6 +44,14 @@ export {
   getJointLinks,
 } from "./parsing/getJointLinks";
 export {
+  findNamedUrdfElement,
+  hasXacroSyntax,
+  parsePlainUrdfDocument,
+  type ParsePlainUrdfDocumentOptions,
+  type ParsePlainUrdfDocumentResult,
+  type PlainUrdfDocumentIssue,
+} from "./parsing/safeUrdfDocument";
+export {
   canonicalOrderURDF,
 } from "./utils/canonicalOrdering";
 export {
@@ -77,8 +85,12 @@ export {
   fixMeshPaths,
 } from "./mesh/fixMeshPaths";
 export {
+  buildRepositoryFileEntriesFromPaths,
   buildPackageRootsFromRepositoryFiles,
+  extractPackageNameFromPackageXml,
   resolveRepositoryFileReference,
   resolveRepositoryMeshReferences,
+  type BuildPackageRootsOptions,
+  type PackageNameByPath,
   type RepositoryFileEntry,
 } from "./repository/repositoryMeshResolution";

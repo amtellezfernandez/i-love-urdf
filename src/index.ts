@@ -6,6 +6,7 @@ export * from "./parsing/parseJointLimits";
 export * from "./parsing/parseJointHierarchy";
 export * from "./parsing/parseLinkNames";
 export * from "./parsing/getJointLinks";
+export * from "./parsing/safeUrdfDocument";
 
 export * from "./analysis/analyzeUrdf";
 export * from "./analysis/healthCheckUrdf";

@@ -8,6 +8,14 @@ export type RepositoryFileEntry = {
   type: "file" | "dir";
 };
 
+export type PackageNameByPath =
+  | ReadonlyMap<string, string | null | undefined>
+  | Record<string, string | null | undefined>;
+
+export type BuildPackageRootsOptions = {
+  packageNameByPath?: PackageNameByPath;
+};
+
 const COMMON_PACKAGE_FOLDERS = new Set([
   "meshes",
   "mesh",
@@ -30,6 +38,24 @@ const COMMON_PACKAGE_FOLDERS = new Set([
 export const normalizeRepositoryPath = (path: string): string => {
   if (!path) return "";
   return path.replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
+};
+
+export const extractPackageNameFromPackageXml = (content: string): string | null => {
+  const match = content.match(/<name>\s*([^<]+)\s*<\/name>/i);
+  const packageName = match?.[1]?.trim() ?? "";
+  return packageName || null;
+};
+
+export const buildRepositoryFileEntriesFromPaths = (
+  paths: Iterable<string>
+): RepositoryFileEntry[] => {
+  const files = new Map<string, RepositoryFileEntry>();
+  for (const path of paths) {
+    const normalized = normalizeRepositoryPath(path);
+    if (!normalized) continue;
+    files.set(normalized, { path: normalized, type: "file" });
+  }
+  return Array.from(files.values()).sort((left, right) => left.path.localeCompare(right.path));
 };
 
 export const repositoryDirname = (path: string): string => {
@@ -158,8 +184,21 @@ export const collectXacroSupportFilesFromRepository = <T extends RepositoryFileE
   return targetFile ? [...supportFiles, targetFile] : supportFiles;
 };
 
+const getPackageNameOverride = (
+  packageNameByPath: PackageNameByPath | undefined,
+  path: string
+): string | null => {
+  if (!packageNameByPath) return null;
+  const normalizedPath = normalizeRepositoryPath(path);
+  if (packageNameByPath instanceof Map) {
+    return packageNameByPath.get(normalizedPath)?.trim() || packageNameByPath.get(path)?.trim() || null;
+  }
+  return packageNameByPath[normalizedPath]?.trim() || packageNameByPath[path]?.trim() || null;
+};
+
 export const buildPackageRootsFromRepositoryFiles = <T extends RepositoryFileEntry>(
-  files: T[]
+  files: T[],
+  options: BuildPackageRootsOptions = {}
 ): Record<string, string[]> => {
   const roots = new Map<string, Set<string>>();
   const addRoot = (packageName: string, rootPath: string) => {
@@ -179,7 +218,8 @@ export const buildPackageRootsFromRepositoryFiles = <T extends RepositoryFileEnt
       const rootPath = repositoryDirname(file.path);
       if (!rootPath) return;
       const parts = rootPath.split("/").filter(Boolean);
-      const packageName = parts[parts.length - 1];
+      const packageName =
+        getPackageNameOverride(options.packageNameByPath, file.path) ?? parts[parts.length - 1];
       if (packageName) {
         addRoot(packageName, rootPath);
       }

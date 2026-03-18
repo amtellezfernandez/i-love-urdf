@@ -34,6 +34,9 @@ const expectedExports = [
   "parseLinkNamesFromDocument",
   "parseLinkNames",
   "getJointLinks",
+  "findNamedUrdfElement",
+  "hasXacroSyntax",
+  "parsePlainUrdfDocument",
   "canonicalOrderURDF",
   "compareUrdfs",
   "normalizeJointAxes",
@@ -47,7 +50,9 @@ const expectedExports = [
   "parseMeshReference",
   "normalizeMeshPathForMatch",
   "fixMeshPaths",
+  "buildRepositoryFileEntriesFromPaths",
   "buildPackageRootsFromRepositoryFiles",
+  "extractPackageNameFromPackageXml",
   "resolveRepositoryFileReference",
   "resolveRepositoryMeshReferences",
 ];
@@ -92,6 +97,20 @@ if (!imported.prettyPrintURDF(sampleUrdf).includes('<robot name="browser_entry">
 }
 if (required.normalizeMeshPathForMatch("meshes\\part.stl") !== "meshes/part.stl") {
   throw new Error("Browser entry mesh-path normalization failed its smoke assertion.");
+}
+if (!imported.hasXacroSyntax('<robot xmlns:xacro="http://ros.org/wiki/xacro"></robot>')) {
+  throw new Error("Browser entry xacro-syntax detection failed its smoke assertion.");
+}
+const safeParsed = imported.parsePlainUrdfDocument(sampleUrdf, {
+  maxBytes: 1024,
+  maxDepth: 8,
+  rejectXacro: true,
+});
+if (!safeParsed.success || !safeParsed.document) {
+  throw new Error("Browser entry safe plain-URDF parsing failed its smoke assertion.");
+}
+if (!imported.findNamedUrdfElement(safeParsed.document, "joint", "fixed_joint")) {
+  throw new Error("Browser entry named-element lookup failed its smoke assertion.");
 }
 
 console.log("ilu browser entry check passed.");
