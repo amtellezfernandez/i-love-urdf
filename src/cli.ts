@@ -19,6 +19,7 @@ import {
   normalizeJointAxes,
   parseMeshReference,
   parseGitHubRepositoryReference,
+  prepareMujocoMeshes,
   prettyPrintURDF,
   repairGitHubRepositoryMeshReferences,
   removeJointsFromUrdf,
@@ -63,6 +64,7 @@ const SUPPORTED_COMMANDS = [
   "rename-link",
   "inspect-repo",
   "repair-mesh-refs",
+  "prepare-mujoco-meshes",
 ] as const;
 
 type SupportedCommandName = (typeof SUPPORTED_COMMANDS)[number];
@@ -90,6 +92,7 @@ type CommandName =
   | "rename-link"
   | "inspect-repo"
   | "repair-mesh-refs"
+  | "prepare-mujoco-meshes"
   | "help";
 
 type ArgMap = Map<string, string | boolean>;
@@ -246,6 +249,7 @@ const printHelp = () => {
       "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
       "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
       "  repair-mesh-refs --local <repo|urdf-path> | --github <owner/repo|url> [--urdf <repo-path>] [--ref <branch>] [--path <subdir>] [--token <token>] [--out <path>]",
+      "  prepare-mujoco-meshes --mesh-dir <path> [--max-faces <n>] [--in-place | --out-dir <path>]",
       "",
       "All commands print JSON to stdout.",
     ].join("\n")
@@ -520,6 +524,24 @@ const run = async () => {
 
     writeOutIfRequested(outPath, result.content);
     console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "prepare-mujoco-meshes") {
+    const meshDir = requireStringArg(args, "mesh-dir");
+    const outDir = getOptionalStringArg(args, "out-dir");
+    const inPlace = Boolean(args.get("in-place"));
+    const maxFaces = getOptionalNumberArg(args, "max-faces");
+    if (inPlace && outDir) {
+      fail("prepare-mujoco-meshes accepts either --in-place or --out-dir, not both.");
+    }
+    const result = prepareMujocoMeshes({
+      meshDir,
+      maxFaces,
+      inPlace,
+      outDir,
+    });
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
 

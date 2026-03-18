@@ -41,6 +41,7 @@ i-love-urdf reassign-joint --urdf robot.urdf --joint elbow_joint --parent upper_
 i-love-urdf set-material-color --urdf robot.urdf --link base_link --material base_red --color '#ff0033' --out robot.red.urdf
 i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
 i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
+i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes --in-place
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
 i-love-urdf load-source --path ./robot.urdf
 i-love-urdf load-source --path ./robot.urdf.xacro --out robot.urdf
@@ -49,8 +50,8 @@ i-love-urdf load-source --github owner/repo --entry urdf/robot.urdf.xacro --out 
 i-love-urdf probe-xacro-runtime
 i-love-urdf setup-xacro-runtime
 i-love-urdf xacro-to-urdf --xacro robot.urdf.xacro --out robot.urdf
-i-love-urdf xacro-to-urdf --local ./my-robot-repo --xacro robots/arm.urdf.xacro --out robots/arm.urdf
-i-love-urdf xacro-to-urdf --github owner/repo --xacro robots/arm.urdf.xacro --out robots/arm.urdf
+i-love-urdf xacro-to-urdf --local ./my-robot-repo --entry robots/arm.urdf.xacro --out robots/arm.urdf
+i-love-urdf xacro-to-urdf --github owner/repo --entry robots/arm.urdf.xacro --out robots/arm.urdf
 i-love-urdf inspect-repo --local ./my-robot-repo
 i-love-urdf inspect-repo --github owner/repo
 i-love-urdf repair-mesh-refs --local ./my-robot-repo --urdf robots/arm.urdf --out robots/arm.fixed.urdf
@@ -63,6 +64,12 @@ Repository flow:
 
 1. `inspect-repo` to identify likely URDF/Xacro entrypoints.
 2. Use the returned candidate path with `repair-mesh-refs`, `validate`, `urdf-to-mjcf`, or any other command.
+
+MuJoCo flow:
+
+1. `load-source` or `xacro-to-urdf` to get a resolved URDF.
+2. `urdf-to-mjcf` to generate MJCF.
+3. `prepare-mujoco-meshes` on the mesh directory if any STL assets are too heavy for MuJoCo.
 
 ## Example
 
@@ -107,6 +114,7 @@ async function main() {
 - Analysis: inertials, collisions, mesh reference analysis
 - Conversion: URDF to MJCF, URDF to XACRO, runtime-backed XACRO to URDF, XACRO request/response helpers
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
+- MuJoCo prep: binary STL inspection and MuJoCo mesh-face-limit repair for heavy mesh sets
 - Repository: candidate discovery, package/dependency name extraction, repository package helpers, generic source inspection, local/GitHub repo inspection, repo-aware mesh reference repair
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
@@ -131,6 +139,20 @@ For Node usage:
 ```ts
 import { loadSourceFromPath, loadSourceFromGitHub } from "i-love-urdf/load-source-node";
 ```
+
+## MuJoCo Mesh Prep
+
+MuJoCo rejects STL meshes above its face limit. `prepare-mujoco-meshes` scans a mesh directory and rewrites only the over-limit binary STL files.
+
+Examples:
+
+```sh
+i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes
+i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes --in-place
+i-love-urdf prepare-mujoco-meshes --mesh-dir ./meshes --out-dir ./meshes.mujoco
+```
+
+The no-write form is a dry run. `--in-place` rewrites the mesh directory directly. `--out-dir` copies the full mesh tree and only rewrites the heavy STL files in the output directory.
 
 ## Runtime Note
 

@@ -14,6 +14,7 @@ const lib = await import(path.join(root, "dist", "index.js"));
 const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
 const loadSourceNode = await import(path.join(root, "dist", "sources", "loadSourceNode.js"));
 const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
+const mujocoMeshPrep = await import(path.join(root, "dist", "mesh", "mujocoMeshPrep.js"));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.DOMParser = dom.window.DOMParser;
@@ -198,6 +199,38 @@ if (
   throw new Error("i-love-urdf wrong-path mesh repair smoke test failed");
 }
 
+const binaryMeshPath = path.join(tempRepo, "meshes", "binary.stl");
+const header = Buffer.alloc(80, 0x20);
+Buffer.from("smoke-binary-stl").copy(header);
+const triangleRecords = Buffer.alloc(84 + 2 * 50);
+header.copy(triangleRecords, 0);
+triangleRecords.writeUInt32LE(2, 80);
+const triangleData = [
+  [0, 0, 0, 1, 0, 0, 0, 1, 0],
+  [0.0001, 0, 0, 1.0001, 0, 0, 0.0001, 1, 0],
+];
+let triangleOffset = 84;
+for (const triangle of triangleData) {
+  triangleOffset += 12;
+  for (const value of triangle) {
+    triangleRecords.writeFloatLE(value, triangleOffset);
+    triangleOffset += 4;
+  }
+  triangleOffset += 2;
+}
+fs.writeFileSync(binaryMeshPath, triangleRecords);
+
+const mujocoMeshPrepResult = mujocoMeshPrep.prepareMujocoMeshes({
+  meshDir: path.join(tempRepo, "meshes"),
+  maxFaces: 1,
+});
+if (
+  mujocoMeshPrepResult.overLimit !== 1 ||
+  !mujocoMeshPrepResult.results[0]?.reason?.includes("MuJoCo STL face limit")
+) {
+  throw new Error("i-love-urdf MuJoCo mesh prep smoke test failed");
+}
+
 const xacroRuntime = await xacroNode.probeXacroRuntime({
   pythonExecutable: process.env.I_LOVE_URDF_XACRO_PYTHON,
 });
@@ -279,7 +312,8 @@ const cliSource = fs.readFileSync(path.join(root, "dist", "cli.js"), "utf8");
 if (
   !cliSource.includes("setup-xacro-runtime") ||
   !cliSource.includes("load-source") ||
-  !cliSource.includes("--entry <repo-path>")
+  !cliSource.includes("--entry <repo-path>") ||
+  !cliSource.includes("prepare-mujoco-meshes")
 ) {
   throw new Error("i-love-urdf CLI surface smoke test failed");
 }

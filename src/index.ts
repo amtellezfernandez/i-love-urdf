@@ -17,6 +17,8 @@ export * from "./formats/extensionSupport";
 export * from "./mesh/meshPaths";
 export * from "./mesh/meshFormats";
 export * from "./mesh/fixMeshPaths";
+export * from "./mesh/stlBinary";
+export * from "./mesh/mujocoMeshPrep";
 export * from "./repository/repositoryMeshResolution";
 export * from "./repository/repositoryInspection";
 export * from "./repository/repositoryUrdfDiscovery";

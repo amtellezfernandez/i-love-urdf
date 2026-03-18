@@ -86,6 +86,76 @@ function rpyToQuat(rpy: number[]): number[] {
   return [w, x, y, z];
 }
 
+function rpyToRotationMatrix(rpy: number[]): number[][] {
+  const [roll, pitch, yaw] = rpy;
+  const cr = Math.cos(roll);
+  const sr = Math.sin(roll);
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+
+  return [
+    [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+    [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+    [-sp, cp * sr, cp * cr],
+  ];
+}
+
+function multiplyMatrix3(a: number[][], b: number[][]): number[][] {
+  const out = Array.from({ length: 3 }, () => [0, 0, 0]);
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      let value = 0;
+      for (let inner = 0; inner < 3; inner += 1) {
+        value += a[row][inner] * b[inner][col];
+      }
+      out[row][col] = value;
+    }
+  }
+  return out;
+}
+
+function transposeMatrix3(matrix: number[][]): number[][] {
+  return [
+    [matrix[0][0], matrix[1][0], matrix[2][0]],
+    [matrix[0][1], matrix[1][1], matrix[2][1]],
+    [matrix[0][2], matrix[1][2], matrix[2][2]],
+  ];
+}
+
+function rotateInertiaToLinkFrame(
+  inertia: NonNullable<LinkData["inertial"]>["inertia"],
+  rpy: number[]
+) {
+  const local = [
+    [inertia.ixx, inertia.ixy, inertia.ixz],
+    [inertia.ixy, inertia.iyy, inertia.iyz],
+    [inertia.ixz, inertia.iyz, inertia.izz],
+  ];
+  const rotation = rpyToRotationMatrix(rpy);
+  const rotated = multiplyMatrix3(multiplyMatrix3(rotation, local), transposeMatrix3(rotation));
+  return {
+    ixx: rotated[0][0],
+    iyy: rotated[1][1],
+    izz: rotated[2][2],
+    ixy: rotated[0][1],
+    ixz: rotated[0][2],
+    iyz: rotated[1][2],
+  };
+}
+
+function inertialToMJCF(indent: string, inertial: NonNullable<LinkData["inertial"]>): string {
+  const ipos = inertial.origin.xyz.join(" ");
+  const rotated = rotateInertiaToLinkFrame(inertial.inertia, inertial.origin.rpy);
+  return (
+    `${indent}<inertial pos="${ipos}" ` +
+    `mass="${inertial.mass.toFixed(6)}" ` +
+    `fullinertia="${rotated.ixx.toFixed(6)} ${rotated.iyy.toFixed(6)} ${rotated.izz.toFixed(6)} ` +
+    `${rotated.ixy.toFixed(6)} ${rotated.ixz.toFixed(6)} ${rotated.iyz.toFixed(6)}"/>`
+  );
+}
+
 /**
  * Parses a link element from URDF
  */
@@ -360,17 +430,7 @@ function generateBody(
 
   // Add inertial properties
   if (link.inertial) {
-    const inertial = link.inertial;
-    const ipos = inertial.origin.xyz.join(" ");
-    const iquat = rpyToQuat(inertial.origin.rpy)
-      .map((v) => v.toFixed(6))
-      .join(" ");
-
-    // MuJoCo uses full inertia matrix (diagonal and products)
-    xml += `${indent}  <inertial pos="${ipos}" quat="${iquat}" `;
-    xml += `mass="${inertial.mass.toFixed(6)}" `;
-    xml += `fullinertia="${inertial.inertia.ixx.toFixed(6)} ${inertial.inertia.iyy.toFixed(6)} ${inertial.inertia.izz.toFixed(6)} `;
-    xml += `${inertial.inertia.ixy.toFixed(6)} ${inertial.inertia.ixz.toFixed(6)} ${inertial.inertia.iyz.toFixed(6)}"/>\n`;
+    xml += `${inertialToMJCF(`${indent}  `, link.inertial)}\n`;
   }
 
   // Add visual geometries
@@ -420,16 +480,7 @@ function generateBody(
     if (childLinkData) {
       // Add inertial for child
       if (childLinkData.inertial) {
-        const inertial = childLinkData.inertial;
-        const ipos = inertial.origin.xyz.join(" ");
-        const iquat = rpyToQuat(inertial.origin.rpy)
-          .map((v) => v.toFixed(6))
-          .join(" ");
-
-        xml += `${indent}    <inertial pos="${ipos}" quat="${iquat}" `;
-        xml += `mass="${inertial.mass.toFixed(6)}" `;
-        xml += `fullinertia="${inertial.inertia.ixx.toFixed(6)} ${inertial.inertia.iyy.toFixed(6)} ${inertial.inertia.izz.toFixed(6)} `;
-        xml += `${inertial.inertia.ixy.toFixed(6)} ${inertial.inertia.ixz.toFixed(6)} ${inertial.inertia.iyz.toFixed(6)}"/>\n`;
+        xml += `${inertialToMJCF(`${indent}    `, childLinkData.inertial)}\n`;
       }
 
       // Add geometries for child
@@ -510,16 +561,7 @@ function generateBodyRecursive(
 
   // Add inertial
   if (childLink.inertial) {
-    const inertial = childLink.inertial;
-    const ipos = inertial.origin.xyz.join(" ");
-    const iquat = rpyToQuat(inertial.origin.rpy)
-      .map((v) => v.toFixed(6))
-      .join(" ");
-
-    xml += `${indent}  <inertial pos="${ipos}" quat="${iquat}" `;
-    xml += `mass="${inertial.mass.toFixed(6)}" `;
-    xml += `fullinertia="${inertial.inertia.ixx.toFixed(6)} ${inertial.inertia.iyy.toFixed(6)} ${inertial.inertia.izz.toFixed(6)} `;
-    xml += `${inertial.inertia.ixy.toFixed(6)} ${inertial.inertia.ixz.toFixed(6)} ${inertial.inertia.iyz.toFixed(6)}"/>\n`;
+    xml += `${inertialToMJCF(`${indent}  `, childLink.inertial)}\n`;
   }
 
   // Add geometries
@@ -662,16 +704,7 @@ export function convertURDFToMJCF(urdfContent: string): MJCFConversionResult {
 
     // Add inertial for root
     if (rootLink.inertial) {
-      const inertial = rootLink.inertial;
-      const ipos = inertial.origin.xyz.join(" ");
-      const iquat = rpyToQuat(inertial.origin.rpy)
-        .map((v) => v.toFixed(6))
-        .join(" ");
-
-      mjcf += `      <inertial pos="${ipos}" quat="${iquat}" `;
-      mjcf += `mass="${inertial.mass.toFixed(6)}" `;
-      mjcf += `fullinertia="${inertial.inertia.ixx.toFixed(6)} ${inertial.inertia.iyy.toFixed(6)} ${inertial.inertia.izz.toFixed(6)} `;
-      mjcf += `${inertial.inertia.ixy.toFixed(6)} ${inertial.inertia.ixz.toFixed(6)} ${inertial.inertia.iyz.toFixed(6)}"/>\n`;
+      mjcf += `${inertialToMJCF("      ", rootLink.inertial)}\n`;
     }
 
     // Add geometries for root
