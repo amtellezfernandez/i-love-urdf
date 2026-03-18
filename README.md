@@ -21,6 +21,13 @@ npm install
 npm run build
 ```
 
+For Xacro expansion, install a Python runtime too:
+
+```sh
+python3 -m pip install xacro
+i-love-urdf probe-xacro-runtime --python "$(which python3)"
+```
+
 ## CLI
 
 ```sh
@@ -35,6 +42,7 @@ i-love-urdf set-material-color --urdf robot.urdf --link base_link --material bas
 i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
 i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
+i-love-urdf probe-xacro-runtime --python /path/to/python
 i-love-urdf xacro-to-urdf --xacro robot.urdf.xacro --python /path/to/python --out robot.urdf
 i-love-urdf xacro-to-urdf --local ./my-robot-repo --xacro robots/arm.urdf.xacro --python /path/to/python --out robots/arm.urdf
 i-love-urdf xacro-to-urdf --github owner/repo --xacro robots/arm.urdf.xacro --python /path/to/python --out robots/arm.urdf
@@ -106,6 +114,12 @@ Some XML-oriented APIs rely on `DOMParser` and `XMLSerializer`. Browsers already
 
 - a Python interpreter with `xacro` installed
 - a vendored `xacrodoc` wheel pointed to by `I_LOVE_URDF_XACRODOC_WHEEL`
+
+Check that setup with:
+
+```sh
+i-love-urdf probe-xacro-runtime --python /path/to/python
+```
 
 For local verification in this workspace, I used:
 

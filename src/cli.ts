@@ -34,6 +34,7 @@ import { parseXml } from "./xmlDom";
 import {
   expandGitHubRepositoryXacro,
   expandLocalXacroToUrdf,
+  probeXacroRuntime,
 } from "./xacro/xacroNode";
 
 const SUPPORTED_COMMANDS = [
@@ -53,6 +54,7 @@ const SUPPORTED_COMMANDS = [
   "urdf-to-mjcf",
   "urdf-to-xacro",
   "xacro-to-urdf",
+  "probe-xacro-runtime",
   "rename-joint",
   "rename-link",
   "inspect-repo",
@@ -77,6 +79,7 @@ type CommandName =
   | "urdf-to-mjcf"
   | "urdf-to-xacro"
   | "xacro-to-urdf"
+  | "probe-xacro-runtime"
   | "rename-joint"
   | "rename-link"
   | "inspect-repo"
@@ -226,6 +229,7 @@ const printHelp = () => {
       "  mesh-to-assets --urdf <path> [--out <path>]",
       "  urdf-to-mjcf --urdf <path> [--out <path>]",
       "  urdf-to-xacro --urdf <path> [--out <path>]",
+      "  probe-xacro-runtime [--python <path>] [--wheel <path>]",
       "  xacro-to-urdf --xacro <path> [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  xacro-to-urdf --local <repo> --xacro <repo-path> [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  xacro-to-urdf --github <owner/repo|url> --xacro <repo-path> [--ref <branch>] [--path <subdir>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
@@ -370,6 +374,15 @@ const run = async () => {
 
     writeOutIfRequested(outPath, result.urdf);
     console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "probe-xacro-runtime") {
+    const result = await probeXacroRuntime({
+      pythonExecutable: getOptionalStringArg(args, "python"),
+      wheelPath: getOptionalStringArg(args, "wheel"),
+    });
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
 
