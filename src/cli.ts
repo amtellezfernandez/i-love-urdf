@@ -452,7 +452,7 @@ const printHelp = () => {
 
   console.log(
     [
-      "ilu CLI (legacy alias: i-love-urdf)",
+      "ilu CLI",
       "",
       "Source-first workflow:",
       "  1. load-source or inspect-repo",
