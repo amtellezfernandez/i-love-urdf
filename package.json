@@ -2,6 +2,7 @@
   "name": "i-love-urdf",
   "version": "0.1.11",
   "type": "commonjs",
+  "packageManager": "pnpm@10.32.1",
   "private": false,
   "description": "Core URDF parsing, validation, transform, mesh, and conversion utilities.",
   "main": "./dist/index.js",
@@ -13,9 +14,9 @@
     "i-love-urdf": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p ./tsconfig.build.json && node ./scripts/postbuild.mjs",
-    "prepare": "npm run build",
-    "setup:xacro": "npm run build && node ./dist/cli.js setup-xacro-runtime",
+    "build": "node ./scripts/build-package.mjs",
+    "prepare": "node ./scripts/build-package.mjs",
+    "setup:xacro": "node ./scripts/build-package.mjs && node ./dist/cli.js setup-xacro-runtime",
     "smoke": "node ./scripts/smoke-cli.mjs"
   },
   "dependencies": {
@@ -38,7 +39,8 @@
   "homepage": "https://github.com/amtellezfernandez/i-love-urdf",
   "license": "SEE LICENSE IN LICENSE",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.6 <21",
+    "pnpm": ">=10.32.1 <11"
   },
   "exports": {
     ".": {

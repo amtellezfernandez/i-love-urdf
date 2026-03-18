@@ -8,7 +8,10 @@ import { JSDOM } from "jsdom";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
-execFileSync("npm", ["run", "build"], { stdio: "inherit", cwd: root, shell: true });
+execFileSync(process.execPath, [path.join(root, "scripts", "build-package.mjs")], {
+  stdio: "inherit",
+  cwd: root,
+});
 
 const lib = await import(path.join(root, "dist", "index.js"));
 const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));

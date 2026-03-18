@@ -30,15 +30,16 @@ Some parts of `i-love-urdf` are adapted from upstream code and that should stay 
 
 Requirements:
 
-- Node.js 20 or newer
-- npm, which is usually installed with Node.js already
+- Node.js 20.19.6
+- Corepack enabled so the repo can provision its pinned `pnpm`
 
-If `npm` is missing on your machine, install or update Node.js first, then run:
+Then run:
 
 ```sh
-npm install
-npm run build
-npm run setup:xacro
+corepack enable
+pnpm install
+pnpm build
+pnpm setup:xacro
 ```
 
 Check the managed XACRO runtime:
@@ -192,7 +193,7 @@ Some XML-oriented APIs rely on `DOMParser` and `XMLSerializer`. Browsers already
 Default standalone flow:
 
 ```sh
-npm run setup:xacro
+pnpm setup:xacro
 i-love-urdf probe-xacro-runtime
 ```
 
