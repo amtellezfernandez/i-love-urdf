@@ -17,6 +17,9 @@ Requirements:
 # optional: use the maintainer baseline (.nvmrc / .node-version / .tool-versions / Volta)
 corepack enable
 pnpm install
+
+# optional: enable local XACRO expansion once per clone
+pnpm setup:xacro
 pnpm ilu probe-xacro-runtime
 ```
 
@@ -75,8 +78,8 @@ console.log(validation.isValid, mjcf.stats.bodiesCreated);
 `pnpm setup:xacro` creates a managed runtime under `.i-love-urdf/xacro-runtime`.
 
 ```sh
+pnpm setup:xacro
 pnpm ilu probe-xacro-runtime
-pnpm ilu setup-xacro-runtime
 ```
 
 ## License
