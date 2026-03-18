@@ -128,6 +128,18 @@ if (
 ) {
   throw new Error("ilu repository xacro target resolution smoke test failed");
 }
+const xacroPayload = lib.buildXacroExpandRequestPayload({
+  targetPath: "ur_description/urdf/ur12e.urdf.xacro",
+  files: [lib.createXacroFilePayloadFromText("ur_description/urdf/ur12e.urdf.xacro", "<robot/>")],
+  args: {},
+  useInorder: true,
+});
+if (
+  !xacroPayload.files.some((file) => file.path === "ur_description/urdf/ur12e.xacro") ||
+  !xacroPayload.files.some((file) => file.path === "ur_description/urdf/ur12e.urdf.xacro")
+) {
+  throw new Error("ilu xacro payload alias expansion smoke test failed");
+}
 const inspectedCandidates = await browserLib.inspectRepositoryCandidates(
   [{ path: "robot.urdf", name: "robot.urdf", hasMeshesFolder: false }],
   [{ path: "robot.urdf", name: "robot.urdf", type: "file" }],

@@ -30,6 +30,8 @@ export type XacroExpandResponsePayload = {
   detail?: string;
 };
 
+const normalizeXacroPayloadPath = (path: string): string => path.replace(/\\/g, "/");
+
 const encodeBase64FromBytes = (bytes: Uint8Array): string => {
   let binary = "";
   for (const byte of bytes) {
@@ -94,6 +96,60 @@ export const createXacroFilePayloadFromBytes = (path: string, bytes: Uint8Array)
 export const createXacroFilePayloadFromText = (path: string, content: string): XacroFilePayload =>
   createXacroFilePayloadFromBytes(path, toUtf8Bytes(content));
 
+const buildXacroPayloadPathAliases = (path: string): string[] => {
+  const normalizedPath = normalizeXacroPayloadPath(path);
+  const fileName = normalizedPath.split("/").pop() || normalizedPath;
+  if (!isXacroPath(fileName)) {
+    return [normalizedPath];
+  }
+
+  const lastSlash = normalizedPath.lastIndexOf("/");
+  const directory = lastSlash >= 0 ? normalizedPath.slice(0, lastSlash) : "";
+  const prefix = directory ? `${directory}/` : "";
+  const stem = fileName.replace(/(\.urdf)?\.xacro$/i, "");
+
+  if (isUrdfXacroPath(fileName)) {
+    return [normalizedPath, `${prefix}${stem}.xacro`];
+  }
+  return [normalizedPath, `${prefix}${stem}.urdf.xacro`];
+};
+
+const expandXacroPayloadFiles = (files: XacroFilePayload[]): XacroFilePayload[] => {
+  const explicitPaths = new Set<string>();
+  const normalizedFiles: XacroFilePayload[] = [];
+
+  for (const file of files) {
+    const normalizedPath = normalizeXacroPayloadPath(file.path);
+    const normalizedKey = normalizedPath.toLowerCase();
+    if (explicitPaths.has(normalizedKey)) continue;
+    explicitPaths.add(normalizedKey);
+    normalizedFiles.push(
+      normalizedPath === file.path
+        ? file
+        : {
+            ...file,
+            path: normalizedPath,
+          }
+    );
+  }
+
+  const expandedFiles = [...normalizedFiles];
+  const seenPaths = new Set(explicitPaths);
+  for (const file of normalizedFiles) {
+    for (const aliasPath of buildXacroPayloadPathAliases(file.path).slice(1)) {
+      const aliasKey = aliasPath.toLowerCase();
+      if (seenPaths.has(aliasKey)) continue;
+      seenPaths.add(aliasKey);
+      expandedFiles.push({
+        ...file,
+        path: aliasPath,
+      });
+    }
+  }
+
+  return expandedFiles;
+};
+
 export const buildXacroExpandRequestPayload = ({
   targetPath,
   files,
@@ -105,8 +161,8 @@ export const buildXacroExpandRequestPayload = ({
   args?: Record<string, string>;
   useInorder?: boolean;
 }): XacroExpandRequestPayload => ({
-  target_path: targetPath,
-  files,
+  target_path: normalizeXacroPayloadPath(targetPath),
+  files: expandXacroPayloadFiles(files),
   args: args ?? DEFAULT_XACRO_ARGS,
   use_inorder: useInorder,
 });
