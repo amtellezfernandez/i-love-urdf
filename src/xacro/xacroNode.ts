@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import * as path from "node:path";
 import * as process from "node:process";
 import { spawn } from "node:child_process";
@@ -37,11 +38,21 @@ export type XacroRuntimeOptions = {
   helperScriptPath?: string;
 };
 
+export type SetupXacroRuntimeOptions = XacroRuntimeOptions & {
+  venvPath?: string;
+  bootstrapPythonExecutable?: string;
+};
+
 export type XacroRuntimeAvailability = {
   available: boolean;
   runtime?: XacroRuntimeName;
   error?: string;
   pythonExecutable: string;
+};
+
+export type SetupXacroRuntimeResult = XacroRuntimeAvailability & {
+  venvPath: string;
+  bootstrapPythonExecutable: string;
 };
 
 export type XacroExpandResult = {
@@ -100,6 +111,55 @@ type PythonHelperPayload = PythonHelperSuccessPayload | PythonHelperFailurePaylo
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const LATIN1_DECODER = new TextDecoder("latin1");
 const MAX_GITHUB_DEPENDENCY_ITERATIONS = 3;
+const MANAGED_XACRO_RUNTIME_SUBPATH = path.join(".i-love-urdf", "xacro-runtime");
+const PACKAGE_ROOT_PATH = path.resolve(__dirname, "..", "..");
+
+const getVenvPythonCandidatePaths = (venvPath: string): string[] => [
+  path.join(venvPath, "bin", "python"),
+  path.join(venvPath, "Scripts", "python.exe"),
+];
+
+const getExistingVenvPythonPath = (venvPath: string): string | undefined =>
+  getVenvPythonCandidatePaths(venvPath).find((candidatePath) => fsSync.existsSync(candidatePath));
+
+const getManagedRuntimeSearchRoots = (): string[] => {
+  const seen = new Set<string>();
+  const roots: string[] = [];
+
+  const pushRoot = (candidate: string | undefined) => {
+    if (!candidate) return;
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    roots.push(resolved);
+  };
+
+  let cursor = path.resolve(process.cwd());
+  while (true) {
+    pushRoot(cursor);
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+
+  pushRoot(PACKAGE_ROOT_PATH);
+  return roots;
+};
+
+const getManagedRuntimePythonPath = (): string | undefined => {
+  const envHome = process.env.I_LOVE_URDF_XACRO_HOME?.trim();
+  if (envHome) {
+    const envPython = getExistingVenvPythonPath(path.resolve(envHome));
+    if (envPython) return envPython;
+  }
+
+  for (const rootPath of getManagedRuntimeSearchRoots()) {
+    const candidate = getExistingVenvPythonPath(path.join(rootPath, MANAGED_XACRO_RUNTIME_SUBPATH));
+    if (candidate) return candidate;
+  }
+
+  return undefined;
+};
 
 const decodeSupportText = (bytes: Uint8Array): string => {
   try {
@@ -111,6 +171,14 @@ const decodeSupportText = (bytes: Uint8Array): string => {
 
 const getPythonExecutable = (options?: XacroRuntimeOptions): string =>
   options?.pythonExecutable?.trim() ||
+  process.env.I_LOVE_URDF_XACRO_PYTHON ||
+  getManagedRuntimePythonPath() ||
+  "python3";
+
+const getBootstrapPythonExecutable = (options?: SetupXacroRuntimeOptions): string =>
+  options?.bootstrapPythonExecutable?.trim() ||
+  options?.pythonExecutable?.trim() ||
+  process.env.I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON ||
   process.env.I_LOVE_URDF_XACRO_PYTHON ||
   "python3";
 
@@ -127,6 +195,50 @@ const buildRuntimeEnv = (options?: XacroRuntimeOptions): NodeJS.ProcessEnv => {
   }
   return env;
 };
+
+const getManagedVenvPath = (options?: SetupXacroRuntimeOptions): string =>
+  path.resolve(options?.venvPath?.trim() || path.join(process.cwd(), MANAGED_XACRO_RUNTIME_SUBPATH));
+
+const runProcess = async (
+  executable: string,
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}
+): Promise<{ stdout: string; stderr: string }> =>
+  new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      reject(new Error(`Failed to launch ${executable}: ${error.message}`));
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(
+        new Error(
+          stderr.trim() ||
+            stdout.trim() ||
+            `${executable} ${args.join(" ")} failed${code !== null ? ` with exit ${code}` : ""}.`
+        )
+      );
+    });
+  });
 
 const runPythonHelper = async (
   payload: Record<string, unknown>,
@@ -203,6 +315,44 @@ export const probeXacroRuntime = async (
       pythonExecutable: getPythonExecutable(options),
     };
   }
+};
+
+export const setupXacroRuntime = async (
+  options: SetupXacroRuntimeOptions = {}
+): Promise<SetupXacroRuntimeResult> => {
+  const bootstrapPythonExecutable = getBootstrapPythonExecutable(options);
+  const venvPath = getManagedVenvPath(options);
+
+  await fs.mkdir(path.dirname(venvPath), { recursive: true });
+  await runProcess(bootstrapPythonExecutable, ["-m", "venv", venvPath], {
+    env: buildRuntimeEnv(options),
+  });
+
+  const managedPythonExecutable = getExistingVenvPythonPath(venvPath);
+  if (!managedPythonExecutable) {
+    throw new Error(`Created virtualenv but could not find its Python executable: ${venvPath}`);
+  }
+
+  await runProcess(managedPythonExecutable, ["-m", "ensurepip", "--upgrade"], {
+    env: buildRuntimeEnv(options),
+  });
+  await runProcess(managedPythonExecutable, ["-m", "pip", "install", "--upgrade", "xacro"], {
+    env: buildRuntimeEnv(options),
+  });
+
+  const probeResult = await probeXacroRuntime({
+    ...options,
+    pythonExecutable: managedPythonExecutable,
+  });
+  if (!probeResult.available) {
+    throw new Error(probeResult.error || "Managed Xacro runtime setup did not produce a usable runtime.");
+  }
+
+  return {
+    ...probeResult,
+    venvPath,
+    bootstrapPythonExecutable,
+  };
 };
 
 export const expandXacroRequestPayload = async (

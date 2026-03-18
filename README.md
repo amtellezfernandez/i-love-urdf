@@ -19,13 +19,13 @@ Some parts of `i-love-urdf` are adapted from upstream code and that should stay 
 ```sh
 npm install
 npm run build
+npm run setup:xacro
 ```
 
-For Xacro expansion, install a Python runtime too:
+Check the managed runtime:
 
 ```sh
-python3 -m pip install xacro
-i-love-urdf probe-xacro-runtime --python "$(which python3)"
+i-love-urdf probe-xacro-runtime
 ```
 
 ## CLI
@@ -42,10 +42,11 @@ i-love-urdf set-material-color --urdf robot.urdf --link base_link --material bas
 i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
 i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
-i-love-urdf probe-xacro-runtime --python /path/to/python
-i-love-urdf xacro-to-urdf --xacro robot.urdf.xacro --python /path/to/python --out robot.urdf
-i-love-urdf xacro-to-urdf --local ./my-robot-repo --xacro robots/arm.urdf.xacro --python /path/to/python --out robots/arm.urdf
-i-love-urdf xacro-to-urdf --github owner/repo --xacro robots/arm.urdf.xacro --python /path/to/python --out robots/arm.urdf
+i-love-urdf probe-xacro-runtime
+i-love-urdf setup-xacro-runtime
+i-love-urdf xacro-to-urdf --xacro robot.urdf.xacro --out robot.urdf
+i-love-urdf xacro-to-urdf --local ./my-robot-repo --xacro robots/arm.urdf.xacro --out robots/arm.urdf
+i-love-urdf xacro-to-urdf --github owner/repo --xacro robots/arm.urdf.xacro --out robots/arm.urdf
 i-love-urdf inspect-repo --local ./my-robot-repo
 i-love-urdf inspect-repo --github owner/repo
 i-love-urdf repair-mesh-refs --local ./my-robot-repo --urdf robots/arm.urdf --out robots/arm.fixed.urdf
@@ -88,7 +89,6 @@ async function main() {
   const expanded = await expandLocalXacroToUrdf({
     xacroPath: "./robot.urdf.xacro",
     rootPath: ".",
-    pythonExecutable: "/path/to/python",
   });
   const customSummary = await inspectRepositoryFiles(files, readTextForMySource);
 }
@@ -110,7 +110,18 @@ async function main() {
 
 Some XML-oriented APIs rely on `DOMParser` and `XMLSerializer`. Browsers already provide these globals. In Node.js environments, install DOM globals before calling those APIs.
 
-`xacro-to-urdf` is different: it is runtime-backed and needs a Python Xacro runtime. The CLI and the `i-love-urdf/xacro-node` API can use either:
+`xacro-to-urdf` is different: it is runtime-backed and needs a Python Xacro runtime. `i-love-urdf` can manage that runtime in the current project for you.
+
+Default standalone flow:
+
+```sh
+npm run setup:xacro
+i-love-urdf probe-xacro-runtime
+```
+
+That installs a managed runtime under `.i-love-urdf/xacro-runtime`, and the CLI will auto-detect it from the current working directory or its parent directories.
+
+Advanced runtime options:
 
 - a Python interpreter with `xacro` installed
 - a vendored `xacrodoc` wheel pointed to by `I_LOVE_URDF_XACRODOC_WHEEL`
@@ -118,14 +129,14 @@ Some XML-oriented APIs rely on `DOMParser` and `XMLSerializer`. Browsers already
 Check that setup with:
 
 ```sh
+i-love-urdf probe-xacro-runtime
 i-love-urdf probe-xacro-runtime --python /path/to/python
 ```
 
-For local verification in this workspace, I used:
+Bootstrap the managed runtime explicitly with:
 
 ```sh
-i-love-urdf xacro-to-urdf \
-  --xacro robot.urdf.xacro \
-  --python /home/am/dev/urdf-studio/.venv/bin/python \
-  --out robot.urdf
+i-love-urdf setup-xacro-runtime
+i-love-urdf setup-xacro-runtime --python /path/to/python
+i-love-urdf setup-xacro-runtime --venv /custom/path/to/xacro-runtime
 ```

@@ -231,4 +231,9 @@ if (xacroRuntime.available) {
   }
 }
 
+const cliSource = fs.readFileSync(path.join(root, "dist", "cli.js"), "utf8");
+if (!cliSource.includes("setup-xacro-runtime")) {
+  throw new Error("i-love-urdf setup-xacro-runtime CLI help smoke test failed");
+}
+
 console.log("i-love-urdf smoke test passed.");
