@@ -10,19 +10,19 @@ The website docs live in `i-love-urdf-web`.
 
 Requirements:
 
-- Node.js 20.19.6
+- Node.js 20, 22, or 24
 - Corepack
 
 ```sh
-# use the pinned Node first (.nvmrc / .node-version)
+# optional: use the maintainer baseline (.nvmrc / .node-version / .tool-versions / Volta)
 corepack enable
 pnpm install
-pnpm build
-pnpm setup:xacro
-pnpm exec ilu probe-xacro-runtime
+pnpm ilu probe-xacro-runtime
 ```
 
-From a repo checkout, run the CLI as `pnpm exec ilu ...`.
+The repo is tested on Node `20.19.6`, but the package also supports current Node `22.x` and `24.x`.
+
+From a repo checkout, run the CLI as `pnpm ilu ...`.
 Use plain `ilu ...` only when the package is installed as a real CLI in your environment.
 
 ## Common CLI Commands
@@ -75,8 +75,8 @@ console.log(validation.isValid, mjcf.stats.bodiesCreated);
 `pnpm setup:xacro` creates a managed runtime under `.i-love-urdf/xacro-runtime`.
 
 ```sh
-pnpm exec ilu probe-xacro-runtime
-pnpm exec ilu setup-xacro-runtime
+pnpm ilu probe-xacro-runtime
+pnpm ilu setup-xacro-runtime
 ```
 
 ## License
