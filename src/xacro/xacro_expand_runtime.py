@@ -299,13 +299,16 @@ def main() -> int:
                     use_inorder=use_inorder,
                 )
             except XacroRuntimeError as primary_exc:
-                urdf, stderr, runtime = _expand_with_vendored_xacro(
-                    target_path=target_path,
-                    args={str(key): str(value) for key, value in args.items()},
-                    package_map=package_map,
-                    wheel_path=wheel_path,
-                    use_inorder=use_inorder,
-                )
+                try:
+                    urdf, stderr, runtime = _expand_with_vendored_xacro(
+                        target_path=target_path,
+                        args={str(key): str(value) for key, value in args.items()},
+                        package_map=package_map,
+                        wheel_path=wheel_path,
+                        use_inorder=use_inorder,
+                    )
+                except XacroRuntimeError:
+                    raise primary_exc
 
         _emit(
             {

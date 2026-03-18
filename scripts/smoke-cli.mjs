@@ -19,6 +19,7 @@ const localLib = await import(path.join(root, "dist", "repository", "localReposi
 const loadSourceNode = await import(path.join(root, "dist", "sources", "loadSourceNode.js"));
 const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
 const meshNode = await import(path.join(root, "dist", "mesh", "meshNode.js"));
+const urdfNode = await import(path.join(root, "dist", "node", "urdfNode.js"));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.DOMParser = dom.window.DOMParser;
@@ -81,6 +82,16 @@ const jointChainUrdf =
   "<joint name=\"j1\" type=\"revolute\"><parent link=\"base\"/><child link=\"mid\"/></joint>" +
   "<joint name=\"j2\" type=\"revolute\"><parent link=\"mid\"/><child link=\"tip\"/></joint></robot>";
 
+const fingerprintUrdf =
+  "<robot name=\"fingerprint_robot\"><link name=\"base\"/><link name=\"arm\"/>" +
+  "<joint name=\"joint_a\" type=\"revolute\"><parent link=\"base\"/><child link=\"arm\"/>" +
+  "<axis xyz=\"0 0 1\"/><origin xyz=\"0 0 0.1\" rpy=\"0 0 0\"/><limit lower=\"-1.57\" upper=\"1.57\"/></joint></robot>";
+
+const fingerprintRenamedUrdf =
+  "<robot name=\"fingerprint_robot_renamed\"><link name=\"foundation\"/><link name=\"tool\"/>" +
+  "<joint name=\"joint_b\" type=\"revolute\"><parent link=\"foundation\"/><child link=\"tool\"/>" +
+  "<axis xyz=\"0 0 1\"/><origin xyz=\"0 0 0.1\" rpy=\"0 0 0\"/><limit lower=\"-1.57\" upper=\"1.57\"/></joint></robot>";
+
 const cylinderVertices = [];
 for (const x of [-1, 1]) {
   for (let i = 0; i < 12; i += 1) {
@@ -139,6 +150,21 @@ if (
 const meshes = lib.fixMeshPaths(urdf);
 if (!meshes.urdfContent.includes("package://smoke_robot_description")) {
   throw new Error("ilu fix-mesh-paths smoke test failed");
+}
+
+const strippedForKinematics = urdfNode.stripUrdfForKinematics(urdf);
+if (strippedForKinematics.includes("<visual") || strippedForKinematics.includes("<mesh")) {
+  throw new Error("ilu strip-urdf-for-kinematics smoke test failed");
+}
+
+const canonicalFingerprint = urdfNode.computeKinematicFingerprint(fingerprintUrdf);
+const renamedFingerprint = urdfNode.computeKinematicFingerprint(fingerprintRenamedUrdf);
+if (
+  !canonicalFingerprint.strict ||
+  canonicalFingerprint.strict !== renamedFingerprint.strict ||
+  urdfNode.computeSha256Text("smoke") !== urdfNode.computeSha256Text("smoke")
+) {
+  throw new Error("ilu kinematic-fingerprint smoke test failed");
 }
 
 const renamedJoint = lib.renameJointInUrdf(urdf, "j", "hinge_joint");

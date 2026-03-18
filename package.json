@@ -70,6 +70,10 @@
       "types": "./dist/mesh/meshNode.d.ts",
       "default": "./dist/mesh/meshNode.js"
     },
+    "./urdf-node": {
+      "types": "./dist/node/urdfNode.d.ts",
+      "default": "./dist/node/urdfNode.js"
+    },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "import": "./dist/browser.mjs",
