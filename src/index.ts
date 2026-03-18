@@ -8,6 +8,8 @@ export * from "./parsing/parseLinkNames";
 export * from "./parsing/getJointLinks";
 
 export * from "./analysis/analyzeUrdf";
+export * from "./analysis/orientationCues";
+export * from "./analysis/guessOrientation";
 export * from "./transforms/urdfTransforms";
 export * from "./transforms/urdfEditing";
 export * from "./convert/urdfToMJCF";

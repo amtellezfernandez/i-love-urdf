@@ -31,7 +31,7 @@ export const TASK_FAMILIES: readonly TaskFamilyDefinition[] = [
     key: "analyze",
     title: "Analyze",
     summary: "Inspect robot structure, mesh references, and diffs.",
-    commands: ["analyze", "mesh-refs", "diff"],
+    commands: ["analyze", "guess-orientation", "mesh-refs", "diff"],
   },
   {
     key: "format",
@@ -44,12 +44,14 @@ export const TASK_FAMILIES: readonly TaskFamilyDefinition[] = [
     title: "Edit",
     summary: "Apply safe structural mutations to an existing URDF.",
     commands: [
+      "set-joint-axis",
       "rename-joint",
       "rename-link",
       "reassign-joint",
       "remove-joints",
       "set-material-color",
       "rotate-90",
+      "apply-orientation",
     ],
   },
   {

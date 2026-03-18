@@ -10,6 +10,13 @@ The package is now organized around a source-first flow:
 
 The website lives separately in `i-love-urdf-web` and should explain these workflows rather than duplicate implementation.
 
+## License
+
+`i-love-urdf` is source-available, not open-source. Use is governed by the
+repository [LICENSE](/home/am/dev/i-love-urdf/LICENSE), which is intentionally
+restrictive and does not grant redistribution, sublicensing, hosted-service,
+or derivative-work rights without separate written permission.
+
 ## Attribution
 
 Some parts of `i-love-urdf` are adapted from upstream code and that should stay explicit.
@@ -37,9 +44,9 @@ i-love-urdf probe-xacro-runtime
 
 - `Load Sources`: `load-source`, `inspect-repo`
 - `Validate`: `validate`
-- `Analyze`: `analyze`, `mesh-refs`, `diff`
+- `Analyze`: `analyze`, `guess-orientation`, `mesh-refs`, `diff`
 - `Format`: `pretty-print`, `canonical-order`, `normalize-axes`
-- `Edit`: `rename-joint`, `rename-link`, `reassign-joint`, `remove-joints`, `set-material-color`, `rotate-90`
+- `Edit`: `set-joint-axis`, `rename-joint`, `rename-link`, `reassign-joint`, `remove-joints`, `set-material-color`, `rotate-90`, `apply-orientation`
 - `Optimize`: `fix-mesh-paths`, `mesh-to-assets`, `repair-mesh-refs`, `inspect-meshes`, `compress-meshes`
 - `Convert`: `urdf-to-mjcf`, `urdf-to-xacro`, `xacro-to-urdf`
 
@@ -60,6 +67,9 @@ Then run tasks:
 ```sh
 i-love-urdf validate --urdf robot.urdf
 i-love-urdf analyze --urdf robot.urdf
+i-love-urdf guess-orientation --urdf robot.urdf
+i-love-urdf set-joint-axis --urdf robot.urdf --joint wheel_joint --xyz "0 1 0" --out robot.axis.urdf
+i-love-urdf apply-orientation --urdf robot.urdf --source-up +y --source-forward -z --target-up +z --target-forward +x --out robot.zup.urdf
 i-love-urdf pretty-print --urdf robot.urdf --out robot.pretty.urdf
 i-love-urdf rename-link --urdf robot.urdf --link tool --name tool0 --out robot.edited.urdf
 i-love-urdf inspect-meshes --mesh-dir ./meshes
@@ -74,6 +84,12 @@ Repository flow:
 1. `inspect-repo` to identify the likely URDF or XACRO entrypoint.
 2. `load-source` or `xacro-to-urdf` if you need one prepared URDF from that source.
 3. run validation, formatting, editing, optimization, or conversion commands on the prepared result.
+
+Orientation flow:
+
+1. `guess-orientation` to get likely `up`, `forward`, signed directions, and an evidence report.
+2. read `suggestedApplyOrientation.command` if you want the exact remap command.
+3. run `apply-orientation` only after checking whether the robot is a wheeled base, a serial arm, or a symmetric asset where forward can stay ambiguous.
 
 MuJoCo flow:
 
@@ -118,13 +134,14 @@ import { loadSourceFromGitHub } from "i-love-urdf/load-source-node";
 - Source loading: local file/repo or GitHub repo normalized into a prepared URDF result with metadata
 - Task helpers: loaded-source validation, analysis, formatting, comparison, and conversion helpers
 - Parsing: URDF document parsing, link/joint/sensor helpers, link name extraction
-- Analysis: inertials, collisions, mesh reference analysis
+- Analysis: inertials, collisions, mesh reference analysis, orientation guessing, and signed orientation evidence reports
 - Conversion: URDF to MJCF, URDF to XACRO, runtime-backed XACRO to URDF, XACRO request/response helpers
 - Mesh: mesh path parsing, mesh format checks, repository mesh resolution
 - Mesh compression: binary STL inspection and target-face-limit repair for heavy mesh sets
 - Repository: candidate discovery, package/dependency name extraction, repository package helpers, generic source inspection, local/GitHub repo inspection, repo-aware mesh reference repair
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
+- Orientation: axis guessing, explicit joint-axis editing, and base-frame orientation remapping
 - Validation: structural and semantic URDF validation
 
 ## Mesh Optimization

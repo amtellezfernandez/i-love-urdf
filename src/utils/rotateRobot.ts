@@ -1,12 +1,32 @@
 /**
- * Rotate the root link and its direct child joints by 90 degrees.
- * This maintains the relative structure while rotating the base frame.
+ * Rotate the robot base frame while preserving the internal kinematic tree.
+ *
+ * This works by rotating:
+ * - each root link's visual / collision / inertial data
+ * - joints whose parent is a root link
+ *
+ * Deeper joints and link-local geometry remain unchanged because their frames
+ * move consistently with the rotated root subtree.
  */
 
 import { parseXml, serializeXml } from "../xmlDom";
 
+export type AxisSpec =
+  | "x"
+  | "y"
+  | "z"
+  | "+x"
+  | "+y"
+  | "+z"
+  | "-x"
+  | "-y"
+  | "-z";
+
+type Vec3 = [number, number, number];
+type Mat3 = [Vec3, Vec3, Vec3];
+
 // Convert RPY (roll-pitch-yaw in radians) to rotation matrix
-function rpyToMatrix(rpy: { r: number; p: number; y: number }): number[][] {
+function rpyToMatrix(rpy: { r: number; p: number; y: number }): Mat3 {
   const [r, p, y] = [rpy.r, rpy.p, rpy.y];
   const cr = Math.cos(r);
   const sr = Math.sin(r);
@@ -23,7 +43,7 @@ function rpyToMatrix(rpy: { r: number; p: number; y: number }): number[][] {
 }
 
 // Convert rotation matrix to RPY (roll-pitch-yaw in radians)
-function matrixToRpy(matrix: number[][]): { r: number; p: number; y: number } {
+function matrixToRpy(matrix: Mat3): { r: number; p: number; y: number } {
   const [[m00, m01, m02], [m10, m11, m12], [m20, m21, m22]] = matrix;
 
   // Handle gimbal lock
@@ -43,8 +63,8 @@ function matrixToRpy(matrix: number[][]): { r: number; p: number; y: number } {
 }
 
 // Matrix multiplication: A * B
-function multiplyMatrices(A: number[][], B: number[][]): number[][] {
-  const result: number[][] = [
+function multiplyMatrices(A: Mat3, B: Mat3): Mat3 {
+  const result: Mat3 = [
     [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
@@ -60,7 +80,7 @@ function multiplyMatrices(A: number[][], B: number[][]): number[][] {
 }
 
 // Matrix * vector: R * v
-function multiplyMatrixVector(matrix: number[][], vector: number[]): number[] {
+function multiplyMatrixVector(matrix: Mat3, vector: Vec3): Vec3 {
   return [
     matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
     matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
@@ -69,7 +89,7 @@ function multiplyMatrixVector(matrix: number[][], vector: number[]): number[] {
 }
 
 // Matrix transpose
-function transpose(matrix: number[][]): number[][] {
+function transpose(matrix: Mat3): Mat3 {
   return [
     [matrix[0][0], matrix[1][0], matrix[2][0]],
     [matrix[0][1], matrix[1][1], matrix[2][1]],
@@ -78,7 +98,7 @@ function transpose(matrix: number[][]): number[][] {
 }
 
 // Create 90-degree rotation matrix around axis
-function createRotation90Degrees(axis: "x" | "y" | "z"): number[][] {
+function createRotation90Degrees(axis: "x" | "y" | "z"): Mat3 {
   const angle = Math.PI / 2;
   const c = Math.cos(angle);
   const s = Math.sin(angle);
@@ -106,7 +126,7 @@ function createRotation90Degrees(axis: "x" | "y" | "z"): number[][] {
 }
 
 // Normalize vector
-function normalize(vector: number[]): number[] {
+function normalize(vector: Vec3): Vec3 {
   const length = Math.sqrt(
     vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]
   );
@@ -115,7 +135,7 @@ function normalize(vector: number[]): number[] {
 }
 
 // Parse xyz attribute to array
-function parseXyz(attr: string | null): number[] {
+function parseXyz(attr: string | null): Vec3 {
   if (!attr) return [0, 0, 0];
   const parts = attr.trim().split(/\s+/).map(parseFloat);
   return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
@@ -129,7 +149,7 @@ function parseRpy(attr: string | null): { r: number; p: number; y: number } {
 }
 
 // Format array as xyz string
-function formatXyz(xyz: number[]): string {
+function formatXyz(xyz: Vec3): string {
   return `${xyz[0].toFixed(6)} ${xyz[1].toFixed(6)} ${xyz[2].toFixed(6)}`;
 }
 
@@ -151,7 +171,7 @@ function ensureOrigin(element: Element): Element {
 }
 
 // Rotate inertia tensor: I' = R * I * R^T
-function rotateInertia(inertia: Element, R: number[][]): void {
+function rotateInertia(inertia: Element, R: Mat3): void {
   const ixx = parseFloat(inertia.getAttribute("ixx") || "0");
   const ixy = parseFloat(inertia.getAttribute("ixy") || "0");
   const ixz = parseFloat(inertia.getAttribute("ixz") || "0");
@@ -160,7 +180,7 @@ function rotateInertia(inertia: Element, R: number[][]): void {
   const izz = parseFloat(inertia.getAttribute("izz") || "0");
 
   // Construct 3x3 inertia matrix
-  const I = [
+  const I: Mat3 = [
     [ixx, ixy, ixz],
     [ixy, iyy, iyz],
     [ixz, iyz, izz],
@@ -179,10 +199,94 @@ function rotateInertia(inertia: Element, R: number[][]): void {
   inertia.setAttribute("izz", IRotated[2][2].toFixed(6));
 }
 
-/**
- * Rotates the root link and its direct child joints by 90 degrees around the specified axis.
- */
-export function rotateRobot90Degrees(urdfContent: string, axis: "x" | "y" | "z"): string {
+function axisSpecToVector(axis: AxisSpec): Vec3 {
+  const normalized = axis.startsWith("+") ? axis.slice(1) : axis;
+  const sign = axis.startsWith("-") ? -1 : 1;
+  switch (normalized) {
+    case "x":
+      return [sign, 0, 0];
+    case "y":
+      return [0, sign, 0];
+    case "z":
+      return [0, 0, sign];
+    default:
+      return [1, 0, 0];
+  }
+}
+
+function cross(left: Vec3, right: Vec3): Vec3 {
+  return [
+    left[1] * right[2] - left[2] * right[1],
+    left[2] * right[0] - left[0] * right[2],
+    left[0] * right[1] - left[1] * right[0],
+  ];
+}
+
+function matrixFromColumns(first: Vec3, second: Vec3, third: Vec3): Mat3 {
+  return [
+    [first[0], second[0], third[0]],
+    [first[1], second[1], third[1]],
+    [first[2], second[2], third[2]],
+  ];
+}
+
+function basisFromForwardUp(forwardAxis: AxisSpec, upAxis: AxisSpec): Mat3 {
+  const forward = normalize(axisSpecToVector(forwardAxis));
+  const up = normalize(axisSpecToVector(upAxis));
+  const dot = forward[0] * up[0] + forward[1] * up[1] + forward[2] * up[2];
+  if (Math.abs(dot) > 1e-9) {
+    throw new Error(`Forward axis ${forwardAxis} must be orthogonal to up axis ${upAxis}.`);
+  }
+  const lateral = normalize(cross(up, forward));
+  return matrixFromColumns(forward, lateral, up);
+}
+
+export function buildOrientationMappingRotation(options: {
+  sourceForwardAxis: AxisSpec;
+  sourceUpAxis: AxisSpec;
+  targetForwardAxis?: AxisSpec;
+  targetUpAxis?: AxisSpec;
+}): Mat3 {
+  const sourceBasis = basisFromForwardUp(
+    options.sourceForwardAxis,
+    options.sourceUpAxis
+  );
+  const targetBasis = basisFromForwardUp(
+    options.targetForwardAxis ?? "x",
+    options.targetUpAxis ?? "z"
+  );
+  return multiplyMatrices(targetBasis, transpose(sourceBasis));
+}
+
+function findRootLinks(xmlDoc: Document): Element[] {
+  const allJoints = xmlDoc.querySelectorAll("joint");
+  const childLinks = new Set<string>();
+  allJoints.forEach((joint) => {
+    const child = joint.querySelector("child")?.getAttribute("link");
+    if (child) childLinks.add(child);
+  });
+
+  return Array.from(xmlDoc.querySelectorAll("link")).filter((link) => {
+    const linkName = link.getAttribute("name");
+    return Boolean(linkName && !childLinks.has(linkName));
+  });
+}
+
+function applyRotationToElementOrigin(element: Element, R: Mat3, RT: Mat3): void {
+  const origin = ensureOrigin(element);
+  const xyz = parseXyz(origin.getAttribute("xyz"));
+  const rpy = parseRpy(origin.getAttribute("rpy"));
+
+  const rotatedXyz = multiplyMatrixVector(R, xyz);
+  const localR = rpyToMatrix(rpy);
+  const rotatedR = multiplyMatrices(R, multiplyMatrices(localR, RT));
+  const rotatedRpy = matrixToRpy(rotatedR);
+
+  origin.setAttribute("xyz", formatXyz(rotatedXyz));
+  origin.setAttribute("rpy", formatRpy(rotatedRpy));
+}
+
+function applyRotationMatrixToRobotBase(urdfContent: string, R: Mat3): string {
   const xmlDoc = parseXml(urdfContent);
 
   const parserError = xmlDoc.querySelector("parsererror");
@@ -198,106 +302,34 @@ export function rotateRobot90Degrees(urdfContent: string, axis: "x" | "y" | "z")
     return urdfContent;
   }
 
-  // Find root link (link that never appears as a child)
-  const allJoints = xmlDoc.querySelectorAll("joint");
-  const childLinks = new Set<string>();
-  allJoints.forEach((joint) => {
-    const child = joint.querySelector("child")?.getAttribute("link");
-    if (child) childLinks.add(child);
-  });
-
-  const allLinks = xmlDoc.querySelectorAll("link");
-  let rootLink: Element | null = null;
-  for (const link of allLinks) {
-    const linkName = link.getAttribute("name");
-    if (linkName && !childLinks.has(linkName)) {
-      rootLink = link;
-      break;
-    }
-  }
-
-  if (!rootLink) {
+  const rootLinks = findRootLinks(xmlDoc);
+  if (rootLinks.length === 0) {
     console.error("Could not find root link");
     return urdfContent;
   }
-
-  const rootName = rootLink.getAttribute("name");
-  if (!rootName) return urdfContent;
-
-  const R = createRotation90Degrees(axis);
   const RT = transpose(R);
 
-  // Rotate the root link's visuals/collisions/inertials
-  const rootVisuals = rootLink.querySelectorAll("visual");
-  rootVisuals.forEach((visual) => {
-    const origin = ensureOrigin(visual);
-    const xyz = parseXyz(origin.getAttribute("xyz"));
-    const rpy = parseRpy(origin.getAttribute("rpy"));
+  xmlDoc.querySelectorAll("link").forEach((link) => {
+    link.querySelectorAll("visual").forEach((visual) => {
+      applyRotationToElementOrigin(visual, R, RT);
+    });
 
-    const rotatedXyz = multiplyMatrixVector(R, xyz);
+    link.querySelectorAll("collision").forEach((collision) => {
+      applyRotationToElementOrigin(collision, R, RT);
+    });
 
-    const localR = rpyToMatrix(rpy);
-    const rotatedR = multiplyMatrices(R, multiplyMatrices(localR, RT));
-    const rotatedRpy = matrixToRpy(rotatedR);
-
-    origin.setAttribute("xyz", formatXyz(rotatedXyz));
-    origin.setAttribute("rpy", formatRpy(rotatedRpy));
-  });
-
-  const rootCollisions = rootLink.querySelectorAll("collision");
-  rootCollisions.forEach((collision) => {
-    const origin = ensureOrigin(collision);
-    const xyz = parseXyz(origin.getAttribute("xyz"));
-    const rpy = parseRpy(origin.getAttribute("rpy"));
-
-    const rotatedXyz = multiplyMatrixVector(R, xyz);
-
-    const localR = rpyToMatrix(rpy);
-    const rotatedR = multiplyMatrices(R, multiplyMatrices(localR, RT));
-    const rotatedRpy = matrixToRpy(rotatedR);
-
-    origin.setAttribute("xyz", formatXyz(rotatedXyz));
-    origin.setAttribute("rpy", formatRpy(rotatedRpy));
-  });
-
-  const rootInertial = rootLink.querySelector("inertial");
-  if (rootInertial) {
-    const origin = ensureOrigin(rootInertial);
-    const xyz = parseXyz(origin.getAttribute("xyz"));
-    const rpy = parseRpy(origin.getAttribute("rpy"));
-
-    const rotatedXyz = multiplyMatrixVector(R, xyz);
-
-    const localR = rpyToMatrix(rpy);
-    const rotatedR = multiplyMatrices(R, multiplyMatrices(localR, RT));
-    const rotatedRpy = matrixToRpy(rotatedR);
-
-    origin.setAttribute("xyz", formatXyz(rotatedXyz));
-    origin.setAttribute("rpy", formatRpy(rotatedRpy));
-
-    const inertia = rootInertial.querySelector("inertia");
-    if (inertia) {
-      rotateInertia(inertia, R);
+    const inertial = link.querySelector("inertial");
+    if (inertial) {
+      applyRotationToElementOrigin(inertial, R, RT);
+      const inertia = inertial.querySelector("inertia");
+      if (inertia) {
+        rotateInertia(inertia, R);
+      }
     }
-  }
+  });
 
-  // Rotate direct child joints of the root
-  allJoints.forEach((joint) => {
-    const parent = joint.querySelector("parent")?.getAttribute("link");
-    if (parent !== rootName) return;
-
-    const origin = ensureOrigin(joint);
-    const xyz = parseXyz(origin.getAttribute("xyz"));
-    const rpy = parseRpy(origin.getAttribute("rpy"));
-
-    const rotatedXyz = multiplyMatrixVector(R, xyz);
-
-    const localR = rpyToMatrix(rpy);
-    const rotatedR = multiplyMatrices(R, multiplyMatrices(localR, RT));
-    const rotatedRpy = matrixToRpy(rotatedR);
-
-    origin.setAttribute("xyz", formatXyz(rotatedXyz));
-    origin.setAttribute("rpy", formatRpy(rotatedRpy));
+  xmlDoc.querySelectorAll("joint").forEach((joint) => {
+    applyRotationToElementOrigin(joint, R, RT);
 
     const axisElement = joint.querySelector("axis");
     if (axisElement) {
@@ -308,4 +340,25 @@ export function rotateRobot90Degrees(urdfContent: string, axis: "x" | "y" | "z")
   });
 
   return serializeXml(xmlDoc);
+}
+
+export function applyOrientationToRobot(
+  urdfContent: string,
+  options: {
+    sourceForwardAxis: AxisSpec;
+    sourceUpAxis: AxisSpec;
+    targetForwardAxis?: AxisSpec;
+    targetUpAxis?: AxisSpec;
+  }
+): string {
+  const rotation = buildOrientationMappingRotation(options);
+  return applyRotationMatrixToRobotBase(urdfContent, rotation);
+}
+
+/**
+ * Rotates the root link and its direct child joints by 90 degrees around the specified axis.
+ */
+export function rotateRobot90Degrees(urdfContent: string, axis: "x" | "y" | "z"): string {
+  const R = createRotation90Degrees(axis);
+  return applyRotationMatrixToRobotBase(urdfContent, R);
 }

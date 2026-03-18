@@ -149,3 +149,71 @@ export const renameLinkInUrdf = (
 
   return { success: true, content: serializeURDF(parsed.document) };
 };
+
+export const setJointAxisInUrdf = (
+  urdfContent: string,
+  jointName: string,
+  axis: [number, number, number]
+): UrdfTransformResult => {
+  if (!urdfContent.trim()) {
+    return { success: false, content: urdfContent, error: "No URDF content available" };
+  }
+
+  const parsed = parseURDF(urdfContent);
+  if (!parsed.isValid) {
+    return { success: false, content: urdfContent, error: parsed.error };
+  }
+
+  const robot = getRobotElement(parsed.document);
+  if (!robot) {
+    return { success: false, content: urdfContent, error: "No <robot> element found" };
+  }
+
+  const joint = findNamedDirectChild(robot, "joint", jointName);
+  if (!joint) {
+    return {
+      success: false,
+      content: urdfContent,
+      error: `Joint "${jointName}" not found`,
+    };
+  }
+
+  const jointType = joint.getAttribute("type") || "fixed";
+  if (jointType === "fixed" || jointType === "floating") {
+    const axisElement = joint.querySelector("axis");
+    if (!axisElement) {
+      return { success: true, content: urdfContent };
+    }
+    axisElement.remove();
+    return { success: true, content: serializeURDF(parsed.document) };
+  }
+
+  const length = Math.sqrt(
+    axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]
+  );
+  const normalizedAxis: [number, number, number] =
+    length < 1e-10
+      ? [1, 0, 0]
+      : [axis[0] / length, axis[1] / length, axis[2] / length];
+
+  let axisElement = joint.querySelector("axis");
+  if (!axisElement) {
+    axisElement = parsed.document.createElement("axis");
+    const originTag = joint.querySelector("origin");
+    const childTag = joint.querySelector("child");
+    if (originTag?.nextSibling) {
+      joint.insertBefore(axisElement, originTag.nextSibling);
+    } else if (childTag?.nextSibling) {
+      joint.insertBefore(axisElement, childTag.nextSibling);
+    } else {
+      joint.appendChild(axisElement);
+    }
+  }
+
+  axisElement.setAttribute(
+    "xyz",
+    `${normalizedAxis[0]} ${normalizedAxis[1]} ${normalizedAxis[2]}`
+  );
+
+  return { success: true, content: serializeURDF(parsed.document) };
+};

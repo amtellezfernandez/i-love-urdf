@@ -15,6 +15,7 @@ import {
   convertURDFToMJCF,
   convertURDFToXacro,
   fixMeshPaths,
+  guessUrdfOrientation,
   inspectGitHubRepositoryUrdfs,
   normalizeJointAxes,
   parseMeshReference,
@@ -24,6 +25,8 @@ import {
   removeJointsFromUrdf,
   renameJointInUrdf,
   renameLinkInUrdf,
+  setJointAxisInUrdf,
+  applyOrientationToRobot,
   rotateRobot90Degrees,
   updateJointLinksInUrdf,
   updateMaterialColorInUrdf,
@@ -45,13 +48,16 @@ import { TASK_FAMILIES } from "./tasks/taskFamilies";
 const SUPPORTED_COMMANDS = [
   "validate",
   "analyze",
+  "guess-orientation",
   "diff",
   "fix-mesh-paths",
   "mesh-refs",
   "canonical-order",
   "pretty-print",
   "normalize-axes",
+  "set-joint-axis",
   "rotate-90",
+  "apply-orientation",
   "remove-joints",
   "reassign-joint",
   "set-material-color",
@@ -74,13 +80,16 @@ type SupportedCommandName = (typeof SUPPORTED_COMMANDS)[number];
 type CommandName =
   | "validate"
   | "analyze"
+  | "guess-orientation"
   | "diff"
   | "fix-mesh-paths"
   | "mesh-refs"
   | "canonical-order"
   | "pretty-print"
   | "normalize-axes"
+  | "set-joint-axis"
   | "rotate-90"
+  | "apply-orientation"
   | "remove-joints"
   | "reassign-joint"
   | "set-material-color"
@@ -225,6 +234,45 @@ const getNumericKeyValueArg = (
   return numeric;
 };
 
+const parseTripletArg = (raw: string, label: string): [number, number, number] => {
+  const parts = raw
+    .trim()
+    .split(/\s+/)
+    .slice(0, 3)
+    .map((value) => Number(value));
+  if (
+    parts.length !== 3 ||
+    !Number.isFinite(parts[0]) ||
+    !Number.isFinite(parts[1]) ||
+    !Number.isFinite(parts[2])
+  ) {
+    fail(`Invalid ${label}: ${raw}. Expected three numeric values like "0 1 0".`);
+  }
+  return [parts[0], parts[1], parts[2]];
+};
+
+const getAxisSpecArg = (
+  args: ArgMap,
+  key: string
+): "x" | "y" | "z" | "+x" | "+y" | "+z" | "-x" | "-y" | "-z" | undefined => {
+  const value = getOptionalStringArg(args, key);
+  if (!value) return undefined;
+  if (
+    value === "x" ||
+    value === "y" ||
+    value === "z" ||
+    value === "+x" ||
+    value === "+y" ||
+    value === "+z" ||
+    value === "-x" ||
+    value === "-y" ||
+    value === "-z"
+  ) {
+    return value;
+  }
+  fail(`Invalid --${key} value: ${value}. Expected x, y, z, +x, +y, +z, -x, -y, or -z.`);
+};
+
 const requireHexColorArg = (args: ArgMap, key: string): string => {
   const value = requireStringArg(args, key).trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
@@ -314,6 +362,8 @@ const printHelp = () => {
           return "  validate --urdf <path>";
         case "analyze":
           return "  analyze --urdf <path>";
+        case "guess-orientation":
+          return "  guess-orientation --urdf <path> [--target-up <x|y|z>] [--target-forward <x|y|z>]";
         case "mesh-refs":
           return "  mesh-refs --urdf <path>";
         case "diff":
@@ -324,6 +374,8 @@ const printHelp = () => {
           return "  canonical-order --urdf <path> [--out <path>]";
         case "normalize-axes":
           return "  normalize-axes --urdf <path> [--out <path>]";
+        case "set-joint-axis":
+          return "  set-joint-axis --urdf <path> --joint <name> --xyz \"0 1 0\" [--out <path>]";
         case "rename-joint":
           return "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]";
         case "rename-link":
@@ -336,6 +388,8 @@ const printHelp = () => {
           return "  set-material-color --urdf <path> --link <name> --material <name> --color <#RRGGBB> [--out <path>]";
         case "rotate-90":
           return "  rotate-90 --urdf <path> --axis <x|y|z> [--out <path>]";
+        case "apply-orientation":
+          return "  apply-orientation --urdf <path> --source-up <axis> --source-forward <axis> [--target-up <axis>] [--target-forward <axis>] [--out <path>]";
         case "fix-mesh-paths":
           return "  fix-mesh-paths --urdf <path> [--package <name>] [--out <path>]";
         case "mesh-to-assets":
@@ -724,6 +778,35 @@ const run = async () => {
     return;
   }
 
+  if (command === "guess-orientation") {
+    const targetUpAxisRaw = getOptionalStringArg(args, "target-up");
+    const targetForwardAxisRaw = getOptionalStringArg(args, "target-forward");
+    if (
+      targetUpAxisRaw &&
+      targetUpAxisRaw !== "x" &&
+      targetUpAxisRaw !== "y" &&
+      targetUpAxisRaw !== "z"
+    ) {
+      fail(`Invalid --target-up value: ${targetUpAxisRaw}. Expected x, y, or z.`);
+    }
+    if (
+      targetForwardAxisRaw &&
+      targetForwardAxisRaw !== "x" &&
+      targetForwardAxisRaw !== "y" &&
+      targetForwardAxisRaw !== "z"
+    ) {
+      fail(`Invalid --target-forward value: ${targetForwardAxisRaw}. Expected x, y, or z.`);
+    }
+    const targetUpAxis = targetUpAxisRaw as "x" | "y" | "z" | undefined;
+    const targetForwardAxis = targetForwardAxisRaw as "x" | "y" | "z" | undefined;
+    const result = guessUrdfOrientation(urdfContent, {
+      targetUpAxis,
+      targetForwardAxis,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
   if (command === "fix-mesh-paths") {
     const packageName = getOptionalStringArg(args, "package");
     const outPath = getOptionalStringArg(args, "out");
@@ -766,6 +849,16 @@ const run = async () => {
     return;
   }
 
+  if (command === "set-joint-axis") {
+    const outPath = getOptionalStringArg(args, "out");
+    const jointName = requireStringArg(args, "joint");
+    const xyz = parseTripletArg(requireStringArg(args, "xyz"), "joint axis");
+    const result = setJointAxisInUrdf(urdfContent, jointName, xyz);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
   if (command === "rotate-90") {
     const outPath = getOptionalStringArg(args, "out");
     const axisRaw = requireStringArg(args, "axis");
@@ -776,6 +869,39 @@ const run = async () => {
     const rotated = rotateRobot90Degrees(urdfContent, axisRaw);
     writeOutIfRequested(outPath, rotated);
     console.log(JSON.stringify({ urdfContent: rotated, axis: axisRaw, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "apply-orientation") {
+    const outPath = getOptionalStringArg(args, "out");
+    const sourceUpAxis = getAxisSpecArg(args, "source-up");
+    const sourceForwardAxis = getAxisSpecArg(args, "source-forward");
+    if (!sourceUpAxis || !sourceForwardAxis) {
+      fail("apply-orientation requires --source-up and --source-forward.");
+    }
+    const targetUpAxis = getAxisSpecArg(args, "target-up");
+    const targetForwardAxis = getAxisSpecArg(args, "target-forward");
+    const rotated = applyOrientationToRobot(urdfContent, {
+      sourceUpAxis,
+      sourceForwardAxis,
+      targetUpAxis,
+      targetForwardAxis,
+    });
+    writeOutIfRequested(outPath, rotated);
+    console.log(
+      JSON.stringify(
+        {
+          urdfContent: rotated,
+          sourceUpAxis,
+          sourceForwardAxis,
+          targetUpAxis: targetUpAxis || "z",
+          targetForwardAxis: targetForwardAxis || "x",
+          outPath: outPath || null,
+        },
+        null,
+        2
+      )
+    );
     return;
   }
 

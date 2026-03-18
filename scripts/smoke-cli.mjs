@@ -44,6 +44,24 @@ const xacroRegressionUrdf =
   "<mesh filename=\"assets/sts3215_03a_v1.stl\" scale=\"0.001 0.001 0.001\"/></geometry>" +
   "<material name=\"sts3215\"/></visual></link></robot>";
 
+const wheeledRobotZUp =
+  "<robot name=\"wheeled_z_up\">" +
+  "<link name=\"base\"><collision><geometry><box size=\"1 0.4 0.2\"/></geometry></collision></link>" +
+  "<link name=\"left_wheel\"><collision><origin xyz=\"0 0 0\" rpy=\"1.57079632679 0 0\"/><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
+  "<link name=\"right_wheel\"><collision><origin xyz=\"0 0 0\" rpy=\"1.57079632679 0 0\"/><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
+  "<joint name=\"left_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"left_wheel\"/><origin xyz=\"0 0.3 -0.1\" rpy=\"0 0 0\"/><axis xyz=\"0 1 0\"/></joint>" +
+  "<joint name=\"right_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"right_wheel\"/><origin xyz=\"0 -0.3 -0.1\" rpy=\"0 0 0\"/><axis xyz=\"0 1 0\"/></joint>" +
+  "</robot>";
+
+const wheeledRobotYUp =
+  "<robot name=\"wheeled_y_up\">" +
+  "<link name=\"base\"><collision><geometry><box size=\"1 0.2 0.5\"/></geometry></collision></link>" +
+  "<link name=\"left_wheel\"><collision><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
+  "<link name=\"right_wheel\"><collision><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
+  "<joint name=\"left_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"left_wheel\"/><origin xyz=\"0 -0.1 0.3\" rpy=\"0 0 0\"/><axis xyz=\"0 0 1\"/></joint>" +
+  "<joint name=\"right_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"right_wheel\"/><origin xyz=\"0 -0.1 -0.3\" rpy=\"0 0 0\"/><axis xyz=\"0 0 1\"/></joint>" +
+  "</robot>";
+
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
   throw new Error("i-love-urdf validate smoke test failed");
@@ -96,6 +114,42 @@ if (
 const analysis = lib.analyzeUrdf(urdf);
 if (analysis.robotName !== "smoke_robot" || analysis.linkNames.length !== 3) {
   throw new Error("i-love-urdf analyze smoke test failed");
+}
+
+const zUpGuess = lib.guessUrdfOrientation(wheeledRobotZUp);
+if (
+  zUpGuess.likelyUpAxis !== "z" ||
+  zUpGuess.likelyForwardAxis !== "x" ||
+  !zUpGuess.likelyUpDirection ||
+  zUpGuess.report.evidence.length < 3
+) {
+  throw new Error("i-love-urdf guess-orientation Z-up smoke test failed");
+}
+
+const yUpGuess = lib.guessUrdfOrientation(wheeledRobotYUp);
+if (
+  yUpGuess.likelyUpAxis !== "y" ||
+  yUpGuess.likelyForwardAxis !== "x" ||
+  !yUpGuess.likelyForwardDirection ||
+  yUpGuess.report.evidence.length < 3
+) {
+  throw new Error("i-love-urdf guess-orientation Y-up smoke test failed");
+}
+
+const updatedAxis = lib.setJointAxisInUrdf(wheeledRobotZUp, "left_wheel_joint", [0, 0, 1]);
+if (!updatedAxis.success || !updatedAxis.content.includes('axis xyz="0 0 1"')) {
+  throw new Error("i-love-urdf set-joint-axis smoke test failed");
+}
+
+const orientedYUp = lib.applyOrientationToRobot(wheeledRobotYUp, {
+  sourceUpAxis: "y",
+  sourceForwardAxis: "x",
+  targetUpAxis: "z",
+  targetForwardAxis: "x",
+});
+const reGuessedYUp = lib.guessUrdfOrientation(orientedYUp);
+if (reGuessedYUp.likelyUpAxis !== "z") {
+  throw new Error("i-love-urdf apply-orientation smoke test failed");
 }
 
 const diff = lib.compareUrdfs(urdf, renamedJoint.content);

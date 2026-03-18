@@ -1,4 +1,5 @@
 import { analyzeUrdf } from "../analysis/analyzeUrdf";
+import { guessUrdfOrientation } from "../analysis/guessOrientation";
 import { convertURDFToMJCF } from "../convert/urdfToMJCF";
 import { convertURDFToXacro } from "../convert/urdfToXacro";
 import { canonicalOrderURDF } from "../utils/canonicalOrdering";
@@ -33,6 +34,10 @@ export const validateLoadedSource = <T extends LoadedUrdfSourceLike>(source: T) 
 
 export const analyzeLoadedSource = <T extends LoadedUrdfSourceLike>(source: T) =>
   analyzeUrdf(source.urdf);
+
+export const guessOrientationLoadedSource = <T extends LoadedUrdfSourceLike>(
+  source: T
+) => guessUrdfOrientation(source.urdf);
 
 export const compareLoadedSources = <
   TLeft extends LoadedUrdfSourceLike,
