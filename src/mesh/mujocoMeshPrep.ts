@@ -269,5 +269,3 @@ export function compressMeshes(options: CompressMeshesOptions): CompressMeshesRe
     results,
   };
 }
-
-export const prepareMujocoMeshes = compressMeshes;

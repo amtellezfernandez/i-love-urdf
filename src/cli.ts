@@ -119,9 +119,8 @@ const writeText = (filePath: string, content: string) => {
 
 const parseArgs = (argv: string[]): { rawCommand: string; command: CommandName; args: ArgMap } => {
   const [, , rawCommand = "help", ...rest] = argv;
-  const normalizedCommand = rawCommand === "prepare-mujoco-meshes" ? "compress-meshes" : rawCommand;
-  const command = SUPPORTED_COMMAND_SET.has(normalizedCommand)
-    ? (normalizedCommand as SupportedCommandName)
+  const command = SUPPORTED_COMMAND_SET.has(rawCommand)
+    ? (rawCommand as SupportedCommandName)
     : "help";
   const args: ArgMap = new Map();
 
