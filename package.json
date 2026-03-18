@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "node ./scripts/build-package.mjs",
+    "check:browser-entry": "node ./scripts/check-browser-entry.mjs",
     "ilu": "node ./scripts/run-cli.mjs",
     "prepare": "node ./scripts/build-package.mjs",
     "setup:xacro": "node ./scripts/run-cli.mjs setup-xacro-runtime",
