@@ -21,6 +21,7 @@ export * from "./formats/extensionSupport";
 
 export * from "./mesh/meshPaths";
 export * from "./mesh/meshFormats";
+export * from "./mesh/collisionAutoFit";
 export * from "./mesh/fixMeshPaths";
 export * from "./repository/repositoryMeshResolution";
 export * from "./repository/repositoryInspection";

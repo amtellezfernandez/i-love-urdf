@@ -80,6 +80,21 @@ const jointChainUrdf =
   "<joint name=\"j1\" type=\"revolute\"><parent link=\"base\"/><child link=\"mid\"/></joint>" +
   "<joint name=\"j2\" type=\"revolute\"><parent link=\"mid\"/><child link=\"tip\"/></joint></robot>";
 
+const cylinderVertices = [];
+for (const x of [-1, 1]) {
+  for (let i = 0; i < 12; i += 1) {
+    const angle = (i / 12) * Math.PI * 2;
+    cylinderVertices.push(x, 0.5 * Math.cos(angle), 0.5 * Math.sin(angle));
+  }
+}
+const syntheticCylinderBounds = {
+  min: [-1, -0.5, -0.5],
+  max: [1, 0.5, 0.5],
+  size: [2, 1, 1],
+  center: [0, 0, 0],
+  vertices: new Float32Array(cylinderVertices),
+};
+
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
   throw new Error("ilu validate smoke test failed");
@@ -174,6 +189,35 @@ if (
 const updatedAxis = lib.setJointAxisInUrdf(wheeledRobotZUp, "left_wheel_joint", [0, 0, 1]);
 if (!updatedAxis.success || !updatedAxis.content.includes('axis xyz="0 0 1"')) {
   throw new Error("ilu set-joint-axis smoke test failed");
+}
+
+const autoFitBox = lib.autoFitCollisionGeometry(
+  syntheticCylinderBounds,
+  { xyz: [0, 0, 0], rpy: [0, 0, 0] },
+  "box"
+);
+if (
+  !autoFitBox ||
+  autoFitBox.geometryType !== "box" ||
+  autoFitBox.geometryParams.size !== "2 1 1"
+) {
+  throw new Error("ilu mesh auto-fit box smoke test failed");
+}
+
+const autoFitCylinder = lib.autoFitCollisionGeometry(
+  syntheticCylinderBounds,
+  { xyz: [0, 0, 0], rpy: [0, 0, 0] },
+  "cylinder"
+);
+if (
+  !autoFitCylinder ||
+  autoFitCylinder.geometryType !== "cylinder" ||
+  Number(autoFitCylinder.geometryParams.length) < 1.9 ||
+  Number(autoFitCylinder.geometryParams.length) > 2.1 ||
+  Number(autoFitCylinder.geometryParams.radius) < 0.45 ||
+  Number(autoFitCylinder.geometryParams.radius) > 0.55
+) {
+  throw new Error("ilu mesh auto-fit cylinder smoke test failed");
 }
 
 const updatedJointLimits = lib.updateJointLimitsInUrdf(urdf, "j", -1.5, 1.5);
