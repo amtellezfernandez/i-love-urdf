@@ -1,9 +1,11 @@
 export type TaskFamilyKey =
   | "load"
+  | "health"
   | "validate"
   | "analyze"
   | "format"
   | "edit"
+  | "normalize"
   | "optimize"
   | "convert";
 
@@ -22,6 +24,12 @@ export const TASK_FAMILIES: readonly TaskFamilyDefinition[] = [
     commands: ["load-source", "inspect-repo"],
   },
   {
+    key: "health",
+    title: "Health",
+    summary: "Audit structural, inertial, axis, and orientation risks before rewriting URDFs.",
+    commands: ["health-check"],
+  },
+  {
     key: "validate",
     title: "Validate",
     summary: "Check whether a prepared URDF is structurally usable.",
@@ -37,7 +45,7 @@ export const TASK_FAMILIES: readonly TaskFamilyDefinition[] = [
     key: "format",
     title: "Format",
     summary: "Apply stable formatting and cleanup transforms to URDF text.",
-    commands: ["pretty-print", "canonical-order", "normalize-axes"],
+    commands: ["pretty-print", "canonical-order", "normalize-axes", "snap-axes"],
   },
   {
     key: "edit",
@@ -53,6 +61,12 @@ export const TASK_FAMILIES: readonly TaskFamilyDefinition[] = [
       "rotate-90",
       "apply-orientation",
     ],
+  },
+  {
+    key: "normalize",
+    title: "Normalize",
+    summary: "Apply simulator-neutral orientation and joint-frame cleanup workflows.",
+    commands: ["canonicalize-joint-frame", "apply-orientation", "normalize-robot"],
   },
   {
     key: "optimize",

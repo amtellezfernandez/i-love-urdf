@@ -62,6 +62,16 @@ const wheeledRobotYUp =
   "<joint name=\"right_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"right_wheel\"/><origin xyz=\"0 -0.1 -0.3\" rpy=\"0 0 0\"/><axis xyz=\"0 0 1\"/></joint>" +
   "</robot>";
 
+const badInertiaUrdf =
+  "<robot name=\"bad_inertia\">" +
+  "<link name=\"base\"><inertial><mass value=\"1\"/><origin xyz=\"0 0 0\" rpy=\"0 0 0\"/>" +
+  "<inertia ixx=\"1\" ixy=\"0\" ixz=\"0\" iyy=\"0.1\" iyz=\"0\" izz=\"0.1\"/></inertial></link>" +
+  "</robot>";
+
+const snapCandidateUrdf =
+  "<robot name=\"snap_axes\"><link name=\"base\"/><link name=\"tip\"/>" +
+  "<joint name=\"j\" type=\"continuous\"><parent link=\"base\"/><child link=\"tip\"/><axis xyz=\"0 0.99999 0.00001\"/></joint></robot>";
+
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
   throw new Error("i-love-urdf validate smoke test failed");
@@ -75,6 +85,14 @@ if (!transmissionValidate.isValid) {
 const axes = lib.normalizeJointAxes(urdf);
 if (!axes.urdfContent.includes("0.7071067812")) {
   throw new Error("i-love-urdf normalize-axes smoke test failed");
+}
+
+const snappedAxes = lib.snapJointAxes(snapCandidateUrdf);
+if (
+  !snappedAxes.urdfContent.includes('axis xyz="0 1 0"') ||
+  snappedAxes.snapped.length !== 1
+) {
+  throw new Error("i-love-urdf snap-axes smoke test failed");
 }
 
 const meshes = lib.fixMeshPaths(urdf);
@@ -116,6 +134,15 @@ if (analysis.robotName !== "smoke_robot" || analysis.linkNames.length !== 3) {
   throw new Error("i-love-urdf analyze smoke test failed");
 }
 
+const health = lib.healthCheckUrdf(badInertiaUrdf);
+if (
+  health.ok ||
+  !health.findings.some((finding) => finding.code === "triangle-inequality") ||
+  !health.findings.some((finding) => finding.code === "orientation-guess")
+) {
+  throw new Error("i-love-urdf health-check smoke test failed");
+}
+
 const zUpGuess = lib.guessUrdfOrientation(wheeledRobotZUp);
 if (
   zUpGuess.likelyUpAxis !== "z" ||
@@ -141,6 +168,17 @@ if (!updatedAxis.success || !updatedAxis.content.includes('axis xyz="0 0 1"')) {
   throw new Error("i-love-urdf set-joint-axis smoke test failed");
 }
 
+const canonicalized = lib.canonicalizeJointFrames(wheeledRobotZUp, {
+  targetAxis: "z",
+});
+if (
+  !canonicalized.success ||
+  !canonicalized.changedJoints.includes("left_wheel_joint") ||
+  !canonicalized.content.includes('axis xyz="0 0 1"')
+) {
+  throw new Error("i-love-urdf canonicalize-joint-frame smoke test failed");
+}
+
 const orientedYUp = lib.applyOrientationToRobot(wheeledRobotYUp, {
   sourceUpAxis: "y",
   sourceForwardAxis: "x",
@@ -150,6 +188,30 @@ const orientedYUp = lib.applyOrientationToRobot(wheeledRobotYUp, {
 const reGuessedYUp = lib.guessUrdfOrientation(orientedYUp);
 if (reGuessedYUp.likelyUpAxis !== "z") {
   throw new Error("i-love-urdf apply-orientation smoke test failed");
+}
+
+const normalizeDryRun = lib.normalizeRobot(wheeledRobotYUp, {
+  snapAxes: true,
+  canonicalizeJointFrame: true,
+});
+if (
+  normalizeDryRun.apply ||
+  !normalizeDryRun.plannedSteps.some((step) => step.name === "canonicalize-joint-frame" && step.enabled)
+) {
+  throw new Error("i-love-urdf normalize-robot dry-run smoke test failed");
+}
+
+const normalizeApply = lib.normalizeRobot(wheeledRobotYUp, {
+  apply: true,
+  snapAxes: true,
+  canonicalizeJointFrame: true,
+  sourceUpAxis: "y",
+  sourceForwardAxis: "x",
+  targetUpAxis: "+z",
+  targetForwardAxis: "+x",
+});
+if (!normalizeApply.apply || !normalizeApply.outputUrdf || !normalizeApply.healthAfter) {
+  throw new Error("i-love-urdf normalize-robot apply smoke test failed");
 }
 
 const diff = lib.compareUrdfs(urdf, renamedJoint.content);
@@ -378,6 +440,10 @@ if (xacroRuntime.available) {
 
 const cliSource = fs.readFileSync(path.join(root, "dist", "cli.js"), "utf8");
 if (
+  !cliSource.includes("health-check") ||
+  !cliSource.includes("snap-axes") ||
+  !cliSource.includes("canonicalize-joint-frame") ||
+  !cliSource.includes("normalize-robot") ||
   !cliSource.includes("setup-xacro-runtime") ||
   !cliSource.includes("load-source") ||
   !cliSource.includes("--entry <repo-path>") ||

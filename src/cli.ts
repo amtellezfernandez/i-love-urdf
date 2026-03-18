@@ -16,6 +16,7 @@ import {
   convertURDFToXacro,
   fixMeshPaths,
   guessUrdfOrientation,
+  healthCheckUrdf,
   inspectGitHubRepositoryUrdfs,
   normalizeJointAxes,
   parseMeshReference,
@@ -28,6 +29,7 @@ import {
   setJointAxisInUrdf,
   applyOrientationToRobot,
   rotateRobot90Degrees,
+  snapJointAxes,
   updateJointLinksInUrdf,
   updateMaterialColorInUrdf,
   updateMeshPathsToAssetsInUrdf,
@@ -44,9 +46,12 @@ import {
 } from "./xacro/xacroNode";
 import { loadSourceFromGitHub, loadSourceFromPath } from "./sources/loadSourceNode";
 import { TASK_FAMILIES } from "./tasks/taskFamilies";
+import { canonicalizeJointFrames } from "./transforms/canonicalizeJointFrames";
+import { normalizeRobot } from "./pipelines/normalizeRobot";
 
 const SUPPORTED_COMMANDS = [
   "validate",
+  "health-check",
   "analyze",
   "guess-orientation",
   "diff",
@@ -55,9 +60,12 @@ const SUPPORTED_COMMANDS = [
   "canonical-order",
   "pretty-print",
   "normalize-axes",
+  "snap-axes",
   "set-joint-axis",
+  "canonicalize-joint-frame",
   "rotate-90",
   "apply-orientation",
+  "normalize-robot",
   "remove-joints",
   "reassign-joint",
   "set-material-color",
@@ -79,6 +87,7 @@ const SUPPORTED_COMMANDS = [
 type SupportedCommandName = (typeof SUPPORTED_COMMANDS)[number];
 type CommandName =
   | "validate"
+  | "health-check"
   | "analyze"
   | "guess-orientation"
   | "diff"
@@ -87,9 +96,12 @@ type CommandName =
   | "canonical-order"
   | "pretty-print"
   | "normalize-axes"
+  | "snap-axes"
   | "set-joint-axis"
+  | "canonicalize-joint-frame"
   | "rotate-90"
   | "apply-orientation"
+  | "normalize-robot"
   | "remove-joints"
   | "reassign-joint"
   | "set-material-color"
@@ -273,6 +285,18 @@ const getAxisSpecArg = (
   fail(`Invalid --${key} value: ${value}. Expected x, y, z, +x, +y, +z, -x, -y, or -z.`);
 };
 
+const getSimpleAxisArg = (
+  args: ArgMap,
+  key: string
+): "x" | "y" | "z" | undefined => {
+  const value = getOptionalStringArg(args, key);
+  if (!value) return undefined;
+  if (value === "x" || value === "y" || value === "z") {
+    return value;
+  }
+  fail(`Invalid --${key} value: ${value}. Expected x, y, or z.`);
+};
+
 const requireHexColorArg = (args: ArgMap, key: string): string => {
   const value = requireStringArg(args, key).trim();
   if (!/^#[0-9a-fA-F]{6}$/.test(value)) {
@@ -360,6 +384,8 @@ const printHelp = () => {
           return "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]";
         case "validate":
           return "  validate --urdf <path>";
+        case "health-check":
+          return "  health-check --urdf <path> [--strict]";
         case "analyze":
           return "  analyze --urdf <path>";
         case "guess-orientation":
@@ -374,8 +400,12 @@ const printHelp = () => {
           return "  canonical-order --urdf <path> [--out <path>]";
         case "normalize-axes":
           return "  normalize-axes --urdf <path> [--out <path>]";
+        case "snap-axes":
+          return "  snap-axes --urdf <path> [--tolerance <n>] [--out <path>]";
         case "set-joint-axis":
           return "  set-joint-axis --urdf <path> --joint <name> --xyz \"0 1 0\" [--out <path>]";
+        case "canonicalize-joint-frame":
+          return "  canonicalize-joint-frame --urdf <path> [--target-axis <x|y|z>] [--joint <name> | --joints <a,b,c>] [--out <path>]";
         case "rename-joint":
           return "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]";
         case "rename-link":
@@ -390,6 +420,8 @@ const printHelp = () => {
           return "  rotate-90 --urdf <path> --axis <x|y|z> [--out <path>]";
         case "apply-orientation":
           return "  apply-orientation --urdf <path> --source-up <axis> --source-forward <axis> [--target-up <axis>] [--target-forward <axis>] [--out <path>]";
+        case "normalize-robot":
+          return "  normalize-robot --urdf <path> [--apply] [--snap-axes] [--canonicalize-joint-frame] [--target-axis <x|y|z>] [--source-up <axis>] [--source-forward <axis>] [--target-up <axis>] [--target-forward <axis>] [--pretty-print] [--canonical-order] [--out <path>]";
         case "fix-mesh-paths":
           return "  fix-mesh-paths --urdf <path> [--package <name>] [--out <path>]";
         case "mesh-to-assets":
@@ -772,6 +804,15 @@ const run = async () => {
     return;
   }
 
+  if (command === "health-check") {
+    const result = healthCheckUrdf(urdfContent);
+    console.log(JSON.stringify(result, null, 2));
+    if (Boolean(args.get("strict")) && !result.ok) {
+      process.exit(1);
+    }
+    return;
+  }
+
   if (command === "analyze") {
     const result = analyzeUrdf(urdfContent);
     console.log(JSON.stringify(result, null, 2));
@@ -849,11 +890,35 @@ const run = async () => {
     return;
   }
 
+  if (command === "snap-axes") {
+    const outPath = getOptionalStringArg(args, "out");
+    const tolerance = getOptionalNumberArg(args, "tolerance");
+    const result = snapJointAxes(urdfContent, {
+      snapTolerance: tolerance,
+    });
+    writeOutIfRequested(outPath, result.urdfContent);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
   if (command === "set-joint-axis") {
     const outPath = getOptionalStringArg(args, "out");
     const jointName = requireStringArg(args, "joint");
     const xyz = parseTripletArg(requireStringArg(args, "xyz"), "joint axis");
     const result = setJointAxisInUrdf(urdfContent, jointName, xyz);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "canonicalize-joint-frame") {
+    const outPath = getOptionalStringArg(args, "out");
+    const targetAxis = getSimpleAxisArg(args, "target-axis") ?? "z";
+    const jointNames = getDelimitedStringArg(args, "joints", "joint");
+    const result = canonicalizeJointFrames(urdfContent, {
+      targetAxis,
+      joints: jointNames.length > 0 ? jointNames : undefined,
+    });
     writeOutIfRequested(outPath, result.content);
     console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
     return;
@@ -896,6 +961,37 @@ const run = async () => {
           sourceForwardAxis,
           targetUpAxis: targetUpAxis || "z",
           targetForwardAxis: targetForwardAxis || "x",
+          outPath: outPath || null,
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  if (command === "normalize-robot") {
+    const outPath = getOptionalStringArg(args, "out");
+    const result = normalizeRobot(urdfContent, {
+      apply: Boolean(args.get("apply")),
+      snapAxes: Boolean(args.get("snap-axes")),
+      canonicalizeJointFrame: Boolean(args.get("canonicalize-joint-frame")),
+      targetJointAxis: getSimpleAxisArg(args, "target-axis"),
+      sourceUpAxis: getAxisSpecArg(args, "source-up"),
+      sourceForwardAxis: getAxisSpecArg(args, "source-forward"),
+      targetUpAxis: getAxisSpecArg(args, "target-up"),
+      targetForwardAxis: getAxisSpecArg(args, "target-forward"),
+      prettyPrint: Boolean(args.get("pretty-print")),
+      canonicalOrder: Boolean(args.get("canonical-order")),
+      axisSnapTolerance: getOptionalNumberArg(args, "tolerance"),
+    });
+    if (result.apply && result.outputUrdf && outPath) {
+      writeOutIfRequested(outPath, result.outputUrdf);
+    }
+    console.log(
+      JSON.stringify(
+        {
+          ...result,
           outPath: outPath || null,
         },
         null,

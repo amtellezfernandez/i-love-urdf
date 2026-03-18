@@ -43,10 +43,12 @@ i-love-urdf probe-xacro-runtime
 ## Task Families
 
 - `Load Sources`: `load-source`, `inspect-repo`
+- `Health`: `health-check`
 - `Validate`: `validate`
 - `Analyze`: `analyze`, `guess-orientation`, `mesh-refs`, `diff`
-- `Format`: `pretty-print`, `canonical-order`, `normalize-axes`
+- `Format`: `pretty-print`, `canonical-order`, `normalize-axes`, `snap-axes`
 - `Edit`: `set-joint-axis`, `rename-joint`, `rename-link`, `reassign-joint`, `remove-joints`, `set-material-color`, `rotate-90`, `apply-orientation`
+- `Normalize`: `canonicalize-joint-frame`, `apply-orientation`, `normalize-robot`
 - `Optimize`: `fix-mesh-paths`, `mesh-to-assets`, `repair-mesh-refs`, `inspect-meshes`, `compress-meshes`
 - `Convert`: `urdf-to-mjcf`, `urdf-to-xacro`, `xacro-to-urdf`
 
@@ -65,11 +67,15 @@ i-love-urdf load-source --github owner/repo --entry urdf/robot.urdf.xacro --out 
 Then run tasks:
 
 ```sh
+i-love-urdf health-check --urdf robot.urdf
 i-love-urdf validate --urdf robot.urdf
 i-love-urdf analyze --urdf robot.urdf
 i-love-urdf guess-orientation --urdf robot.urdf
+i-love-urdf snap-axes --urdf robot.urdf --out robot.snapped.urdf
 i-love-urdf set-joint-axis --urdf robot.urdf --joint wheel_joint --xyz "0 1 0" --out robot.axis.urdf
+i-love-urdf canonicalize-joint-frame --urdf robot.urdf --target-axis z --out robot.canonical.urdf
 i-love-urdf apply-orientation --urdf robot.urdf --source-up +y --source-forward -z --target-up +z --target-forward +x --out robot.zup.urdf
+i-love-urdf normalize-robot --urdf robot.urdf --snap-axes --canonicalize-joint-frame
 i-love-urdf pretty-print --urdf robot.urdf --out robot.pretty.urdf
 i-love-urdf rename-link --urdf robot.urdf --link tool --name tool0 --out robot.edited.urdf
 i-love-urdf inspect-meshes --mesh-dir ./meshes
@@ -91,6 +97,13 @@ Orientation flow:
 2. read `suggestedApplyOrientation.command` if you want the exact remap command.
 3. run `apply-orientation` only after checking whether the robot is a wheeled base, a serial arm, or a symmetric asset where forward can stay ambiguous.
 
+Normalization flow:
+
+1. `health-check` to see structural, inertial, axis, and orientation findings.
+2. `snap-axes` when nearly-canonical joint axes should become exact `x/y/z` basis vectors.
+3. `canonicalize-joint-frame --target-axis z` when you need local joint axes standardized for simulation/control code.
+4. `normalize-robot` to dry-run or apply the selected normalization steps together.
+
 MuJoCo flow:
 
 1. `load-source` or `xacro-to-urdf` to get a resolved URDF.
@@ -105,6 +118,8 @@ Load once, then run tasks on the prepared source:
 import {
   analyzeLoadedSource,
   convertLoadedSourceToMJCF,
+  healthCheckLoadedSource,
+  normalizeLoadedSource,
   prettyPrintLoadedSource,
   validateLoadedSource,
 } from "i-love-urdf";
@@ -114,9 +129,11 @@ async function main() {
   const loaded = await loadSourceFromPath({ path: "./robot.urdf.xacro" });
   const validation = validateLoadedSource(loaded);
   const analysis = analyzeLoadedSource(loaded);
+  const health = healthCheckLoadedSource(loaded);
   const formatted = prettyPrintLoadedSource(loaded, 2);
+  const normalized = normalizeLoadedSource(formatted, { apply: true, snapAxes: true });
   const mjcf = convertLoadedSourceToMJCF(formatted);
-  console.log(validation.isValid, analysis.robotName, mjcf.stats.bodiesCreated);
+  console.log(validation.isValid, analysis.robotName, health.summary.errors, normalized.apply, mjcf.stats.bodiesCreated);
 }
 ```
 
@@ -133,6 +150,7 @@ import { loadSourceFromGitHub } from "i-love-urdf/load-source-node";
 
 - Source loading: local file/repo or GitHub repo normalized into a prepared URDF result with metadata
 - Task helpers: loaded-source validation, analysis, formatting, comparison, and conversion helpers
+- Health: structural, inertial, axis, and orientation auditing with structured findings
 - Parsing: URDF document parsing, link/joint/sensor helpers, link name extraction
 - Analysis: inertials, collisions, mesh reference analysis, orientation guessing, and signed orientation evidence reports
 - Conversion: URDF to MJCF, URDF to XACRO, runtime-backed XACRO to URDF, XACRO request/response helpers
@@ -140,8 +158,9 @@ import { loadSourceFromGitHub } from "i-love-urdf/load-source-node";
 - Mesh compression: binary STL inspection and target-face-limit repair for heavy mesh sets
 - Repository: candidate discovery, package/dependency name extraction, repository package helpers, generic source inspection, local/GitHub repo inspection, repo-aware mesh reference repair
 - Transforms: joint removal, joint relinking, material updates, mesh path updates
-- Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
-- Orientation: axis guessing, explicit joint-axis editing, and base-frame orientation remapping
+- Utilities: pretty printing, canonical ordering, axis normalization, axis snapping, URDF rotation, diff helpers
+- Orientation: axis guessing, explicit joint-axis editing, base-frame orientation remapping, and joint-frame canonicalization
+- Pipelines: dry-run/apply robot normalization around health checks, axis cleanup, orientation remap, and joint-frame canonicalization
 - Validation: structural and semantic URDF validation
 
 ## Mesh Optimization

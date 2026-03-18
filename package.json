@@ -1,6 +1,6 @@
 {
   "name": "i-love-urdf",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "type": "commonjs",
   "private": false,
   "description": "Core URDF parsing, validation, transform, mesh, and conversion utilities.",
