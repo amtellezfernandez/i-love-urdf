@@ -28,6 +28,13 @@ Some parts of `i-love-urdf` are adapted from upstream code and that should stay 
 
 ## Install
 
+Requirements:
+
+- Node.js 20 or newer
+- npm, which is usually installed with Node.js already
+
+If `npm` is missing on your machine, install or update Node.js first, then run:
+
 ```sh
 npm install
 npm run build
