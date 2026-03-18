@@ -37,6 +37,7 @@ import {
   probeXacroRuntime,
   setupXacroRuntime,
 } from "./xacro/xacroNode";
+import { loadSourceFromGitHub, loadSourceFromPath } from "./sources/loadSourceNode";
 
 const SUPPORTED_COMMANDS = [
   "validate",
@@ -57,6 +58,7 @@ const SUPPORTED_COMMANDS = [
   "xacro-to-urdf",
   "probe-xacro-runtime",
   "setup-xacro-runtime",
+  "load-source",
   "rename-joint",
   "rename-link",
   "inspect-repo",
@@ -83,6 +85,7 @@ type CommandName =
   | "xacro-to-urdf"
   | "probe-xacro-runtime"
   | "setup-xacro-runtime"
+  | "load-source"
   | "rename-joint"
   | "rename-link"
   | "inspect-repo"
@@ -234,6 +237,8 @@ const printHelp = () => {
       "  urdf-to-xacro --urdf <path> [--out <path>]",
       "  probe-xacro-runtime [--python <path>] [--wheel <path>]",
       "  setup-xacro-runtime [--python <path>] [--venv <path>]",
+      "  load-source --path <local-file-or-dir> [--entry <repo-path>] [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+      "  load-source --github <owner/repo|url> [--entry <repo-path>] [--ref <branch>] [--subdir <path>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  xacro-to-urdf --xacro <path> [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  xacro-to-urdf --local <repo> --xacro <repo-path> [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
       "  xacro-to-urdf --github <owner/repo|url> --xacro <repo-path> [--ref <branch>] [--path <subdir>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
@@ -397,6 +402,69 @@ const run = async () => {
       wheelPath: getOptionalStringArg(args, "wheel"),
     });
     console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "load-source") {
+    const localPath = getOptionalStringArg(args, "path");
+    const github = getOptionalStringArg(args, "github");
+    if ((localPath ? 1 : 0) + (github ? 1 : 0) !== 1) {
+      fail("load-source requires exactly one of --path or --github.");
+    }
+
+    const outPath = getOptionalStringArg(args, "out");
+    const runtimeOptions = {
+      pythonExecutable: getOptionalStringArg(args, "python"),
+      wheelPath: getOptionalStringArg(args, "wheel"),
+    };
+    const runtimeArgs = getKeyValueArg(args, "args", "arg");
+    const useInorder = !Boolean(args.get("no-inorder"));
+    const entryPath = getOptionalStringArg(args, "entry");
+    const maxCandidatesToInspect = getOptionalNumberArg(args, "max-candidates");
+    const concurrency = getOptionalNumberArg(args, "concurrency");
+
+    const result = localPath
+      ? await loadSourceFromPath({
+          path: localPath,
+          entryPath,
+          rootPath: getOptionalStringArg(args, "root"),
+          args: runtimeArgs,
+          useInorder,
+          maxCandidatesToInspect,
+          concurrency,
+          ...runtimeOptions,
+        })
+      : await (() => {
+          const parsed = parseGitHubRepositoryReference(github || "");
+          if (!parsed) {
+            fail("Invalid --github value. Expected owner/repo or a GitHub repository URL.");
+          }
+
+          const subdirOverride = getOptionalStringArg(args, "subdir");
+          const refOverride = getOptionalStringArg(args, "ref");
+          const accessToken =
+            getOptionalStringArg(args, "token") ||
+            process.env.GITHUB_TOKEN ||
+            process.env.GH_TOKEN;
+
+          return loadSourceFromGitHub({
+            reference: {
+              ...parsed,
+              path: subdirOverride ?? parsed.path,
+              ref: refOverride ?? parsed.ref,
+            },
+            entryPath,
+            accessToken,
+            args: runtimeArgs,
+            useInorder,
+            maxCandidatesToInspect,
+            concurrency,
+            ...runtimeOptions,
+          });
+        })();
+
+    writeOutIfRequested(outPath, result.urdf);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
     return;
   }
 

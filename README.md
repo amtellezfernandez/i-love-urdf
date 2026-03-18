@@ -42,6 +42,10 @@ i-love-urdf set-material-color --urdf robot.urdf --link base_link --material bas
 i-love-urdf mesh-to-assets --urdf robot.urdf --out robot.assets.urdf
 i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
 i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
+i-love-urdf load-source --path ./robot.urdf
+i-love-urdf load-source --path ./robot.urdf.xacro --out robot.urdf
+i-love-urdf load-source --path ./my-robot-repo --entry urdf/robot.urdf
+i-love-urdf load-source --github owner/repo --entry urdf/robot.urdf.xacro --out robot.urdf
 i-love-urdf probe-xacro-runtime
 i-love-urdf setup-xacro-runtime
 i-love-urdf xacro-to-urdf --xacro robot.urdf.xacro --out robot.urdf
@@ -73,6 +77,7 @@ import {
   repairGitHubRepositoryMeshReferences,
 } from "i-love-urdf";
 import { inspectLocalRepositoryUrdfs } from "i-love-urdf/local";
+import { loadSourceFromPath } from "i-love-urdf/load-source-node";
 import { expandLocalXacroToUrdf } from "i-love-urdf/xacro-node";
 
 async function main() {
@@ -86,6 +91,7 @@ async function main() {
     { owner: "owner", repo: "robot-repo" },
     { urdfPath: "robots/arm.urdf" }
   );
+  const prepared = await loadSourceFromPath({ path: "./robot.urdf.xacro" });
   const expanded = await expandLocalXacroToUrdf({
     xacroPath: "./robot.urdf.xacro",
     rootPath: ".",
@@ -96,6 +102,7 @@ async function main() {
 
 ## Current API Areas
 
+- Source loading: local file/repo or GitHub repo normalized into a prepared URDF result with metadata
 - Parsing: URDF document parsing, link/joint/sensor helpers, link name extraction
 - Analysis: inertials, collisions, mesh reference analysis
 - Conversion: URDF to MJCF, URDF to XACRO, runtime-backed XACRO to URDF, XACRO request/response helpers
@@ -105,6 +112,25 @@ async function main() {
 - Utilities: pretty printing, canonical ordering, axis normalization, URDF rotation, diff helpers
 - CLI: validation, analysis, diffing, transform commands, conversion commands, rename commands, local/GitHub repo inspection, repo-aware mesh repair
 - Validation: structural and semantic URDF validation
+
+## Load Source
+
+`load-source` is the new normalization layer. It accepts a local file, a local repo, or a GitHub repo and gives you one prepared URDF plus metadata about where it came from.
+
+Examples:
+
+```sh
+i-love-urdf load-source --path ./robot.urdf
+i-love-urdf load-source --path ./robot.urdf.xacro --out robot.urdf
+i-love-urdf load-source --path ./my-robot-repo --entry urdf/robot.urdf
+i-love-urdf load-source --github ros/urdf_tutorial --entry urdf/08-macroed.urdf.xacro
+```
+
+For Node usage:
+
+```ts
+import { loadSourceFromPath, loadSourceFromGitHub } from "i-love-urdf/load-source-node";
+```
 
 ## Runtime Note
 

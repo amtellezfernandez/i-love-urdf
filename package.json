@@ -1,6 +1,6 @@
 {
   "name": "i-love-urdf",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "commonjs",
   "private": false,
   "description": "Core URDF parsing, validation, transform, mesh, and conversion utilities.",
@@ -52,6 +52,10 @@
     "./xacro-node": {
       "types": "./dist/xacro/xacroNode.d.ts",
       "default": "./dist/xacro/xacroNode.js"
+    },
+    "./load-source-node": {
+      "types": "./dist/sources/loadSourceNode.d.ts",
+      "default": "./dist/sources/loadSourceNode.js"
     },
     "./src": "./src/index.ts",
     "./package.json": "./package.json"

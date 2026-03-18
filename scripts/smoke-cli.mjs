@@ -12,6 +12,7 @@ execFileSync("npm", ["run", "build"], { stdio: "inherit", cwd: root, shell: true
 
 const lib = await import(path.join(root, "dist", "index.js"));
 const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
+const loadSourceNode = await import(path.join(root, "dist", "sources", "loadSourceNode.js"));
 const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
@@ -149,6 +150,13 @@ if (
   throw new Error("i-love-urdf local repository inspection smoke test failed");
 }
 
+const loadedUrdfFile = await loadSourceNode.loadSourceFromPath({
+  path: path.join(tempRepo, "robot.urdf"),
+});
+if (loadedUrdfFile.entryFormat !== "urdf" || !loadedUrdfFile.urdf.includes('robot name="smoke_robot"')) {
+  throw new Error("i-love-urdf load-source local file smoke test failed");
+}
+
 const brokenRepoUrdf =
   "<robot name=\"smoke_robot\"><link name=\"mesh_link\"><visual><geometry>" +
   "<mesh filename=\"mesh.stl\"/></geometry></visual></link></robot>";
@@ -229,11 +237,20 @@ if (xacroRuntime.available) {
   if (!expanded.urdf.includes('link name="shared_tip"')) {
     throw new Error("i-love-urdf xacro-to-urdf smoke test failed");
   }
+
+  const loadedXacroRepo = await loadSourceNode.loadSourceFromPath({
+    path: tempRepo,
+    entryPath: "robot.urdf.xacro",
+    pythonExecutable: process.env.I_LOVE_URDF_XACRO_PYTHON,
+  });
+  if (loadedXacroRepo.entryFormat !== "xacro" || !loadedXacroRepo.urdf.includes('link name="shared_tip"')) {
+    throw new Error("i-love-urdf load-source xacro repository smoke test failed");
+  }
 }
 
 const cliSource = fs.readFileSync(path.join(root, "dist", "cli.js"), "utf8");
-if (!cliSource.includes("setup-xacro-runtime")) {
-  throw new Error("i-love-urdf setup-xacro-runtime CLI help smoke test failed");
+if (!cliSource.includes("setup-xacro-runtime") || !cliSource.includes("load-source")) {
+  throw new Error("i-love-urdf CLI surface smoke test failed");
 }
 
 console.log("i-love-urdf smoke test passed.");
