@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
 const buildScriptPath = path.join(root, "scripts", "build-package.mjs");
+const buildManifestPath = path.join(root, "dist", ".build-manifest.json");
 const distCliPath = path.join(root, "dist", "cli.js");
 const typescriptCliPath = path.join(root, "node_modules", "typescript", "bin", "tsc");
 const cliArgs = process.argv.slice(2);
@@ -35,17 +36,41 @@ const getNewestMtimeMs = (targetPath) => {
   }, stats.mtimeMs);
 };
 
+const loadBuildManifest = () => {
+  if (!fs.existsSync(buildManifestPath)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(buildManifestPath, "utf8"));
+    if (!Array.isArray(parsed.outputs) || parsed.outputs.some((entry) => typeof entry !== "string")) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
 const needsBuild = () => {
-  if (!fs.existsSync(distCliPath)) {
+  const manifest = loadBuildManifest();
+  if (!manifest || !fs.existsSync(distCliPath)) {
     return true;
   }
 
-  const distMtimeMs = fs.statSync(distCliPath).mtimeMs;
+  const distStateIsComplete = manifest.outputs.every((relativePath) => {
+    return fs.existsSync(path.join(root, "dist", relativePath));
+  });
+  if (!distStateIsComplete) {
+    return true;
+  }
+
+  const buildStateMtimeMs = Math.min(fs.statSync(buildManifestPath).mtimeMs, fs.statSync(distCliPath).mtimeMs);
   const newestInputMtimeMs = buildInputs.reduce((newest, targetPath) => {
     return Math.max(newest, getNewestMtimeMs(targetPath));
   }, 0);
 
-  return newestInputMtimeMs > distMtimeMs;
+  return newestInputMtimeMs > buildStateMtimeMs;
 };
 
 if (!fs.existsSync(typescriptCliPath)) {

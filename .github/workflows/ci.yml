@@ -34,5 +34,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Setup XACRO Runtime
+        run: pnpm setup:xacro
+
+      - name: Probe XACRO Runtime
+        run: pnpm ilu probe-xacro-runtime
+
       - name: Smoke Test
         run: pnpm smoke
