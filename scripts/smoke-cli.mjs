@@ -75,6 +75,11 @@ const snapCandidateUrdf =
   "<robot name=\"snap_axes\"><link name=\"base\"/><link name=\"tip\"/>" +
   "<joint name=\"j\" type=\"continuous\"><parent link=\"base\"/><child link=\"tip\"/><axis xyz=\"0 0.99999 0.00001\"/></joint></robot>";
 
+const jointChainUrdf =
+  "<robot name=\"joint_chain\"><link name=\"base\"/><link name=\"mid\"/><link name=\"tip\"/>" +
+  "<joint name=\"j1\" type=\"revolute\"><parent link=\"base\"/><child link=\"mid\"/></joint>" +
+  "<joint name=\"j2\" type=\"revolute\"><parent link=\"mid\"/><child link=\"tip\"/></joint></robot>";
+
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
   throw new Error("ilu validate smoke test failed");
@@ -169,6 +174,111 @@ if (
 const updatedAxis = lib.setJointAxisInUrdf(wheeledRobotZUp, "left_wheel_joint", [0, 0, 1]);
 if (!updatedAxis.success || !updatedAxis.content.includes('axis xyz="0 0 1"')) {
   throw new Error("ilu set-joint-axis smoke test failed");
+}
+
+const updatedJointLimits = lib.updateJointLimitsInUrdf(urdf, "j", -1.5, 1.5);
+if (
+  !updatedJointLimits.success ||
+  !updatedJointLimits.content.includes('limit lower="-1.5" upper="1.5"')
+) {
+  throw new Error("ilu set-joint-limits smoke test failed");
+}
+
+const updatedJointVelocity = lib.updateJointVelocityInUrdf(updatedJointLimits.content, "j", 2.5);
+if (
+  !updatedJointVelocity.success ||
+  !updatedJointVelocity.content.includes('velocity="2.5"')
+) {
+  throw new Error("ilu set-joint-velocity smoke test failed");
+}
+
+const updatedJointType = lib.updateJointTypeInUrdf(urdf, "j", "continuous");
+if (
+  !updatedJointType.success ||
+  !updatedJointType.content.includes('joint name="j" type="continuous"') ||
+  updatedJointType.content.includes(' lower=')
+) {
+  throw new Error("ilu set-joint-type smoke test failed");
+}
+
+const reassignmentValidation = lib.validateJointLinkReassignment(
+  jointChainUrdf,
+  "j1",
+  "tip",
+  "mid"
+);
+if (reassignmentValidation.valid || !("error" in reassignmentValidation) || !/cycle/i.test(reassignmentValidation.error)) {
+  throw new Error("ilu joint reassignment validation smoke test failed");
+}
+
+const safeReassignment = lib.updateJointLinksInUrdf(jointChainUrdf, "j2", "base", "tip");
+if (
+  !safeReassignment.success ||
+  !safeReassignment.content.includes('joint name="j2" type="revolute"><parent link="base"/><child link="tip"/>')
+) {
+  throw new Error("ilu reassign-joint smoke test failed");
+}
+
+const updatedVisual = lib.updateVisualInLink(
+  urdf,
+  "mesh_link",
+  0,
+  "mesh",
+  { filename: "meshes/updated.stl", scale: "1 1 1" },
+  { xyz: [0, 0, 0], rpy: [0, 0, 0] },
+  "#336699"
+);
+const updatedVisualData = lib.parseLinkData(updatedVisual.content, "mesh_link");
+if (
+  !updatedVisual.success ||
+  updatedVisualData?.visuals[0]?.geometry.params.filename !== "meshes/updated.stl" ||
+  updatedVisualData.visuals[0]?.materialColor !== "#336699"
+) {
+  throw new Error("ilu update-visual smoke test failed");
+}
+
+const addedCollision = lib.addCollisionToLink(
+  urdf,
+  "mesh_link",
+  "box",
+  { size: "1 2 3" },
+  { xyz: [0, 0, 0], rpy: [0, 0, 0] }
+);
+const addedCollisionData = lib.parseLinkData(addedCollision.content, "mesh_link");
+if (
+  !addedCollision.success ||
+  addedCollisionData?.collisions.length !== 1 ||
+  addedCollisionData.collisions[0]?.geometry.type !== "box" ||
+  addedCollisionData.collisions[0]?.geometry.params.size !== "1 2 3"
+) {
+  throw new Error("ilu add-collision smoke test failed");
+}
+
+const removedCollision = lib.removeCollisionFromLink(addedCollision.content, "mesh_link", 0);
+if (!removedCollision.success || removedCollision.content.includes("<collision>")) {
+  throw new Error("ilu remove-collision smoke test failed");
+}
+
+const addedInertial = lib.addInertialToLink(
+  urdf,
+  "mesh_link",
+  2,
+  { ixx: 1, ixy: 0, ixz: 0, iyy: 1, iyz: 0, izz: 1 },
+  { xyz: [0, 0, 0], rpy: [0, 0, 0] }
+);
+const addedInertialData = lib.parseLinkData(addedInertial.content, "mesh_link");
+if (
+  !addedInertial.success ||
+  addedInertialData?.inertial?.mass !== 2 ||
+  addedInertialData.inertial?.inertia.ixx !== 1 ||
+  addedInertialData.inertial?.inertia.izz !== 1
+) {
+  throw new Error("ilu add-inertial smoke test failed");
+}
+
+const removedInertial = lib.removeInertialFromLink(addedInertial.content, "mesh_link");
+if (!removedInertial.success || removedInertial.content.includes("<inertial>")) {
+  throw new Error("ilu remove-inertial smoke test failed");
 }
 
 const canonicalized = lib.canonicalizeJointFrames(wheeledRobotZUp, {
@@ -445,6 +555,9 @@ const cliSource = fs.readFileSync(path.join(root, "dist", "cli.js"), "utf8");
 if (
   !cliSource.includes("health-check") ||
   !cliSource.includes("snap-axes") ||
+  !cliSource.includes("set-joint-type") ||
+  !cliSource.includes("set-joint-limits") ||
+  !cliSource.includes("set-joint-velocity") ||
   !cliSource.includes("canonicalize-joint-frame") ||
   !cliSource.includes("normalize-robot") ||
   !cliSource.includes("setup-xacro-runtime") ||

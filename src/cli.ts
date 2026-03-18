@@ -27,6 +27,9 @@ import {
   renameJointInUrdf,
   renameLinkInUrdf,
   setJointAxisInUrdf,
+  updateJointLimitsInUrdf,
+  updateJointTypeInUrdf,
+  updateJointVelocityInUrdf,
   applyOrientationToRobot,
   rotateRobot90Degrees,
   snapJointAxes,
@@ -62,6 +65,9 @@ const SUPPORTED_COMMANDS = [
   "normalize-axes",
   "snap-axes",
   "set-joint-axis",
+  "set-joint-type",
+  "set-joint-limits",
+  "set-joint-velocity",
   "canonicalize-joint-frame",
   "rotate-90",
   "apply-orientation",
@@ -98,6 +104,9 @@ type CommandName =
   | "normalize-axes"
   | "snap-axes"
   | "set-joint-axis"
+  | "set-joint-type"
+  | "set-joint-limits"
+  | "set-joint-velocity"
   | "canonicalize-joint-frame"
   | "rotate-90"
   | "apply-orientation"
@@ -404,6 +413,12 @@ const printHelp = () => {
           return "  snap-axes --urdf <path> [--tolerance <n>] [--out <path>]";
         case "set-joint-axis":
           return "  set-joint-axis --urdf <path> --joint <name> --xyz \"0 1 0\" [--out <path>]";
+        case "set-joint-type":
+          return "  set-joint-type --urdf <path> --joint <name> --type <revolute|continuous|prismatic|fixed|floating|planar> [--lower <n>] [--upper <n>] [--out <path>]";
+        case "set-joint-limits":
+          return "  set-joint-limits --urdf <path> --joint <name> --lower <n> --upper <n> [--out <path>]";
+        case "set-joint-velocity":
+          return "  set-joint-velocity --urdf <path> --joint <name> --velocity <n> [--out <path>]";
         case "canonicalize-joint-frame":
           return "  canonicalize-joint-frame --urdf <path> [--target-axis <x|y|z>] [--joint <name> | --joints <a,b,c>] [--out <path>]";
         case "rename-joint":
@@ -906,6 +921,42 @@ const run = async () => {
     const jointName = requireStringArg(args, "joint");
     const xyz = parseTripletArg(requireStringArg(args, "xyz"), "joint axis");
     const result = setJointAxisInUrdf(urdfContent, jointName, xyz);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "set-joint-type") {
+    const outPath = getOptionalStringArg(args, "out");
+    const jointName = requireStringArg(args, "joint");
+    const jointType = requireStringArg(args, "type");
+    const lowerLimit = getOptionalNumberArg(args, "lower");
+    const upperLimit = getOptionalNumberArg(args, "upper");
+    const result = updateJointTypeInUrdf(urdfContent, jointName, jointType, lowerLimit, upperLimit);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "set-joint-limits") {
+    const outPath = getOptionalStringArg(args, "out");
+    const jointName = requireStringArg(args, "joint");
+    const lowerLimit = getOptionalNumberArg(args, "lower");
+    const upperLimit = getOptionalNumberArg(args, "upper");
+    const result = updateJointLimitsInUrdf(urdfContent, jointName, lowerLimit, upperLimit);
+    writeOutIfRequested(outPath, result.content);
+    console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
+    return;
+  }
+
+  if (command === "set-joint-velocity") {
+    const outPath = getOptionalStringArg(args, "out");
+    const jointName = requireStringArg(args, "joint");
+    const velocity = getOptionalNumberArg(args, "velocity");
+    if (velocity === undefined) {
+      fail("set-joint-velocity requires --velocity.");
+    }
+    const result = updateJointVelocityInUrdf(urdfContent, jointName, velocity);
     writeOutIfRequested(outPath, result.content);
     console.log(JSON.stringify({ ...result, outPath: outPath || null }, null, 2));
     return;

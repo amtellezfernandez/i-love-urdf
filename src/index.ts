@@ -13,6 +13,7 @@ export * from "./analysis/orientationCues";
 export * from "./analysis/guessOrientation";
 export * from "./transforms/urdfTransforms";
 export * from "./transforms/urdfEditing";
+export * from "./transforms/linkEditing";
 export * from "./transforms/canonicalizeJointFrames";
 export * from "./convert/urdfToMJCF";
 export * from "./convert/urdfToXacro";
@@ -37,6 +38,7 @@ export * from "./utils/rotationMath";
 export * from "./spatial/axisFrame";
 
 export * from "./validation/validateUrdf";
+export * from "./validation/validateJointLinkReassignment";
 export * from "./xmlDom";
 export * from "./xacro/xacroContract";
 export * from "./tasks/loadedSourceTasks";

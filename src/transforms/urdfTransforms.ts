@@ -1,5 +1,6 @@
 import { parseURDF, serializeURDF } from "../parsing/urdfParser";
 import { normalizeMeshPathForMatch, parseMeshReference } from "../mesh/meshPaths";
+import { validateJointLinkReassignment } from "../validation/validateJointLinkReassignment";
 
 export type UrdfTransformResult = {
   success: boolean;
@@ -90,6 +91,16 @@ export const updateJointLinksInUrdf = (
 ): UrdfTransformResult => {
   if (!urdfContent.trim()) {
     return { success: false, content: urdfContent, error: "No URDF content available" };
+  }
+
+  const validation = validateJointLinkReassignment(
+    urdfContent,
+    jointName,
+    parentLink,
+    childLink
+  );
+  if ("error" in validation) {
+    return { success: false, content: urdfContent, error: validation.error };
   }
 
   const parsed = parseURDF(urdfContent);

@@ -53,6 +53,9 @@ export const TASK_FAMILIES: readonly TaskFamilyDefinition[] = [
     summary: "Apply safe structural mutations to an existing URDF.",
     commands: [
       "set-joint-axis",
+      "set-joint-type",
+      "set-joint-limits",
+      "set-joint-velocity",
       "rename-joint",
       "rename-link",
       "reassign-joint",
