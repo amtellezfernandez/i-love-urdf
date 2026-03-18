@@ -43,6 +43,7 @@ const browserExports = [
   "normalizeMeshPathForMatch",
   "fixMeshPaths",
   "inspectRepositoryCandidates",
+  "collectPackageResourceFilesForMatchedFiles",
   "resolveRepositoryXacroTargetPath",
   "buildRepositoryFileEntriesFromPaths",
   "buildPackageRootsFromRepositoryFiles",

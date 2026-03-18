@@ -579,6 +579,19 @@ if (!repairedLocal.success || repairedLocal.corrections.length !== 1) {
   throw new Error("ilu local mesh repair smoke test failed");
 }
 
+const matchedResourceFiles = lib.collectPackageResourceFilesForMatchedFiles(
+  [
+    { path: "smoke_robot/package.xml", type: "file" },
+    { path: "smoke_robot/meshes/visual/base.dae", type: "file" },
+    { path: "smoke_robot/textures/base.png", type: "file" },
+  ],
+  [{ path: "smoke_robot/meshes/visual/base.dae", type: "file" }],
+  { smoke_robot: ["smoke_robot"] }
+);
+if (!matchedResourceFiles.some((file) => file.path === "smoke_robot/textures/base.png")) {
+  throw new Error("ilu matched package resource collection smoke test failed");
+}
+
 const wrongPathRepoUrdf =
   "<robot name=\"smoke_robot\"><link name=\"mesh_link\"><visual><geometry>" +
   "<mesh filename=\"wrongdir/mesh.stl\"/></geometry></visual></link></robot>";

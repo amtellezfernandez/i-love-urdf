@@ -90,6 +90,7 @@ export {
   type RepositoryCandidateInspection,
 } from "./repository/repositoryInspection";
 export {
+  collectPackageResourceFilesForMatchedFiles,
   resolveRepositoryXacroTargetPath,
 } from "./repository/repositoryUrdfDiscovery";
 export {

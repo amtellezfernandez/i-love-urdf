@@ -398,6 +398,44 @@ export const collectPackageResourceFilesForReferencedPackages = <T extends Repos
   });
 };
 
+export const collectPackageResourceFilesForMatchedFiles = <T extends RepositoryFileEntry>(
+  files: T[],
+  matchedFiles: T[],
+  packageRoots: Record<string, string[]> = buildPackageRootsFromRepositoryFiles(files)
+): T[] => {
+  const matchedPackageRoots = new Set<string>();
+
+  matchedFiles.forEach((file) => {
+    if (file.type !== "file") return;
+    const normalizedPath = normalizeMeshPathForMatch(file.path);
+    if (!normalizedPath) return;
+
+    Object.values(packageRoots).forEach((roots) => {
+      roots.forEach((root) => {
+        const normalizedRoot = normalizeMeshPathForMatch(root);
+        if (!normalizedRoot) return;
+        if (normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)) {
+          matchedPackageRoots.add(normalizedRoot);
+        }
+      });
+    });
+  });
+
+  if (matchedPackageRoots.size === 0) return [];
+
+  return files.filter((file) => {
+    if (file.type !== "file" || !isSupportedMeshResource(file.path)) return false;
+    const normalizedPath = normalizeMeshPathForMatch(file.path);
+    if (!normalizedPath) return false;
+    for (const root of matchedPackageRoots) {
+      if (normalizedPath === root || normalizedPath.startsWith(`${root}/`)) {
+        return true;
+      }
+    }
+    return false;
+  });
+};
+
 export const scoreXacroWrapperCandidate = (path: string): number => {
   const lower = path.toLowerCase();
   let score = 0;
