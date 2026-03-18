@@ -85,6 +85,11 @@ export {
   fixMeshPaths,
 } from "./mesh/fixMeshPaths";
 export {
+  inspectRepositoryCandidates,
+  type InspectRepositoryCandidatesOptions,
+  type RepositoryCandidateInspection,
+} from "./repository/repositoryInspection";
+export {
   resolveRepositoryXacroTargetPath,
 } from "./repository/repositoryUrdfDiscovery";
 export {

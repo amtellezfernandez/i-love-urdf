@@ -50,6 +50,7 @@ const expectedExports = [
   "parseMeshReference",
   "normalizeMeshPathForMatch",
   "fixMeshPaths",
+  "inspectRepositoryCandidates",
   "resolveRepositoryXacroTargetPath",
   "buildRepositoryFileEntriesFromPaths",
   "buildPackageRootsFromRepositoryFiles",

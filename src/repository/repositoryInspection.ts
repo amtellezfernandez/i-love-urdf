@@ -34,9 +34,12 @@ export type RepositoryInspectionSummary = {
   candidates: RepositoryCandidateInspection[];
 };
 
-export type InspectRepositoryFilesOptions = {
+export type InspectRepositoryCandidatesOptions = {
   maxCandidatesToInspect?: number;
   concurrency?: number;
+};
+
+export type InspectRepositoryFilesOptions = InspectRepositoryCandidatesOptions & {
   candidateFilter?: (candidate: RepositoryUrdfCandidate) => boolean;
 };
 
@@ -102,17 +105,12 @@ const inspectRepositoryCandidate = async <T extends InspectableRepositoryFile>(
   };
 };
 
-export const inspectRepositoryFiles = async <T extends InspectableRepositoryFile>(
+export const inspectRepositoryCandidates = async <T extends InspectableRepositoryFile>(
+  candidates: RepositoryUrdfCandidate[],
   files: T[],
   readText: RepositoryTextLoader<T>,
-  options: InspectRepositoryFilesOptions = {}
-): Promise<RepositoryInspectionSummary> => {
-  const totalEntries = files.length;
-  const totalFiles = files.filter((file) => file.type === "file").length;
-  const candidates = findRepositoryUrdfCandidates(files).filter((candidate) =>
-    options.candidateFilter ? options.candidateFilter(candidate) : true
-  );
-
+  options: InspectRepositoryCandidatesOptions = {}
+): Promise<RepositoryCandidateInspection[]> => {
   const maxCandidatesToInspect = Math.max(
     0,
     Number(options.maxCandidatesToInspect ?? 12) || 12
@@ -144,12 +142,34 @@ export const inspectRepositoryFiles = async <T extends InspectableRepositoryFile
 
   await Promise.all(workers);
 
+  return [...inspected, ...untouchedCandidates];
+};
+
+export const inspectRepositoryFiles = async <T extends InspectableRepositoryFile>(
+  files: T[],
+  readText: RepositoryTextLoader<T>,
+  options: InspectRepositoryFilesOptions = {}
+): Promise<RepositoryInspectionSummary> => {
+  const totalEntries = files.length;
+  const totalFiles = files.filter((file) => file.type === "file").length;
+  const candidates = findRepositoryUrdfCandidates(files).filter((candidate) =>
+    options.candidateFilter ? options.candidateFilter(candidate) : true
+  );
+  const inspectedCandidates = await inspectRepositoryCandidates(candidates, files, readText, {
+    maxCandidatesToInspect: options.maxCandidatesToInspect,
+    concurrency: options.concurrency,
+  });
+  const maxCandidatesToInspect = Math.max(
+    0,
+    Number(options.maxCandidatesToInspect ?? 12) || 12
+  );
+
   return {
     totalEntries,
     totalFiles,
     candidateCount: candidates.length,
     inspectedCandidateCount: Math.min(candidates.length, maxCandidatesToInspect),
     primaryCandidatePath: candidates[0]?.path ?? null,
-    candidates: [...inspected, ...untouchedCandidates],
+    candidates: inspectedCandidates,
   };
 };

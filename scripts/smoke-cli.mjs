@@ -128,6 +128,16 @@ if (
 ) {
   throw new Error("ilu repository xacro target resolution smoke test failed");
 }
+const inspectedCandidates = await browserLib.inspectRepositoryCandidates(
+  [{ path: "robot.urdf", name: "robot.urdf", hasMeshesFolder: false }],
+  [{ path: "robot.urdf", name: "robot.urdf", type: "file" }],
+  async () =>
+    '<robot name="inspect_robot"><link name="base"><visual><geometry><mesh filename="meshes/missing.stl"/></geometry></visual></link></robot>',
+  { maxCandidatesToInspect: 1 }
+);
+if (inspectedCandidates[0]?.unmatchedMeshReferences?.[0] !== "meshes/missing.stl") {
+  throw new Error("ilu repository candidate inspection smoke test failed");
+}
 
 const transmissionValidate = lib.validateUrdf(transmissionUrdf);
 if (!transmissionValidate.isValid) {
