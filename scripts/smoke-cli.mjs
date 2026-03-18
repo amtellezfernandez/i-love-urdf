@@ -497,6 +497,64 @@ if (loadedUrdfFile.entryFormat !== "urdf" || !loadedUrdfFile.urdf.includes('robo
   throw new Error("ilu load-source local file smoke test failed");
 }
 
+const originalFetch = globalThis.fetch;
+const gitHubFetchUrls = [];
+globalThis.fetch = async (input) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  gitHubFetchUrls.push(url);
+
+  if (url === "https://api.github.com/repos/acme/robot-repo/git/trees/main?recursive=1") {
+    return new Response(
+      JSON.stringify({
+        tree: [
+          { path: "robots", type: "tree" },
+          { path: "robots/demo.urdf", type: "blob", sha: "demo-urdf-sha", size: 64 },
+        ],
+      }),
+      { status: 200 }
+    );
+  }
+
+  if (url === "https://api.github.com/repos/acme/robot-repo/git/blobs/demo-urdf-sha") {
+    return new Response(
+      JSON.stringify({
+        content: Buffer.from(
+          '<robot name="demo"><link name="base"/></robot>',
+          "utf8"
+        ).toString("base64"),
+        encoding: "base64",
+      }),
+      { status: 200 }
+    );
+  }
+
+  throw new Error(`Unexpected GitHub smoke fetch: ${url}`);
+};
+
+try {
+  const loadedGitHubUrdf = await loadSourceNode.loadSourceFromGitHub({
+    reference: {
+      owner: "acme",
+      repo: "robot-repo",
+      ref: "main",
+    },
+    entryPath: "robots/demo.urdf",
+  });
+  if (
+    loadedGitHubUrdf.entryFormat !== "urdf" ||
+    !loadedGitHubUrdf.urdf.includes('robot name="demo"')
+  ) {
+    throw new Error("ilu load-source GitHub explicit entry smoke test failed");
+  }
+  const treeFetchCount = gitHubFetchUrls.filter((url) => url.includes("/git/trees/")).length;
+  const blobFetchCount = gitHubFetchUrls.filter((url) => url.includes("/git/blobs/")).length;
+  if (treeFetchCount !== 1 || blobFetchCount !== 1) {
+    throw new Error("ilu load-source GitHub explicit entry fetch-count smoke test failed");
+  }
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
 const brokenRepoUrdf =
   "<robot name=\"smoke_robot\"><link name=\"mesh_link\"><visual><geometry>" +
   "<mesh filename=\"mesh.stl\"/></geometry></visual></link></robot>";

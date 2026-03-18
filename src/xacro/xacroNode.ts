@@ -543,6 +543,20 @@ export const expandGitHubRepositoryXacro = async (
   }
 
   const { ref, files } = await fetchGitHubRepositoryFiles(reference, options.accessToken);
+  return expandFetchedGitHubRepositoryXacro(reference, ref, files, options);
+};
+
+export const expandFetchedGitHubRepositoryXacro = async (
+  reference: GitHubRepositoryReference,
+  ref: string,
+  files: GitHubRepositoryFile[],
+  options: ExpandGitHubXacroOptions = {}
+): Promise<GitHubXacroExpansionResult> => {
+  const normalizedTargetPath = normalizeRepositoryPath(options.targetPath ?? reference.path ?? "");
+  if (!normalizedTargetPath) {
+    throw new Error("GitHub Xacro expansion requires --xacro unless the GitHub reference already points to a xacro file.");
+  }
+
   let resolvedFiles = files;
   const byteCache = new Map<string, Uint8Array>();
 

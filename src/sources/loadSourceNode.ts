@@ -7,17 +7,13 @@ import {
 } from "../repository/githubRepositoryInspection";
 import {
   collectLocalRepositoryFiles,
-  type LocalRepositoryFile,
 } from "../repository/localRepositoryInspection";
-import {
-  inspectRepositoryFiles,
-  type InspectRepositoryFilesOptions,
-  type RepositoryInspectionSummary,
-} from "../repository/repositoryInspection";
+import { type InspectRepositoryFilesOptions } from "../repository/repositoryInspection";
+import { findRepositoryUrdfCandidates } from "../repository/repositoryUrdfDiscovery";
 import { normalizeRepositoryPath } from "../repository/repositoryMeshResolution";
 import { isXacroPath } from "../xacro/xacroContract";
 import {
-  expandGitHubRepositoryXacro,
+  expandFetchedGitHubRepositoryXacro,
   expandLocalXacroToUrdf,
   type XacroRuntimeName,
   type XacroRuntimeOptions,
@@ -67,12 +63,34 @@ const inferEntryFormat = (entryPath: string): "urdf" | "xacro" | null => {
 
 const resolveSelectedEntryPath = (
   requestedEntryPath: string | undefined,
-  summary: Pick<RepositoryInspectionSummary, "primaryCandidatePath">
+  summary: { primaryCandidatePath: string | null }
 ): string => {
   const normalizedRequested = normalizeRepositoryPath(requestedEntryPath || "");
   if (normalizedRequested) return normalizedRequested;
   if (summary.primaryCandidatePath) return normalizeRepositoryPath(summary.primaryCandidatePath);
   throw new Error("No URDF or Xacro entrypoint was found. Pass --entry to choose one explicitly.");
+};
+
+const summarizeRepositoryCandidates = <
+  T extends {
+    name: string;
+    path: string;
+    type: "file" | "dir";
+  }
+>(
+  files: T[],
+  candidateFilter?: InspectRepositoryFilesOptions["candidateFilter"]
+): {
+  candidateCount: number;
+  primaryCandidatePath: string | null;
+} => {
+  const candidates = findRepositoryUrdfCandidates(files).filter((candidate) =>
+    candidateFilter ? candidateFilter(candidate) : true
+  );
+  return {
+    candidateCount: candidates.length,
+    primaryCandidatePath: candidates[0]?.path ?? null,
+  };
 };
 
 const buildResult = (params: {
@@ -151,15 +169,7 @@ export const loadSourceFromPath = async (
   }
 
   const files = await collectLocalRepositoryFiles(inspectedPath);
-  const summary = await inspectRepositoryFiles(
-    files,
-    async (_candidate, file: LocalRepositoryFile) => fs.readFile(file.absolutePath, "utf8"),
-    {
-      maxCandidatesToInspect: options.maxCandidatesToInspect,
-      concurrency: options.concurrency,
-      candidateFilter: options.candidateFilter,
-    }
-  );
+  const summary = summarizeRepositoryCandidates(files, options.candidateFilter);
 
   const entryPath = resolveSelectedEntryPath(options.entryPath, summary);
   const entryFormat = inferEntryFormat(entryPath);
@@ -208,22 +218,7 @@ export const loadSourceFromGitHub = async (
   options: LoadSourceGitHubOptions
 ): Promise<LoadSourceResult> => {
   const { ref, files } = await fetchGitHubRepositoryFiles(options.reference, options.accessToken);
-  const summary = await inspectRepositoryFiles(
-    files,
-    (_candidate, file) =>
-      fetchGitHubTextFile(
-        options.reference.owner,
-        options.reference.repo,
-        file.path,
-        file.sha,
-        options.accessToken
-      ),
-    {
-      maxCandidatesToInspect: options.maxCandidatesToInspect,
-      concurrency: options.concurrency,
-      candidateFilter: options.candidateFilter,
-    }
-  );
+  const summary = summarizeRepositoryCandidates(files, options.candidateFilter);
 
   const entryPath = resolveSelectedEntryPath(options.entryPath, summary);
   const entryFormat = inferEntryFormat(entryPath);
@@ -258,7 +253,7 @@ export const loadSourceFromGitHub = async (
     });
   }
 
-  const expanded = await expandGitHubRepositoryXacro(options.reference, {
+  const expanded = await expandFetchedGitHubRepositoryXacro(options.reference, ref, files, {
     targetPath: entryPath,
     accessToken: options.accessToken,
     args: options.args,
