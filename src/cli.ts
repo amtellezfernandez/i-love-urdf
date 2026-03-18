@@ -360,7 +360,7 @@ const inspectLocalMjcfMeshRisks = (urdfPath: string, urdfContent: string): strin
   const meshDirs = Array.from(new Set(riskyMeshList.map((mesh) => mesh.meshDir)));
   const commandHint =
     meshDirs.length === 1
-      ? ` Inspect: i-love-urdf inspect-meshes --mesh-dir ${meshDirs[0]}. Fix: i-love-urdf compress-meshes --mesh-dir ${meshDirs[0]} --in-place`
+      ? ` Inspect: ilu inspect-meshes --mesh-dir ${meshDirs[0]}. Fix: ilu compress-meshes --mesh-dir ${meshDirs[0]} --in-place`
       : " Inspect those mesh directories with inspect-meshes, then run compress-meshes on the ones that contain the failing STL files.";
   const meshSummary = riskyMeshList
     .slice(0, 3)
@@ -452,7 +452,7 @@ const printHelp = () => {
 
   console.log(
     [
-      "i-love-urdf CLI",
+      "ilu CLI (legacy alias: i-love-urdf)",
       "",
       "Source-first workflow:",
       "  1. load-source or inspect-repo",

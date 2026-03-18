@@ -11,6 +11,7 @@
     "dist"
   ],
   "bin": {
+    "ilu": "./dist/cli.js",
     "i-love-urdf": "./dist/cli.js"
   },
   "scripts": {

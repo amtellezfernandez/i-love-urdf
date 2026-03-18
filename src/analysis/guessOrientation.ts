@@ -972,7 +972,7 @@ export function guessUrdfOrientation(
           axes: rotateAxes,
           commandSequence: rotateAxes.map(
             (axis, index) =>
-              `i-love-urdf rotate-90 --urdf robot.urdf --axis ${axis} --out robot.rotated${index + 1}.urdf`
+              `ilu rotate-90 --urdf robot.urdf --axis ${axis} --out robot.rotated${index + 1}.urdf`
           ),
           note:
             "This only aligns the guessed up-axis to the target up-axis. Use apply-orientation when forward sign matters too.",
@@ -997,7 +997,7 @@ export function guessUrdfOrientation(
       sourceForwardAxis: likelyForwardDirection,
       targetUpAxis: axisSpecFromAxis(targetUpAxis),
       targetForwardAxis: axisSpecFromAxis(targetForwardAxis),
-      command: `i-love-urdf apply-orientation --urdf robot.urdf --source-up ${likelyUpDirection} --source-forward ${likelyForwardDirection} --target-up +${targetUpAxis} --target-forward +${targetForwardAxis} --out robot.oriented.urdf`,
+      command: `ilu apply-orientation --urdf robot.urdf --source-up ${likelyUpDirection} --source-forward ${likelyForwardDirection} --target-up +${targetUpAxis} --target-forward +${targetForwardAxis} --out robot.oriented.urdf`,
     },
     spans,
     revoluteAxisVotes,

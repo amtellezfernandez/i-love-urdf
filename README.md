@@ -42,10 +42,12 @@ pnpm build
 pnpm setup:xacro
 ```
 
+The primary CLI command is `ilu`. The legacy alias `i-love-urdf` still resolves.
+
 Check the managed XACRO runtime:
 
 ```sh
-i-love-urdf probe-xacro-runtime
+ilu probe-xacro-runtime
 ```
 
 ## Task Families
@@ -67,30 +69,30 @@ Leaf commands still work directly. The change is the mental model, not a breakin
 Load or inspect first:
 
 ```sh
-i-love-urdf load-source --path ./robot.urdf
-i-love-urdf inspect-repo --local ./my-robot-repo
-i-love-urdf load-source --github owner/repo --entry urdf/robot.urdf.xacro --out robot.urdf
+ilu load-source --path ./robot.urdf
+ilu inspect-repo --local ./my-robot-repo
+ilu load-source --github owner/repo --entry urdf/robot.urdf.xacro --out robot.urdf
 ```
 
 Then run tasks:
 
 ```sh
-i-love-urdf health-check --urdf robot.urdf
-i-love-urdf validate --urdf robot.urdf
-i-love-urdf analyze --urdf robot.urdf
-i-love-urdf guess-orientation --urdf robot.urdf
-i-love-urdf snap-axes --urdf robot.urdf --out robot.snapped.urdf
-i-love-urdf set-joint-axis --urdf robot.urdf --joint wheel_joint --xyz "0 1 0" --out robot.axis.urdf
-i-love-urdf canonicalize-joint-frame --urdf robot.urdf --target-axis z --out robot.canonical.urdf
-i-love-urdf apply-orientation --urdf robot.urdf --source-up +y --source-forward -z --target-up +z --target-forward +x --out robot.zup.urdf
-i-love-urdf normalize-robot --urdf robot.urdf --snap-axes --canonicalize-joint-frame
-i-love-urdf pretty-print --urdf robot.urdf --out robot.pretty.urdf
-i-love-urdf rename-link --urdf robot.urdf --link tool --name tool0 --out robot.edited.urdf
-i-love-urdf inspect-meshes --mesh-dir ./meshes
-i-love-urdf compress-meshes --mesh-dir ./meshes --in-place
-i-love-urdf urdf-to-mjcf --urdf robot.urdf --out robot.xml
-i-love-urdf urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
-i-love-urdf xacro-to-urdf --xacro robot.urdf.xacro --out robot.urdf
+ilu health-check --urdf robot.urdf
+ilu validate --urdf robot.urdf
+ilu analyze --urdf robot.urdf
+ilu guess-orientation --urdf robot.urdf
+ilu snap-axes --urdf robot.urdf --out robot.snapped.urdf
+ilu set-joint-axis --urdf robot.urdf --joint wheel_joint --xyz "0 1 0" --out robot.axis.urdf
+ilu canonicalize-joint-frame --urdf robot.urdf --target-axis z --out robot.canonical.urdf
+ilu apply-orientation --urdf robot.urdf --source-up +y --source-forward -z --target-up +z --target-forward +x --out robot.zup.urdf
+ilu normalize-robot --urdf robot.urdf --snap-axes --canonicalize-joint-frame
+ilu pretty-print --urdf robot.urdf --out robot.pretty.urdf
+ilu rename-link --urdf robot.urdf --link tool --name tool0 --out robot.edited.urdf
+ilu inspect-meshes --mesh-dir ./meshes
+ilu compress-meshes --mesh-dir ./meshes --in-place
+ilu urdf-to-mjcf --urdf robot.urdf --out robot.xml
+ilu urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
+ilu xacro-to-urdf --xacro robot.urdf.xacro --out robot.urdf
 ```
 
 Repository flow:
@@ -176,10 +178,10 @@ import { loadSourceFromGitHub } from "i-love-urdf/load-source-node";
 MuJoCo rejects STL meshes above its face limit. `inspect-meshes` shows current STL face counts and target limits. `compress-meshes` rewrites only the STL files above their target face limits.
 
 ```sh
-i-love-urdf inspect-meshes --mesh-dir ./meshes
-i-love-urdf inspect-meshes --mesh-dir ./meshes --limits heavy.stl=100000
-i-love-urdf compress-meshes --mesh-dir ./meshes --in-place
-i-love-urdf compress-meshes --mesh-dir ./meshes --meshes heavy.stl --limits heavy.stl=100000 --out-dir ./meshes.optimized
+ilu inspect-meshes --mesh-dir ./meshes
+ilu inspect-meshes --mesh-dir ./meshes --limits heavy.stl=100000
+ilu compress-meshes --mesh-dir ./meshes --in-place
+ilu compress-meshes --mesh-dir ./meshes --meshes heavy.stl --limits heavy.stl=100000 --out-dir ./meshes.optimized
 ```
 
 If you do not pass `--limits`, the default target is the MuJoCo face limit.
@@ -194,7 +196,7 @@ Default standalone flow:
 
 ```sh
 pnpm setup:xacro
-i-love-urdf probe-xacro-runtime
+ilu probe-xacro-runtime
 ```
 
 That installs a managed runtime under `.i-love-urdf/xacro-runtime`, and the CLI will auto-detect it from the current working directory or its parent directories.
@@ -207,7 +209,7 @@ Advanced runtime options:
 Bootstrap the managed runtime explicitly with:
 
 ```sh
-i-love-urdf setup-xacro-runtime
-i-love-urdf setup-xacro-runtime --python /path/to/python
-i-love-urdf setup-xacro-runtime --venv /custom/path/to/xacro-runtime
+ilu setup-xacro-runtime
+ilu setup-xacro-runtime --python /path/to/python
+ilu setup-xacro-runtime --venv /custom/path/to/xacro-runtime
 ```

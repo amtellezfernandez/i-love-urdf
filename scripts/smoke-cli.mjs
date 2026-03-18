@@ -77,17 +77,17 @@ const snapCandidateUrdf =
 
 const validate = lib.validateUrdf(urdf);
 if (!validate.isValid) {
-  throw new Error("i-love-urdf validate smoke test failed");
+  throw new Error("ilu validate smoke test failed");
 }
 
 const transmissionValidate = lib.validateUrdf(transmissionUrdf);
 if (!transmissionValidate.isValid) {
-  throw new Error("i-love-urdf transmission-aware validate smoke test failed");
+  throw new Error("ilu transmission-aware validate smoke test failed");
 }
 
 const axes = lib.normalizeJointAxes(urdf);
 if (!axes.urdfContent.includes("0.7071067812")) {
-  throw new Error("i-love-urdf normalize-axes smoke test failed");
+  throw new Error("ilu normalize-axes smoke test failed");
 }
 
 const snappedAxes = lib.snapJointAxes(snapCandidateUrdf);
@@ -95,17 +95,17 @@ if (
   !snappedAxes.urdfContent.includes('axis xyz="0 1 0"') ||
   snappedAxes.snapped.length !== 1
 ) {
-  throw new Error("i-love-urdf snap-axes smoke test failed");
+  throw new Error("ilu snap-axes smoke test failed");
 }
 
 const meshes = lib.fixMeshPaths(urdf);
 if (!meshes.urdfContent.includes("package://smoke_robot_description")) {
-  throw new Error("i-love-urdf fix-mesh-paths smoke test failed");
+  throw new Error("ilu fix-mesh-paths smoke test failed");
 }
 
 const renamedJoint = lib.renameJointInUrdf(urdf, "j", "hinge_joint");
 if (!renamedJoint.success || !renamedJoint.content.includes('joint name="hinge_joint"')) {
-  throw new Error("i-love-urdf rename-joint library smoke test failed");
+  throw new Error("ilu rename-joint library smoke test failed");
 }
 
 const renamedTransmissionJoint = lib.renameJointInUrdf(transmissionUrdf, "j", "hinge_joint");
@@ -115,12 +115,12 @@ if (
   !renamedTransmissionJoint.content.includes('<transmission name="j_trans">') ||
   !renamedTransmissionJoint.content.includes('<joint name="hinge_joint">')
 ) {
-  throw new Error("i-love-urdf transmission-aware rename-joint smoke test failed");
+  throw new Error("ilu transmission-aware rename-joint smoke test failed");
 }
 
 const renamedLink = lib.renameLinkInUrdf(urdf, "tip", "tool0");
 if (!renamedLink.success || !renamedLink.content.includes('child link="tool0"')) {
-  throw new Error("i-love-urdf rename-link library smoke test failed");
+  throw new Error("ilu rename-link library smoke test failed");
 }
 
 const removedTransmissionJoint = lib.removeJointsFromUrdf(transmissionUrdf, ["j"]);
@@ -129,12 +129,12 @@ if (
   removedTransmissionJoint.content.includes('joint name="j" type="revolute"') ||
   removedTransmissionJoint.content.includes('<transmission name="j_trans">')
 ) {
-  throw new Error("i-love-urdf transmission-aware remove-joints smoke test failed");
+  throw new Error("ilu transmission-aware remove-joints smoke test failed");
 }
 
 const analysis = lib.analyzeUrdf(urdf);
 if (analysis.robotName !== "smoke_robot" || analysis.linkNames.length !== 3) {
-  throw new Error("i-love-urdf analyze smoke test failed");
+  throw new Error("ilu analyze smoke test failed");
 }
 
 const health = lib.healthCheckUrdf(badInertiaUrdf);
@@ -143,7 +143,7 @@ if (
   !health.findings.some((finding) => finding.code === "triangle-inequality") ||
   !health.findings.some((finding) => finding.code === "orientation-guess")
 ) {
-  throw new Error("i-love-urdf health-check smoke test failed");
+  throw new Error("ilu health-check smoke test failed");
 }
 
 const zUpGuess = lib.guessUrdfOrientation(wheeledRobotZUp);
@@ -153,7 +153,7 @@ if (
   !zUpGuess.likelyUpDirection ||
   zUpGuess.report.evidence.length < 3
 ) {
-  throw new Error("i-love-urdf guess-orientation Z-up smoke test failed");
+  throw new Error("ilu guess-orientation Z-up smoke test failed");
 }
 
 const yUpGuess = lib.guessUrdfOrientation(wheeledRobotYUp);
@@ -163,12 +163,12 @@ if (
   !yUpGuess.likelyForwardDirection ||
   yUpGuess.report.evidence.length < 3
 ) {
-  throw new Error("i-love-urdf guess-orientation Y-up smoke test failed");
+  throw new Error("ilu guess-orientation Y-up smoke test failed");
 }
 
 const updatedAxis = lib.setJointAxisInUrdf(wheeledRobotZUp, "left_wheel_joint", [0, 0, 1]);
 if (!updatedAxis.success || !updatedAxis.content.includes('axis xyz="0 0 1"')) {
-  throw new Error("i-love-urdf set-joint-axis smoke test failed");
+  throw new Error("ilu set-joint-axis smoke test failed");
 }
 
 const canonicalized = lib.canonicalizeJointFrames(wheeledRobotZUp, {
@@ -179,7 +179,7 @@ if (
   !canonicalized.changedJoints.includes("left_wheel_joint") ||
   !canonicalized.content.includes('axis xyz="0 0 1"')
 ) {
-  throw new Error("i-love-urdf canonicalize-joint-frame smoke test failed");
+  throw new Error("ilu canonicalize-joint-frame smoke test failed");
 }
 
 const orientedYUp = lib.applyOrientationToRobot(wheeledRobotYUp, {
@@ -190,7 +190,7 @@ const orientedYUp = lib.applyOrientationToRobot(wheeledRobotYUp, {
 });
 const reGuessedYUp = lib.guessUrdfOrientation(orientedYUp);
 if (reGuessedYUp.likelyUpAxis !== "z") {
-  throw new Error("i-love-urdf apply-orientation smoke test failed");
+  throw new Error("ilu apply-orientation smoke test failed");
 }
 
 const normalizeDryRun = lib.normalizeRobot(wheeledRobotYUp, {
@@ -201,7 +201,7 @@ if (
   normalizeDryRun.apply ||
   !normalizeDryRun.plannedSteps.some((step) => step.name === "canonicalize-joint-frame" && step.enabled)
 ) {
-  throw new Error("i-love-urdf normalize-robot dry-run smoke test failed");
+  throw new Error("ilu normalize-robot dry-run smoke test failed");
 }
 
 const normalizeApply = lib.normalizeRobot(wheeledRobotYUp, {
@@ -214,50 +214,50 @@ const normalizeApply = lib.normalizeRobot(wheeledRobotYUp, {
   targetForwardAxis: "+x",
 });
 if (!normalizeApply.apply || !normalizeApply.outputUrdf || !normalizeApply.healthAfter) {
-  throw new Error("i-love-urdf normalize-robot apply smoke test failed");
+  throw new Error("ilu normalize-robot apply smoke test failed");
 }
 
 const diff = lib.compareUrdfs(urdf, renamedJoint.content);
 if (diff.areEqual || diff.differenceCount < 1) {
-  throw new Error("i-love-urdf diff smoke test failed");
+  throw new Error("ilu diff smoke test failed");
 }
 
 const meshAssets = lib.updateMeshPathsToAssetsInUrdf(urdf);
 if (!meshAssets.success || !meshAssets.content.includes('mesh filename="assets/abs/path/mesh.stl"')) {
-  throw new Error("i-love-urdf mesh-to-assets smoke test failed");
+  throw new Error("ilu mesh-to-assets smoke test failed");
 }
 
 const mjcf = lib.convertURDFToMJCF(urdf);
 if (!mjcf.mjcfContent.includes("<mujoco")) {
-  throw new Error("i-love-urdf urdf-to-mjcf smoke test failed");
+  throw new Error("ilu urdf-to-mjcf smoke test failed");
 }
 
 const xacro = lib.convertURDFToXacro(xacroRegressionUrdf);
 if (!xacro.xacroContent.includes("xacro:property")) {
-  throw new Error("i-love-urdf urdf-to-xacro smoke test failed");
+  throw new Error("ilu urdf-to-xacro smoke test failed");
 }
 if (!xacro.xacroContent.includes('robot name="so101_robot"')) {
-  throw new Error("i-love-urdf urdf-to-xacro robot name regression smoke test failed");
+  throw new Error("ilu urdf-to-xacro robot name regression smoke test failed");
 }
 if (!xacro.xacroContent.includes('mesh filename="assets/sts3215_03a_v1.stl"')) {
-  throw new Error("i-love-urdf urdf-to-xacro mesh filename regression smoke test failed");
+  throw new Error("ilu urdf-to-xacro mesh filename regression smoke test failed");
 }
 if (!xacro.xacroContent.includes('material name="sts3215"')) {
-  throw new Error("i-love-urdf urdf-to-xacro material name regression smoke test failed");
+  throw new Error("ilu urdf-to-xacro material name regression smoke test failed");
 }
 if (xacro.xacroContent.includes('name="so${') || xacro.xacroContent.includes('filename="assets/${')) {
-  throw new Error("i-love-urdf urdf-to-xacro unsafe substitution regression smoke test failed");
+  throw new Error("ilu urdf-to-xacro unsafe substitution regression smoke test failed");
 }
 if (xacro.xacroContent.includes("${yaw}") || xacro.xacroContent.includes('name="yaw" value="0"')) {
-  throw new Error("i-love-urdf urdf-to-xacro identity-value regression smoke test failed");
+  throw new Error("ilu urdf-to-xacro identity-value regression smoke test failed");
 }
 
 const repoRef = lib.parseGitHubRepositoryReference("https://github.com/acme/robot-repo/tree/main/robots/arm");
 if (!repoRef || repoRef.owner !== "acme" || repoRef.repo !== "robot-repo" || repoRef.ref !== "main" || repoRef.path !== "robots/arm") {
-  throw new Error("i-love-urdf GitHub repository parsing smoke test failed");
+  throw new Error("ilu GitHub repository parsing smoke test failed");
 }
 
-const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), "i-love-urdf-smoke-"));
+const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-smoke-"));
 fs.mkdirSync(path.join(tempRepo, "meshes"), { recursive: true });
 fs.writeFileSync(path.join(tempRepo, "robot.urdf"), urdf, "utf8");
 fs.writeFileSync(path.join(tempRepo, "._robot.urdf"), "not a urdf", "utf8");
@@ -267,14 +267,14 @@ if (
   localSummary.candidateCount !== 1 ||
   localSummary.primaryCandidatePath !== "robot.urdf"
 ) {
-  throw new Error("i-love-urdf local repository inspection smoke test failed");
+  throw new Error("ilu local repository inspection smoke test failed");
 }
 
 const loadedUrdfFile = await loadSourceNode.loadSourceFromPath({
   path: path.join(tempRepo, "robot.urdf"),
 });
 if (loadedUrdfFile.entryFormat !== "urdf" || !loadedUrdfFile.urdf.includes('robot name="smoke_robot"')) {
-  throw new Error("i-love-urdf load-source local file smoke test failed");
+  throw new Error("ilu load-source local file smoke test failed");
 }
 
 const brokenRepoUrdf =
@@ -290,7 +290,7 @@ const repairedLib = lib.fixMissingMeshReferencesInRepository(brokenRepoUrdf, "ur
   { path: "meshes/mesh.stl", type: "file" },
 ]);
 if (!repairedLib.success || !repairedLib.content.includes('mesh filename="../meshes/mesh.stl"')) {
-  throw new Error("i-love-urdf repo mesh repair library smoke test failed");
+  throw new Error("ilu repo mesh repair library smoke test failed");
 }
 
 const repairedLocal = await localLib.repairLocalRepositoryMeshReferences(
@@ -298,7 +298,7 @@ const repairedLocal = await localLib.repairLocalRepositoryMeshReferences(
   { urdfPath: "urdf/robot.urdf" }
 );
 if (!repairedLocal.success || repairedLocal.corrections.length !== 1) {
-  throw new Error("i-love-urdf local mesh repair smoke test failed");
+  throw new Error("ilu local mesh repair smoke test failed");
 }
 
 const wrongPathRepoUrdf =
@@ -315,7 +315,7 @@ if (
   repairedWrongPath.corrections.length !== 1 ||
   !repairedWrongPath.content.includes('mesh filename="meshes/mesh.stl"')
 ) {
-  throw new Error("i-love-urdf wrong-path mesh repair smoke test failed");
+  throw new Error("ilu wrong-path mesh repair smoke test failed");
 }
 
 const binaryMeshPath = path.join(tempRepo, "meshes", "binary.stl");
@@ -349,7 +349,7 @@ if (
   meshInspection.missingMeshes.length !== 0 ||
   meshInspection.results[0]?.targetMaxFaces !== 1
 ) {
-  throw new Error("i-love-urdf inspect-meshes smoke test failed");
+  throw new Error("ilu inspect-meshes smoke test failed");
 }
 
 const mujocoMeshPrepResult = meshNode.compressMeshes({
@@ -361,7 +361,7 @@ if (
   mujocoMeshPrepResult.overLimit !== 1 ||
   !mujocoMeshPrepResult.results[0]?.reason?.includes("Above target face limit")
 ) {
-  throw new Error("i-love-urdf MuJoCo mesh prep smoke test failed");
+  throw new Error("ilu MuJoCo mesh prep smoke test failed");
 }
 
 const xacroRuntime = await xacroNode.probeXacroRuntime({
@@ -407,7 +407,7 @@ if (xacroRuntime.available) {
 
   const xacroSummary = await localLib.inspectLocalRepositoryUrdfs({ path: tempRepo });
   if (xacroSummary.candidates.some((candidate) => candidate.path === "materials.xacro")) {
-    throw new Error("i-love-urdf xacro candidate filtering smoke test failed");
+    throw new Error("ilu xacro candidate filtering smoke test failed");
   }
 
   const expanded = await xacroNode.expandLocalXacroToUrdf({
@@ -416,13 +416,13 @@ if (xacroRuntime.available) {
     pythonExecutable: process.env.I_LOVE_URDF_XACRO_PYTHON,
   });
   if (!expanded.urdf.includes('link name="shared_tip"')) {
-    throw new Error("i-love-urdf xacro-to-urdf smoke test failed");
+    throw new Error("ilu xacro-to-urdf smoke test failed");
   }
   if (
     expanded.urdf.includes("i-love-urdf-xacro-") ||
     !expanded.urdf.includes('mesh filename="meshes/mesh.stl"')
   ) {
-    throw new Error("i-love-urdf expanded xacro mesh-path stabilization smoke test failed");
+    throw new Error("ilu expanded xacro mesh-path stabilization smoke test failed");
   }
 
   const loadedXacroRepo = await loadSourceNode.loadSourceFromPath({
@@ -431,13 +431,13 @@ if (xacroRuntime.available) {
     pythonExecutable: process.env.I_LOVE_URDF_XACRO_PYTHON,
   });
   if (loadedXacroRepo.entryFormat !== "xacro" || !loadedXacroRepo.urdf.includes('link name="shared_tip"')) {
-    throw new Error("i-love-urdf load-source xacro repository smoke test failed");
+    throw new Error("ilu load-source xacro repository smoke test failed");
   }
   if (
     loadedXacroRepo.urdf.includes("i-love-urdf-xacro-") ||
     !loadedXacroRepo.urdf.includes('mesh filename="meshes/mesh.stl"')
   ) {
-    throw new Error("i-love-urdf load-source xacro mesh-path stabilization smoke test failed");
+    throw new Error("ilu load-source xacro mesh-path stabilization smoke test failed");
   }
 }
 
@@ -453,7 +453,7 @@ if (
   !cliSource.includes("compress-meshes") ||
   !cliSource.includes("inspect-meshes")
 ) {
-  throw new Error("i-love-urdf CLI surface smoke test failed");
+  throw new Error("ilu CLI surface smoke test failed");
 }
 
-console.log("i-love-urdf smoke test passed.");
+console.log("ilu smoke test passed.");

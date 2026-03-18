@@ -223,7 +223,7 @@ export function healthCheckUrdf(
         code: "invalid-axis-format",
         context: jointName,
         message: `Joint "${jointName}" has an invalid axis format.`,
-        suggestion: "Run i-love-urdf snap-axes --urdf robot.urdf --out robot.fixed.urdf",
+        suggestion: "Run ilu snap-axes --urdf robot.urdf --out robot.fixed.urdf",
       });
       return;
     }
@@ -235,7 +235,7 @@ export function healthCheckUrdf(
         code: "zero-axis",
         context: jointName,
         message: `Joint "${jointName}" has a zero or near-zero axis vector.`,
-        suggestion: "Run i-love-urdf set-joint-axis --urdf robot.urdf --joint JOINT --xyz \"0 0 1\" --out robot.fixed.urdf",
+        suggestion: "Run ilu set-joint-axis --urdf robot.urdf --joint JOINT --xyz \"0 0 1\" --out robot.fixed.urdf",
       });
       return;
     }
@@ -246,7 +246,7 @@ export function healthCheckUrdf(
         code: "non-unit-axis",
         context: jointName,
         message: `Joint "${jointName}" axis is not unit length (magnitude ${axisMagnitude.toFixed(4)}).`,
-        suggestion: "Run i-love-urdf normalize-axes --urdf robot.urdf --out robot.normalized.urdf",
+        suggestion: "Run ilu normalize-axes --urdf robot.urdf --out robot.normalized.urdf",
       });
     }
 
@@ -257,7 +257,7 @@ export function healthCheckUrdf(
         code: "snap-axis-candidate",
         context: jointName,
         message: `Joint "${jointName}" axis is close to a canonical basis vector and can be snapped safely.`,
-        suggestion: "Run i-love-urdf snap-axes --urdf robot.urdf --out robot.snapped.urdf",
+        suggestion: "Run ilu snap-axes --urdf robot.urdf --out robot.snapped.urdf",
       });
     }
   });
@@ -271,7 +271,7 @@ export function healthCheckUrdf(
       message: `Guessed orientation: up ${orientationGuess.likelyUpDirection ?? orientationGuess.likelyUpAxis}, forward ${orientationGuess.likelyForwardDirection ?? orientationGuess.likelyForwardAxis}.`,
       suggestion:
         orientationGuess.suggestedApplyOrientation.command ||
-        "Run i-love-urdf guess-orientation --urdf robot.urdf for a detailed evidence report.",
+        "Run ilu guess-orientation --urdf robot.urdf for a detailed evidence report.",
     });
   }
 
