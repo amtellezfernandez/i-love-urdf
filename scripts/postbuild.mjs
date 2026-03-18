@@ -39,6 +39,9 @@ const browserExports = [
   "parseMeshReference",
   "normalizeMeshPathForMatch",
   "fixMeshPaths",
+  "buildPackageRootsFromRepositoryFiles",
+  "resolveRepositoryFileReference",
+  "resolveRepositoryMeshReferences",
 ];
 
 fs.mkdirSync(destinationDir, { recursive: true });

@@ -76,3 +76,9 @@ export {
 export {
   fixMeshPaths,
 } from "./mesh/fixMeshPaths";
+export {
+  buildPackageRootsFromRepositoryFiles,
+  resolveRepositoryFileReference,
+  resolveRepositoryMeshReferences,
+  type RepositoryFileEntry,
+} from "./repository/repositoryMeshResolution";

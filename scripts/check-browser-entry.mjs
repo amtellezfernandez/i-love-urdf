@@ -47,6 +47,9 @@ const expectedExports = [
   "parseMeshReference",
   "normalizeMeshPathForMatch",
   "fixMeshPaths",
+  "buildPackageRootsFromRepositoryFiles",
+  "resolveRepositoryFileReference",
+  "resolveRepositoryMeshReferences",
 ];
 
 const resolveExportPath = (relativePath) => path.join(root, relativePath.replace(/^\.\//, ""));
