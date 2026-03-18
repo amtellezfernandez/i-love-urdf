@@ -7,7 +7,7 @@
 
 import { parseURDF } from "../parsing/urdfParser";
 
-interface MJCFConversionResult {
+export interface MJCFConversionResult {
   mjcfContent: string;
   warnings: string[];
   stats: {

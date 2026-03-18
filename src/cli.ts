@@ -40,6 +40,7 @@ import {
   setupXacroRuntime,
 } from "./xacro/xacroNode";
 import { loadSourceFromGitHub, loadSourceFromPath } from "./sources/loadSourceNode";
+import { TASK_FAMILIES } from "./tasks/taskFamilies";
 
 const SUPPORTED_COMMANDS = [
   "validate",
@@ -299,39 +300,83 @@ const inspectLocalMjcfMeshRisks = (urdfPath: string, urdfContent: string): strin
 };
 
 const printHelp = () => {
+  const familySections = TASK_FAMILIES.map((family) => {
+    const commandLines = family.commands.map((commandName) => {
+      switch (commandName) {
+        case "load-source":
+          return [
+            "  load-source --path <local-file-or-dir> [--entry <repo-path>] [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+            "  load-source --github <owner/repo|url> [--entry <repo-path>] [--ref <branch>] [--subdir <path>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+          ].join("\n");
+        case "inspect-repo":
+          return "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]";
+        case "validate":
+          return "  validate --urdf <path>";
+        case "analyze":
+          return "  analyze --urdf <path>";
+        case "mesh-refs":
+          return "  mesh-refs --urdf <path>";
+        case "diff":
+          return "  diff --left <path> --right <path>";
+        case "pretty-print":
+          return "  pretty-print --urdf <path> [--indent <n>] [--out <path>]";
+        case "canonical-order":
+          return "  canonical-order --urdf <path> [--out <path>]";
+        case "normalize-axes":
+          return "  normalize-axes --urdf <path> [--out <path>]";
+        case "rename-joint":
+          return "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]";
+        case "rename-link":
+          return "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]";
+        case "reassign-joint":
+          return "  reassign-joint --urdf <path> --joint <name> --parent <link> --child <link> [--out <path>]";
+        case "remove-joints":
+          return "  remove-joints --urdf <path> --joints <a,b,c> [--out <path>]";
+        case "set-material-color":
+          return "  set-material-color --urdf <path> --link <name> --material <name> --color <#RRGGBB> [--out <path>]";
+        case "rotate-90":
+          return "  rotate-90 --urdf <path> --axis <x|y|z> [--out <path>]";
+        case "fix-mesh-paths":
+          return "  fix-mesh-paths --urdf <path> [--package <name>] [--out <path>]";
+        case "mesh-to-assets":
+          return "  mesh-to-assets --urdf <path> [--out <path>]";
+        case "repair-mesh-refs":
+          return "  repair-mesh-refs --local <repo|urdf-path> | --github <owner/repo|url> [--urdf <repo-path>] [--ref <branch>] [--path <subdir>] [--token <token>] [--out <path>]";
+        case "inspect-meshes":
+          return "  inspect-meshes --mesh-dir <path> [--max-faces <n>] [--meshes <a.stl,b.stl>] [--limits <a.stl=100000,b.stl=50000>]";
+        case "compress-meshes":
+          return "  compress-meshes --mesh-dir <path> [--max-faces <n>] [--meshes <a.stl,b.stl>] [--limits <a.stl=100000,b.stl=50000>] [--in-place | --out-dir <path>]";
+        case "urdf-to-mjcf":
+          return "  urdf-to-mjcf --urdf <path> [--out <path>]";
+        case "urdf-to-xacro":
+          return "  urdf-to-xacro --urdf <path> [--out <path>]";
+        case "xacro-to-urdf":
+          return [
+            "  xacro-to-urdf --xacro <path> [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+            "  xacro-to-urdf --local <repo> --entry <repo-path> [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+            "  xacro-to-urdf --github <owner/repo|url> --entry <repo-path> [--ref <branch>] [--path <subdir>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
+          ].join("\n");
+        default:
+          return "";
+      }
+    });
+
+    return [family.title, `  ${family.summary}`, ...commandLines].join("\n");
+  });
+
   console.log(
     [
       "i-love-urdf CLI",
       "",
-      "Commands:",
-      "  validate --urdf <path>",
-      "  analyze --urdf <path>",
-      "  diff --left <path> --right <path>",
-      "  fix-mesh-paths --urdf <path> [--package <name>] [--out <path>]",
-      "  mesh-refs --urdf <path>",
-      "  canonical-order --urdf <path> [--out <path>]",
-      "  pretty-print --urdf <path> [--indent <n>] [--out <path>]",
-      "  normalize-axes --urdf <path> [--out <path>]",
-      "  rotate-90 --urdf <path> --axis <x|y|z> [--out <path>]",
-      "  remove-joints --urdf <path> --joints <a,b,c> [--out <path>]",
-      "  reassign-joint --urdf <path> --joint <name> --parent <link> --child <link> [--out <path>]",
-      "  set-material-color --urdf <path> --link <name> --material <name> --color <#RRGGBB> [--out <path>]",
-      "  mesh-to-assets --urdf <path> [--out <path>]",
-      "  urdf-to-mjcf --urdf <path> [--out <path>]",
-      "  urdf-to-xacro --urdf <path> [--out <path>]",
+      "Source-first workflow:",
+      "  1. load-source or inspect-repo",
+      "  2. validate / analyze / edit / optimize / convert",
+      "",
+      ...familySections,
+      "",
+      "XACRO runtime support",
       "  probe-xacro-runtime [--python <path>] [--wheel <path>]",
       "  setup-xacro-runtime [--python <path>] [--venv <path>]",
-      "  load-source --path <local-file-or-dir> [--entry <repo-path>] [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
-      "  load-source --github <owner/repo|url> [--entry <repo-path>] [--ref <branch>] [--subdir <path>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
-      "  xacro-to-urdf --xacro <path> [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
-      "  xacro-to-urdf --local <repo> --entry <repo-path> [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
-      "  xacro-to-urdf --github <owner/repo|url> --entry <repo-path> [--ref <branch>] [--path <subdir>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
-      "  rename-joint --urdf <path> --joint <old> --name <new> [--out <path>]",
-      "  rename-link --urdf <path> --link <old> --name <new> [--out <path>]",
-      "  inspect-repo --local <path> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--max-candidates <n>] [--token <token>] [--out <path>]",
-      "  repair-mesh-refs --local <repo|urdf-path> | --github <owner/repo|url> [--urdf <repo-path>] [--ref <branch>] [--path <subdir>] [--token <token>] [--out <path>]",
-      "  inspect-meshes --mesh-dir <path> [--max-faces <n>] [--meshes <a.stl,b.stl>] [--limits <a.stl=100000,b.stl=50000>]",
-      "  compress-meshes --mesh-dir <path> [--max-faces <n>] [--meshes <a.stl,b.stl>] [--limits <a.stl=100000,b.stl=50000>] [--in-place | --out-dir <path>]",
       "",
       "All commands print JSON to stdout.",
     ].join("\n")

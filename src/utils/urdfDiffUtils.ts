@@ -1,7 +1,7 @@
 import { canonicalOrderURDF } from "./canonicalOrdering";
 import { prettyPrintURDF } from "./prettyPrintURDF";
 
-interface UrdfComparisonResult {
+export interface UrdfComparisonResult {
   normalizedOriginal: string;
   normalizedModified: string;
   areEqual: boolean;

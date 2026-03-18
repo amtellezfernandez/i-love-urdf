@@ -33,3 +33,5 @@ export * from "./utils/rotateRobot";
 export * from "./validation/validateUrdf";
 export * from "./xmlDom";
 export * from "./xacro/xacroContract";
+export * from "./tasks/loadedSourceTasks";
+export * from "./tasks/taskFamilies";

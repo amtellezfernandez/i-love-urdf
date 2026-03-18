@@ -41,7 +41,7 @@ interface MacroInstance {
   paramValues: Record<string, string>;
 }
 
-interface ConversionResult {
+export interface ConversionResult {
   xacroContent: string;
   properties: XacroProperty[];
   macros: XacroMacro[];
