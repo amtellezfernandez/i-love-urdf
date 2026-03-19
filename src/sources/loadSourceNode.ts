@@ -268,7 +268,7 @@ export const loadSourceFromGitHub = async (
     inspectedPath: expanded.repositoryUrl,
     repositoryUrl: expanded.repositoryUrl,
     ref: expanded.ref,
-    entryPath,
+    entryPath: expanded.targetPath,
     entryFormat,
     urdf: expanded.urdf,
     runtime: expanded.runtime,

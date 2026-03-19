@@ -17,6 +17,7 @@ import {
   buildDependencyRepositoryNameCandidates,
   collectPackageNamesFromText,
   repositoryContainsPackage,
+  resolveRepositoryXacroTargetPath,
 } from "../repository/repositoryUrdfDiscovery";
 import {
   buildPackageRootsFromRepositoryFiles,
@@ -380,10 +381,11 @@ export const buildXacroExpandPayloadFromRepository = async <T extends Repository
     useInorder?: boolean;
   } = {}
 ): Promise<XacroExpandRequestPayload> => {
-  const normalizedTargetPath = normalizeRepositoryPath(targetPath);
-  if (!normalizedTargetPath) {
+  const requestedTargetPath = normalizeRepositoryPath(targetPath);
+  if (!requestedTargetPath) {
     throw new Error("Missing target xacro path.");
   }
+  const normalizedTargetPath = resolveRepositoryXacroTargetPath(files, requestedTargetPath);
 
   const targetFile = files.find(
     (file) => file.type === "file" && normalizeRepositoryPath(file.path) === normalizedTargetPath
@@ -552,8 +554,8 @@ export const expandFetchedGitHubRepositoryXacro = async (
   files: GitHubRepositoryFile[],
   options: ExpandGitHubXacroOptions = {}
 ): Promise<GitHubXacroExpansionResult> => {
-  const normalizedTargetPath = normalizeRepositoryPath(options.targetPath ?? reference.path ?? "");
-  if (!normalizedTargetPath) {
+  const requestedTargetPath = normalizeRepositoryPath(options.targetPath ?? reference.path ?? "");
+  if (!requestedTargetPath) {
     throw new Error("GitHub Xacro expansion requires --xacro unless the GitHub reference already points to a xacro file.");
   }
 
@@ -577,7 +579,8 @@ export const expandFetchedGitHubRepositoryXacro = async (
   };
 
   for (let iteration = 0; iteration < MAX_GITHUB_DEPENDENCY_ITERATIONS; iteration += 1) {
-    const supportFiles = collectXacroSupportFilesFromRepository(resolvedFiles, normalizedTargetPath).filter(
+    const resolvedTargetPath = resolveRepositoryXacroTargetPath(resolvedFiles, requestedTargetPath);
+    const supportFiles = collectXacroSupportFilesFromRepository(resolvedFiles, resolvedTargetPath).filter(
       (file): file is GitHubRepositoryFile => file.type === "file"
     );
     const packageNames = new Set<string>();
@@ -603,7 +606,7 @@ export const expandFetchedGitHubRepositoryXacro = async (
 
   const payload = await buildXacroExpandPayloadFromRepository(
     resolvedFiles,
-    normalizedTargetPath,
+    requestedTargetPath,
     readFileBytes,
     {
       args: options.args,
@@ -611,7 +614,8 @@ export const expandFetchedGitHubRepositoryXacro = async (
     }
   );
   const result = await expandXacroRequestPayload(payload, options);
-  const stabilized = stabilizeExpandedXacroUrdf(result.urdf, normalizedTargetPath, resolvedFiles);
+  const resolvedTargetPath = resolveRepositoryXacroTargetPath(resolvedFiles, requestedTargetPath);
+  const stabilized = stabilizeExpandedXacroUrdf(result.urdf, resolvedTargetPath, resolvedFiles);
 
   return {
     source: "github",
@@ -619,7 +623,7 @@ export const expandFetchedGitHubRepositoryXacro = async (
     repo: reference.repo,
     ref,
     path: normalizeRepositoryPath(reference.path || "") || null,
-    targetPath: normalizedTargetPath,
+    targetPath: resolvedTargetPath,
     repositoryUrl: `https://github.com/${reference.owner}/${reference.repo}`,
     ...result,
     urdf: stabilized.urdf,
