@@ -242,6 +242,28 @@ const runProcess = async (
     });
   });
 
+const isMissingXacroRuntimeError = (message: string): boolean =>
+  /no (python |vendored )?xacro runtime available/i.test(message) ||
+  /install xacro or provide i_love_urdf_xacrodoc_wheel/i.test(message);
+
+const withXacroRuntimeGuidance = (message: string): string => {
+  if (!isMissingXacroRuntimeError(message)) {
+    return message;
+  }
+
+  return [
+    message,
+    "",
+    "Set up a local XACRO runtime in this project directory, then retry:",
+    "  ilu setup-xacro-runtime",
+    "  ilu probe-xacro-runtime",
+    "",
+    "If you are running from a repo checkout instead of an installed CLI, use:",
+    "  corepack pnpm ilu setup-xacro-runtime",
+    "  corepack pnpm ilu probe-xacro-runtime",
+  ].join("\n");
+};
+
 const runPythonHelper = async (
   payload: Record<string, unknown>,
   options?: XacroRuntimeOptions
@@ -279,7 +301,7 @@ const runPythonHelper = async (
       }
 
       if (parsed && parsed.ok === false) {
-        reject(new Error(parsed.error || stderr.trim() || "Xacro runtime failed."));
+        reject(new Error(withXacroRuntimeGuidance(parsed.error || stderr.trim() || "Xacro runtime failed.")));
         return;
       }
 
