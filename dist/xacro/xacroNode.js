@@ -119,21 +119,26 @@ const runProcess = async (executable, args, options = {}) => new Promise((resolv
 });
 const isMissingXacroRuntimeError = (message) => /no (python |vendored )?xacro runtime available/i.test(message) ||
     /install xacro or provide i_love_urdf_xacrodoc_wheel/i.test(message);
+const getMissingXacroArgumentName = (message) => {
+    const match = message.match(/Undefined substitution argument\s+([A-Za-z0-9_:-]+)/i);
+    return match?.[1] ?? null;
+};
 const withXacroRuntimeGuidance = (message) => {
-    if (!isMissingXacroRuntimeError(message)) {
+    const guidance = [];
+    if (isMissingXacroRuntimeError(message)) {
+        guidance.push("Set up a local XACRO runtime in this project directory, then retry:", "  ilu setup-xacro-runtime", "  ilu probe-xacro-runtime", "", "If you are running from a repo checkout instead of an installed CLI, use:", "  corepack pnpm ilu setup-xacro-runtime", "  corepack pnpm ilu probe-xacro-runtime");
+    }
+    const missingArgumentName = getMissingXacroArgumentName(message);
+    if (missingArgumentName) {
+        if (guidance.length > 0) {
+            guidance.push("");
+        }
+        guidance.push(`Provide the missing XACRO argument with --args, for example:`, `  --args ${missingArgumentName}=<value>`, "", "You can pass multiple values as --args name=value,other=value.");
+    }
+    if (guidance.length === 0) {
         return message;
     }
-    return [
-        message,
-        "",
-        "Set up a local XACRO runtime in this project directory, then retry:",
-        "  ilu setup-xacro-runtime",
-        "  ilu probe-xacro-runtime",
-        "",
-        "If you are running from a repo checkout instead of an installed CLI, use:",
-        "  corepack pnpm ilu setup-xacro-runtime",
-        "  corepack pnpm ilu probe-xacro-runtime",
-    ].join("\n");
+    return [message, "", ...guidance].join("\n");
 };
 const runPythonHelper = async (payload, options) => new Promise((resolve, reject) => {
     const pythonExecutable = getPythonExecutable(options);
