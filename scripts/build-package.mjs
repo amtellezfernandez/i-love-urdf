@@ -11,9 +11,10 @@ const distDir = path.join(root, "dist");
 const buildManifestPath = path.join(distDir, ".build-manifest.json");
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
-const run = (command, args) => {
+const run = (command, args, envOverrides = undefined) => {
   execFileSync(command, args, {
     cwd: root,
+    env: envOverrides ? { ...process.env, ...envOverrides } : process.env,
     stdio: "inherit",
   });
 };
@@ -36,19 +37,31 @@ const runTypeScriptBuild = () => {
 
   const typescriptVersion = packageJson.devDependencies?.typescript || "typescript";
   const nodeTypesVersion = packageJson.devDependencies?.["@types/node"] || "@types/node";
+  const localInstallEnv = {
+    npm_config_global: "",
+    npm_config_prefix: "",
+  };
 
-  console.error("Local TypeScript toolchain not found; bootstrapping temporary build dependencies via npm exec.");
-  run(process.execPath, [
-    npmExecPath,
-    "exec",
-    "--yes",
-    `--package=typescript@${typescriptVersion}`,
-    `--package=@types/node@${nodeTypesVersion}`,
-    "--",
-    "tsc",
-    "-p",
-    "./tsconfig.build.json",
-  ]);
+  console.error("Local TypeScript toolchain not found; installing temporary build dependencies.");
+  run(
+    process.execPath,
+    [
+      npmExecPath,
+      "install",
+      "--no-save",
+      "--no-package-lock",
+      `typescript@${typescriptVersion}`,
+      `@types/node@${nodeTypesVersion}`,
+    ],
+    localInstallEnv
+  );
+
+  const bootstrappedTscPath = resolveLocalTscPath();
+  if (!fs.existsSync(bootstrappedTscPath)) {
+    throw new Error("Temporary TypeScript install completed but tsc is still unavailable.");
+  }
+
+  run(process.execPath, [bootstrappedTscPath, "-p", "./tsconfig.build.json"]);
 };
 
 const listFiles = (targetDir) => {
