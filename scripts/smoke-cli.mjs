@@ -145,7 +145,11 @@ const xacroRepositoryPayload = await xacroNode.buildXacroExpandPayloadFromReposi
   "ur_description/urdf/ur10.xacro",
   async () => new Uint8Array(Buffer.from("<robot/>", "utf8"))
 );
-if (xacroRepositoryPayload.target_path !== "ur_description/urdf/ur10.urdf.xacro") {
+if (
+  xacroRepositoryPayload.target_path !== "ur_description/urdf/ur10.urdf.xacro" ||
+  !xacroRepositoryPayload.files.some((file) => file.path === "ur_description/urdf/ur10.urdf.xacro") ||
+  !xacroRepositoryPayload.files.some((file) => file.path === "ur_description/urdf/ur10.xacro")
+) {
   throw new Error("ilu repository xacro payload alias smoke test failed");
 }
 const inspectedCandidates = await browserLib.inspectRepositoryCandidates(
