@@ -40,11 +40,11 @@ Requirements:
 Install the CLI globally from GitHub:
 
 ```sh
-npm install -g --install-links=true git+https://github.com/amtellezfernandez/i-love-urdf.git
+npm install -g https://github.com/amtellezfernandez/i-love-urdf/archive/refs/heads/main.tar.gz
 ilu --help
 ```
 
-Use `--install-links=true` for GitHub installs so npm writes a real global package instead of a temp cache link.
+GitHub installs use the prebuilt `dist/` shipped in this repo, so no local TypeScript build step is required.
 
 Install the CLI globally from a release tarball:
 

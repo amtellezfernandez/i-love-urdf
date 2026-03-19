@@ -1,0 +1,14 @@
+import type { InertialData, OriginData } from "../parsing/parseLinkData";
+import type { UrdfTransformResult } from "./urdfTransforms";
+export type LinkGeometryType = "box" | "sphere" | "cylinder" | "mesh";
+export type LinkGeometryParams = Record<string, string>;
+export type LinkOrigin = OriginData;
+export type LinkInertiaTensor = InertialData["inertia"];
+export declare const updateVisualInLink: (urdfContent: string, linkName: string, visualIndex: number, geometryType: LinkGeometryType, geometryParams: LinkGeometryParams, origin: LinkOrigin, materialColor?: string) => UrdfTransformResult;
+export declare const addCollisionToLink: (urdfContent: string, linkName: string, geometryType: LinkGeometryType, geometryParams: LinkGeometryParams, origin?: LinkOrigin) => UrdfTransformResult;
+export declare const updateCollisionInLink: (urdfContent: string, linkName: string, collisionIndex: number, geometryType: LinkGeometryType, geometryParams: LinkGeometryParams, origin: LinkOrigin) => UrdfTransformResult;
+export declare const addInertialToLink: (urdfContent: string, linkName: string, mass: number, inertia: LinkInertiaTensor, origin?: LinkOrigin) => UrdfTransformResult;
+export declare const updateInertialInLink: (urdfContent: string, linkName: string, mass: number, inertia: LinkInertiaTensor, origin: LinkOrigin) => UrdfTransformResult;
+export declare const removeVisualFromLink: (urdfContent: string, linkName: string, visualIndex: number) => UrdfTransformResult;
+export declare const removeCollisionFromLink: (urdfContent: string, linkName: string, collisionIndex: number) => UrdfTransformResult;
+export declare const removeInertialFromLink: (urdfContent: string, linkName: string) => UrdfTransformResult;
