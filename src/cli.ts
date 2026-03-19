@@ -3,7 +3,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as process from "node:process";
-import { JSDOM } from "jsdom";
 import {
   inspectLocalRepositoryUrdfs,
   repairLocalRepositoryMeshReferences,
@@ -51,6 +50,7 @@ import { loadSourceFromGitHub, loadSourceFromPath } from "./sources/loadSourceNo
 import { TASK_FAMILIES } from "./tasks/taskFamilies";
 import { canonicalizeJointFrames } from "./transforms/canonicalizeJointFrames";
 import { normalizeRobot } from "./pipelines/normalizeRobot";
+import { installNodeDomGlobals } from "./node/nodeDomRuntime";
 
 const SUPPORTED_COMMANDS = [
   "validate",
@@ -133,12 +133,7 @@ type ArgMap = Map<string, string | boolean>;
 const SUPPORTED_COMMAND_SET = new Set<string>(SUPPORTED_COMMANDS);
 
 const installDomGlobals = () => {
-  if (typeof globalThis.DOMParser !== "undefined" && typeof globalThis.XMLSerializer !== "undefined") {
-    return;
-  }
-  const dom = new JSDOM("<!doctype html><html><body></body></html>");
-  globalThis.DOMParser = dom.window.DOMParser as unknown as typeof DOMParser;
-  globalThis.XMLSerializer = dom.window.XMLSerializer as unknown as typeof XMLSerializer;
+  installNodeDomGlobals();
 };
 
 const readText = (filePath: string): string => fs.readFileSync(filePath, "utf8");

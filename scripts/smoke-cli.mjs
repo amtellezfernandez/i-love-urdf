@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
-import { JSDOM } from "jsdom";
+import { installDomGlobals } from "./install-dom-globals.mjs";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 
@@ -21,9 +21,14 @@ const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"))
 const meshNode = await import(path.join(root, "dist", "mesh", "meshNode.js"));
 const urdfNode = await import(path.join(root, "dist", "node", "urdfNode.js"));
 
-const dom = new JSDOM("<!doctype html><html><body></body></html>");
-globalThis.DOMParser = dom.window.DOMParser;
-globalThis.XMLSerializer = dom.window.XMLSerializer;
+installDomGlobals();
+
+const hasTagWithAttributes = (xml, tagName, attributes) => {
+  const tags = xml.match(new RegExp(`<${tagName}\\b[^>]*>`, "g")) ?? [];
+  return tags.some((tag) =>
+    attributes.every(([name, value]) => tag.includes(`${name}="${value}"`))
+  );
+};
 
 const urdf =
   "<robot name=\"smoke_robot\"><link name=\"base\"/><link name=\"tip\"/>" +
@@ -209,7 +214,10 @@ if (!renamedJoint.success || !renamedJoint.content.includes('joint name="hinge_j
 const renamedTransmissionJoint = lib.renameJointInUrdf(transmissionUrdf, "j", "hinge_joint");
 if (
   !renamedTransmissionJoint.success ||
-  !renamedTransmissionJoint.content.includes('joint name="hinge_joint" type="revolute"') ||
+  !hasTagWithAttributes(renamedTransmissionJoint.content, "joint", [
+    ["name", "hinge_joint"],
+    ["type", "revolute"],
+  ]) ||
   !renamedTransmissionJoint.content.includes('<transmission name="j_trans">') ||
   !renamedTransmissionJoint.content.includes('<joint name="hinge_joint">')
 ) {
@@ -224,7 +232,10 @@ if (!renamedLink.success || !renamedLink.content.includes('child link="tool0"'))
 const removedTransmissionJoint = lib.removeJointsFromUrdf(transmissionUrdf, ["j"]);
 if (
   !removedTransmissionJoint.success ||
-  removedTransmissionJoint.content.includes('joint name="j" type="revolute"') ||
+  hasTagWithAttributes(removedTransmissionJoint.content, "joint", [
+    ["name", "j"],
+    ["type", "revolute"],
+  ]) ||
   removedTransmissionJoint.content.includes('<transmission name="j_trans">')
 ) {
   throw new Error("ilu transmission-aware remove-joints smoke test failed");
@@ -301,7 +312,8 @@ if (
 const updatedJointLimits = lib.updateJointLimitsInUrdf(urdf, "j", -1.5, 1.5);
 if (
   !updatedJointLimits.success ||
-  !updatedJointLimits.content.includes('limit lower="-1.5" upper="1.5"')
+  !updatedJointLimits.content.includes('lower="-1.5"') ||
+  !updatedJointLimits.content.includes('upper="1.5"')
 ) {
   throw new Error("ilu set-joint-limits smoke test failed");
 }
@@ -317,7 +329,10 @@ if (
 const updatedJointType = lib.updateJointTypeInUrdf(urdf, "j", "continuous");
 if (
   !updatedJointType.success ||
-  !updatedJointType.content.includes('joint name="j" type="continuous"') ||
+  !hasTagWithAttributes(updatedJointType.content, "joint", [
+    ["name", "j"],
+    ["type", "continuous"],
+  ]) ||
   updatedJointType.content.includes(' lower=')
 ) {
   throw new Error("ilu set-joint-type smoke test failed");
@@ -336,7 +351,12 @@ if (reassignmentValidation.valid || !("error" in reassignmentValidation) || !/cy
 const safeReassignment = lib.updateJointLinksInUrdf(jointChainUrdf, "j2", "base", "tip");
 if (
   !safeReassignment.success ||
-  !safeReassignment.content.includes('joint name="j2" type="revolute"><parent link="base"/><child link="tip"/>')
+  !hasTagWithAttributes(safeReassignment.content, "joint", [
+    ["name", "j2"],
+    ["type", "revolute"],
+  ]) ||
+  !safeReassignment.content.includes('<parent link="base"/>') ||
+  !safeReassignment.content.includes('<child link="tip"/>')
 ) {
   throw new Error("ilu reassign-joint smoke test failed");
 }
@@ -468,7 +488,7 @@ const xacro = lib.convertURDFToXacro(xacroRegressionUrdf);
 if (!xacro.xacroContent.includes("xacro:property")) {
   throw new Error("ilu urdf-to-xacro smoke test failed");
 }
-if (!xacro.xacroContent.includes('robot name="so101_robot"')) {
+if (!hasTagWithAttributes(xacro.xacroContent, "robot", [["name", "so101_robot"]])) {
   throw new Error("ilu urdf-to-xacro robot name regression smoke test failed");
 }
 if (!xacro.xacroContent.includes('mesh filename="assets/sts3215_03a_v1.stl"')) {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { JSDOM } from "jsdom";
+import { parseNodeXmlDocument, serializeNodeXmlDocument } from "./nodeDomRuntime";
 
 export type KinematicFingerprint = {
   strict: string;
@@ -11,7 +11,6 @@ export type ComputeKinematicFingerprintOptions = {
 };
 
 const DEFAULT_KINEMATIC_FINGERPRINT_DECIMALS = 6;
-const DOM = new JSDOM("<!doctype html><html><body></body></html>");
 const VISUAL_COLLISION_REGEXPS = [
   /<visual\b[^>]*>.*?<\/visual>/gis,
   /<collision\b[^>]*>.*?<\/collision>/gis,
@@ -20,10 +19,10 @@ const VISUAL_COLLISION_REGEXPS = [
 ];
 
 const parseXmlDocument = (xml: string): Document =>
-  new DOM.window.DOMParser().parseFromString(xml, "application/xml");
+  parseNodeXmlDocument(xml, "application/xml");
 
 const serializeXmlDocument = (document: Document): string =>
-  new DOM.window.XMLSerializer().serializeToString(document);
+  serializeNodeXmlDocument(document);
 
 const tagNameOf = (element: Element | null): string =>
   String(element?.tagName || "")

@@ -5,7 +5,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { JSDOM } from "jsdom";
+import { installDomGlobals } from "./install-dom-globals.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(
@@ -83,9 +83,7 @@ for (const exportName of expectedExports) {
   }
 }
 
-const dom = new JSDOM("<!doctype html><html><body></body></html>");
-globalThis.DOMParser = dom.window.DOMParser;
-globalThis.XMLSerializer = dom.window.XMLSerializer;
+installDomGlobals();
 
 const sampleUrdf =
   '<robot name="browser_entry"><link name="base"/><link name="tip"/>' +
