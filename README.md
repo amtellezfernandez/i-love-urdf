@@ -40,9 +40,11 @@ Requirements:
 Install the CLI globally from GitHub:
 
 ```sh
-npm install -g git+https://github.com/amtellezfernandez/i-love-urdf.git
+npm install -g --install-links=true git+https://github.com/amtellezfernandez/i-love-urdf.git
 ilu --help
 ```
+
+Use `--install-links=true` for GitHub installs so npm writes a real global package instead of a temp cache link.
 
 Install the CLI globally from a release tarball:
 
