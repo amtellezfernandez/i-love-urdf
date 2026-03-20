@@ -29,6 +29,17 @@ export type RepositoryUrdfCandidate = {
   isXacro?: boolean;
 };
 
+export type XacroArgumentDefinition = {
+  name: string;
+  hasDefault: boolean;
+  defaultValue: string | null;
+  isRequired: boolean;
+};
+
+const XML_COMMENT_REGEX = /<!--[\s\S]*?-->/g;
+const XACRO_ARG_TAG_REGEX = /<(?:[A-Za-z_][\w.-]*:)?arg\b([^<>]*)\/?>/gi;
+const XML_ATTRIBUTE_REGEX = /([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+
 const hasPathSegment = (repositoryPath: string, expectedSegment: string): boolean =>
   repositoryPath
     .split("/")
@@ -209,6 +220,51 @@ export const findRepositoryUrdfCandidates = <T extends RepositoryNamedFileEntry>
     if (scoreDiff !== 0) return scoreDiff;
     return left.path.localeCompare(right.path);
   });
+};
+
+const parseXmlAttributes = (rawAttributes: string): Map<string, string> => {
+  const attributes = new Map<string, string>();
+  let match: RegExpExecArray | null;
+  XML_ATTRIBUTE_REGEX.lastIndex = 0;
+  while ((match = XML_ATTRIBUTE_REGEX.exec(rawAttributes))) {
+    attributes.set(match[1], match[2] ?? match[3] ?? "");
+  }
+  return attributes;
+};
+
+export const extractXacroArgumentDefinitions = (
+  xacroContent: string
+): XacroArgumentDefinition[] => {
+  if (!xacroContent.trim()) return [];
+
+  const stripped = xacroContent.replace(XML_COMMENT_REGEX, "");
+  const definitions: XacroArgumentDefinition[] = [];
+  const seenNames = new Set<string>();
+  let match: RegExpExecArray | null;
+  XACRO_ARG_TAG_REGEX.lastIndex = 0;
+
+  while ((match = XACRO_ARG_TAG_REGEX.exec(stripped))) {
+    const attributes = parseXmlAttributes(match[1] ?? "");
+    const name = (attributes.get("name") ?? "").trim();
+    if (!name || seenNames.has(name)) continue;
+
+    const hasDefault = attributes.has("default") || attributes.has("value");
+    const defaultValue = attributes.has("default")
+      ? (attributes.get("default") ?? "")
+      : attributes.has("value")
+        ? (attributes.get("value") ?? "")
+        : null;
+
+    seenNames.add(name);
+    definitions.push({
+      name,
+      hasDefault,
+      defaultValue,
+      isRequired: !hasDefault,
+    });
+  }
+
+  return definitions;
 };
 
 export const extractMeshReferencesFromUrdf = (urdfContent: string): string[] => {

@@ -1,4 +1,4 @@
-import { type RepositoryNamedFileEntry, type RepositoryUrdfCandidate } from "./repositoryUrdfDiscovery";
+import { type RepositoryNamedFileEntry, type RepositoryUrdfCandidate, type XacroArgumentDefinition } from "./repositoryUrdfDiscovery";
 export type InspectableRepositoryFile = RepositoryNamedFileEntry;
 export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
     inspectionMode: "urdf" | "xacro-source";
@@ -6,6 +6,7 @@ export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
     meshReferenceCount?: number;
     unresolvedMeshReferenceCount?: number;
     referencedPackages: string[];
+    xacroArgs?: XacroArgumentDefinition[];
 };
 export type RepositoryInspectionSummary = {
     totalEntries: number;

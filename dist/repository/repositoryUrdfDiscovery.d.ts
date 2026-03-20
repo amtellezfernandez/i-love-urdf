@@ -12,8 +12,15 @@ export type RepositoryUrdfCandidate = {
     unmatchedMeshReferences?: string[];
     isXacro?: boolean;
 };
+export type XacroArgumentDefinition = {
+    name: string;
+    hasDefault: boolean;
+    defaultValue: string | null;
+    isRequired: boolean;
+};
 export declare const resolveRepositoryXacroTargetPath: <T extends RepositoryFileEntry>(files: T[], targetPath: string) => string;
 export declare const findRepositoryUrdfCandidates: <T extends RepositoryNamedFileEntry>(files: T[]) => RepositoryUrdfCandidate[];
+export declare const extractXacroArgumentDefinitions: (xacroContent: string) => XacroArgumentDefinition[];
 export declare const extractMeshReferencesFromUrdf: (urdfContent: string) => string[];
 export declare const detectUnsupportedMeshFormats: (urdfContent: string) => {
     hasUnsupported: boolean;

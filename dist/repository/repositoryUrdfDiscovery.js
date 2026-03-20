@@ -1,11 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSupportedMeshExtensions = exports.collectTargetPathHints = exports.scoreXacroWrapperCandidate = exports.collectPackageResourceFilesForMatchedFiles = exports.collectPackageResourceFilesForReferencedPackages = exports.findPackageXmlForPackageName = exports.repositoryContainsPackage = exports.buildDependencyRepositoryNameCandidates = exports.collectMeshReferencedPackageNamesFromUrdf = exports.collectPackageNamesFromText = exports.hasRenderableUrdfGeometry = exports.detectUnsupportedMeshFormats = exports.extractMeshReferencesFromUrdf = exports.findRepositoryUrdfCandidates = exports.resolveRepositoryXacroTargetPath = void 0;
+exports.getSupportedMeshExtensions = exports.collectTargetPathHints = exports.scoreXacroWrapperCandidate = exports.collectPackageResourceFilesForMatchedFiles = exports.collectPackageResourceFilesForReferencedPackages = exports.findPackageXmlForPackageName = exports.repositoryContainsPackage = exports.buildDependencyRepositoryNameCandidates = exports.collectMeshReferencedPackageNamesFromUrdf = exports.collectPackageNamesFromText = exports.hasRenderableUrdfGeometry = exports.detectUnsupportedMeshFormats = exports.extractMeshReferencesFromUrdf = exports.extractXacroArgumentDefinitions = exports.findRepositoryUrdfCandidates = exports.resolveRepositoryXacroTargetPath = void 0;
 const analyzeUrdf_1 = require("../analysis/analyzeUrdf");
 const meshFormats_1 = require("../mesh/meshFormats");
 const meshPaths_1 = require("../mesh/meshPaths");
 const repositoryMeshResolution_1 = require("./repositoryMeshResolution");
 const xacroContract_1 = require("../xacro/xacroContract");
+const XML_COMMENT_REGEX = /<!--[\s\S]*?-->/g;
+const XACRO_ARG_TAG_REGEX = /<(?:[A-Za-z_][\w.-]*:)?arg\b([^<>]*)\/?>/gi;
+const XML_ATTRIBUTE_REGEX = /([A-Za-z_][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 const hasPathSegment = (repositoryPath, expectedSegment) => repositoryPath
     .split("/")
     .filter(Boolean)
@@ -172,6 +175,45 @@ const findRepositoryUrdfCandidates = (files) => {
     });
 };
 exports.findRepositoryUrdfCandidates = findRepositoryUrdfCandidates;
+const parseXmlAttributes = (rawAttributes) => {
+    const attributes = new Map();
+    let match;
+    XML_ATTRIBUTE_REGEX.lastIndex = 0;
+    while ((match = XML_ATTRIBUTE_REGEX.exec(rawAttributes))) {
+        attributes.set(match[1], match[2] ?? match[3] ?? "");
+    }
+    return attributes;
+};
+const extractXacroArgumentDefinitions = (xacroContent) => {
+    if (!xacroContent.trim())
+        return [];
+    const stripped = xacroContent.replace(XML_COMMENT_REGEX, "");
+    const definitions = [];
+    const seenNames = new Set();
+    let match;
+    XACRO_ARG_TAG_REGEX.lastIndex = 0;
+    while ((match = XACRO_ARG_TAG_REGEX.exec(stripped))) {
+        const attributes = parseXmlAttributes(match[1] ?? "");
+        const name = (attributes.get("name") ?? "").trim();
+        if (!name || seenNames.has(name))
+            continue;
+        const hasDefault = attributes.has("default") || attributes.has("value");
+        const defaultValue = attributes.has("default")
+            ? (attributes.get("default") ?? "")
+            : attributes.has("value")
+                ? (attributes.get("value") ?? "")
+                : null;
+        seenNames.add(name);
+        definitions.push({
+            name,
+            hasDefault,
+            defaultValue,
+            isRequired: !hasDefault,
+        });
+    }
+    return definitions;
+};
+exports.extractXacroArgumentDefinitions = extractXacroArgumentDefinitions;
 const extractMeshReferencesFromUrdf = (urdfContent) => {
     const analysis = (0, analyzeUrdf_1.analyzeUrdf)(urdfContent);
     if (!analysis.isValid)

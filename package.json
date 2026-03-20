@@ -19,7 +19,8 @@
     "check:browser-entry": "node ./scripts/check-browser-entry.mjs",
     "ilu": "node ./scripts/run-cli.mjs",
     "setup:xacro": "node ./scripts/run-cli.mjs setup-xacro-runtime",
-    "smoke": "node ./scripts/smoke-cli.mjs"
+    "smoke": "node ./scripts/smoke-cli.mjs",
+    "test:real-repos": "node ./scripts/test-real-repos.mjs"
   },
   "dependencies": {
     "linkedom": "^0.18.12",

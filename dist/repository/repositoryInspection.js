@@ -22,9 +22,11 @@ const inspectRepositoryCandidate = async (candidate, files, readText) => {
         ...(candidate.isXacro ? [] : (0, repositoryUrdfDiscovery_1.collectMeshReferencedPackageNamesFromUrdf)(text)),
     ])).sort();
     if (candidate.isXacro) {
+        const xacroArgs = (0, repositoryUrdfDiscovery_1.extractXacroArgumentDefinitions)(text);
         return {
             ...baseInspection,
             referencedPackages,
+            xacroArgs,
         };
     }
     const packageRoots = (0, repositoryMeshResolution_1.buildPackageRootsFromRepositoryFiles)(files);

@@ -32,6 +32,14 @@ export type XacroExpandResponsePayload = {
 
 const normalizeXacroPayloadPath = (path: string): string => path.replace(/\\/g, "/");
 
+const stripDescriptionSegment = (path: string): string | null => {
+  if (/^description\//i.test(path)) {
+    return path.replace(/^description\//i, "");
+  }
+  const replaced = path.replace(/\/description\//i, "/");
+  return replaced === path ? null : replaced;
+};
+
 const encodeBase64FromBytes = (bytes: Uint8Array): string => {
   let binary = "";
   for (const byte of bytes) {
@@ -98,20 +106,31 @@ export const createXacroFilePayloadFromText = (path: string, content: string): X
 
 const buildXacroPayloadPathAliases = (path: string): string[] => {
   const normalizedPath = normalizeXacroPayloadPath(path);
-  const fileName = normalizedPath.split("/").pop() || normalizedPath;
-  if (!isXacroPath(fileName)) {
-    return [normalizedPath];
+  const basePaths = [normalizedPath];
+  const descriptionAlias = stripDescriptionSegment(normalizedPath);
+  if (descriptionAlias) {
+    basePaths.push(descriptionAlias);
   }
 
-  const lastSlash = normalizedPath.lastIndexOf("/");
-  const directory = lastSlash >= 0 ? normalizedPath.slice(0, lastSlash) : "";
-  const prefix = directory ? `${directory}/` : "";
-  const stem = fileName.replace(/(\.urdf)?\.xacro$/i, "");
+  const aliases = new Set<string>();
+  for (const basePath of basePaths) {
+    aliases.add(basePath);
+    const fileName = basePath.split("/").pop() || basePath;
+    if (!isXacroPath(fileName)) continue;
 
-  if (isUrdfXacroPath(fileName)) {
-    return [normalizedPath, `${prefix}${stem}.xacro`];
+    const lastSlash = basePath.lastIndexOf("/");
+    const directory = lastSlash >= 0 ? basePath.slice(0, lastSlash) : "";
+    const prefix = directory ? `${directory}/` : "";
+    const stem = fileName.replace(/(\.urdf)?\.xacro$/i, "");
+
+    if (isUrdfXacroPath(fileName)) {
+      aliases.add(`${prefix}${stem}.xacro`);
+    } else {
+      aliases.add(`${prefix}${stem}.urdf.xacro`);
+    }
   }
-  return [normalizedPath, `${prefix}${stem}.urdf.xacro`];
+
+  return Array.from(aliases);
 };
 
 const expandXacroPayloadFiles = (files: XacroFilePayload[]): XacroFilePayload[] => {

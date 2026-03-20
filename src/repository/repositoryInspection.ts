@@ -6,11 +6,13 @@ import {
   collectMeshReferencedPackageNamesFromUrdf,
   collectPackageNamesFromText,
   detectUnsupportedMeshFormats,
+  extractXacroArgumentDefinitions,
   extractMeshReferencesFromUrdf,
   findRepositoryUrdfCandidates,
   hasRenderableUrdfGeometry,
   type RepositoryNamedFileEntry,
   type RepositoryUrdfCandidate,
+  type XacroArgumentDefinition,
 } from "./repositoryUrdfDiscovery";
 import { extractExtension, isSupportedMeshExtension } from "../mesh/meshFormats";
 import { normalizeMeshPathForMatch, parseMeshReference } from "../mesh/meshPaths";
@@ -23,6 +25,7 @@ export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
   meshReferenceCount?: number;
   unresolvedMeshReferenceCount?: number;
   referencedPackages: string[];
+  xacroArgs?: XacroArgumentDefinition[];
 };
 
 export type RepositoryInspectionSummary = {
@@ -74,9 +77,11 @@ const inspectRepositoryCandidate = async <T extends InspectableRepositoryFile>(
   ).sort();
 
   if (candidate.isXacro) {
+    const xacroArgs = extractXacroArgumentDefinitions(text);
     return {
       ...baseInspection,
       referencedPackages,
+      xacroArgs,
     };
   }
 

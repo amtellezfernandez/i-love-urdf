@@ -15,5 +15,5 @@ export { buildOrientationMappingRotation, applyOrientationToRobot, rotateRobot90
 export { isSafeMeshPath, normalizeMeshPath, normalizeMeshPathForMatch, parseMeshReference, type MeshReference, } from "./mesh/meshPaths";
 export { fixMeshPaths, } from "./mesh/fixMeshPaths";
 export { inspectRepositoryCandidates, type InspectRepositoryCandidatesOptions, type RepositoryCandidateInspection, } from "./repository/repositoryInspection";
-export { collectPackageResourceFilesForMatchedFiles, resolveRepositoryXacroTargetPath, } from "./repository/repositoryUrdfDiscovery";
+export { collectPackageResourceFilesForMatchedFiles, extractXacroArgumentDefinitions, resolveRepositoryXacroTargetPath, type XacroArgumentDefinition, } from "./repository/repositoryUrdfDiscovery";
 export { buildRepositoryFileEntriesFromPaths, buildPackageRootsFromRepositoryFiles, extractPackageNameFromPackageXml, resolveRepositoryFileReference, resolveRepositoryMeshReferences, type BuildPackageRootsOptions, type PackageNameByPath, type RepositoryFileEntry, } from "./repository/repositoryMeshResolution";

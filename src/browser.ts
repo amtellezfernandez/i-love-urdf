@@ -91,7 +91,9 @@ export {
 } from "./repository/repositoryInspection";
 export {
   collectPackageResourceFilesForMatchedFiles,
+  extractXacroArgumentDefinitions,
   resolveRepositoryXacroTargetPath,
+  type XacroArgumentDefinition,
 } from "./repository/repositoryUrdfDiscovery";
 export {
   buildRepositoryFileEntriesFromPaths,

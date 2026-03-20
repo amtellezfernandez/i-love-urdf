@@ -157,6 +157,31 @@ if (
 ) {
   throw new Error("ilu repository xacro payload alias smoke test failed");
 }
+const descriptionAliasPayload = lib.buildXacroExpandRequestPayload({
+  targetPath: "example_9/description/urdf/rrbot.urdf.xacro",
+  files: [
+    lib.createXacroFilePayloadFromText(
+      "example_9/description/urdf/rrbot.urdf.xacro",
+      "<robot/>"
+    ),
+    lib.createXacroFilePayloadFromText(
+      "example_9/description/ros2_control/rrbot.ros2_control.xacro",
+      "<robot/>"
+    ),
+  ],
+  args: {},
+  useInorder: true,
+});
+if (
+  !descriptionAliasPayload.files.some(
+    (file) => file.path === "example_9/urdf/rrbot.urdf.xacro"
+  ) ||
+  !descriptionAliasPayload.files.some(
+    (file) => file.path === "example_9/ros2_control/rrbot.ros2_control.xacro"
+  )
+) {
+  throw new Error("ilu xacro description-root alias smoke test failed");
+}
 const inspectedCandidates = await browserLib.inspectRepositoryCandidates(
   [{ path: "robot.urdf", name: "robot.urdf", hasMeshesFolder: false }],
   [{ path: "robot.urdf", name: "robot.urdf", type: "file" }],
@@ -166,6 +191,43 @@ const inspectedCandidates = await browserLib.inspectRepositoryCandidates(
 );
 if (inspectedCandidates[0]?.unmatchedMeshReferences?.[0] !== "meshes/missing.stl") {
   throw new Error("ilu repository candidate inspection smoke test failed");
+}
+const xacroArgs = lib.extractXacroArgumentDefinitions(
+  '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">' +
+    '<xacro:arg name="required_name"/>' +
+    '<xacro:arg name="prefix" default=""/>' +
+    '<xacro:arg name="mode" value="demo"/>' +
+  "</robot>"
+);
+if (
+  xacroArgs.length !== 3 ||
+  xacroArgs[0]?.name !== "required_name" ||
+  xacroArgs[0]?.isRequired !== true ||
+  xacroArgs[1]?.name !== "prefix" ||
+  xacroArgs[1]?.hasDefault !== true ||
+  xacroArgs[1]?.defaultValue !== "" ||
+  xacroArgs[2]?.name !== "mode" ||
+  xacroArgs[2]?.defaultValue !== "demo"
+) {
+  throw new Error("ilu xacro arg extraction smoke test failed");
+}
+const inspectedXacroCandidates = await browserLib.inspectRepositoryCandidates(
+  [{ path: "robot.urdf.xacro", name: "robot.urdf.xacro", hasMeshesFolder: false, isXacro: true }],
+  [{ path: "robot.urdf.xacro", name: "robot.urdf.xacro", type: "file" }],
+  async () =>
+    '<robot xmlns:xacro="http://www.ros.org/wiki/xacro">' +
+    '<xacro:arg name="robot_name"/>' +
+    '<xacro:arg name="prefix" default="demo_"/>' +
+    "</robot>",
+  { maxCandidatesToInspect: 1 }
+);
+if (
+  inspectedXacroCandidates[0]?.inspectionMode !== "xacro-source" ||
+  inspectedXacroCandidates[0]?.xacroArgs?.[0]?.name !== "robot_name" ||
+  inspectedXacroCandidates[0]?.xacroArgs?.[0]?.isRequired !== true ||
+  inspectedXacroCandidates[0]?.xacroArgs?.[1]?.defaultValue !== "demo_"
+) {
+  throw new Error("ilu xacro candidate inspection smoke test failed");
 }
 
 const transmissionValidate = lib.validateUrdf(transmissionUrdf);
