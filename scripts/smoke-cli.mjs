@@ -222,6 +222,12 @@ if (
 ) {
   throw new Error("ilu xacro arg extraction smoke test failed");
 }
+const browserXacroArgs = browserLib.extractXacroArgumentDefinitions(
+  '<robot xmlns:xacro="http://www.ros.org/wiki/xacro"><xacro:arg name="robot_name"/></robot>'
+);
+if (browserXacroArgs[0]?.name !== "robot_name") {
+  throw new Error("ilu browser xacro arg extraction smoke test failed");
+}
 const inspectedXacroCandidates = await browserLib.inspectRepositoryCandidates(
   [{ path: "robot.urdf.xacro", name: "robot.urdf.xacro", hasMeshesFolder: false, isXacro: true }],
   [{ path: "robot.urdf.xacro", name: "robot.urdf.xacro", type: "file" }],

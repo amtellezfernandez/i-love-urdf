@@ -35,6 +35,20 @@ const requiredPackedFiles = [
 
 const unexpectedPackedPrefixes = ["examples/", "scripts/", "src/", "tests/"];
 
+const collectExportTargetPaths = (value) => {
+  if (typeof value === "string") {
+    return value.startsWith("./") ? [value.slice(2)] : [];
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  return Array.from(
+    new Set(Object.values(value).flatMap((entry) => collectExportTargetPaths(entry)))
+  );
+};
+
 const buildEnv = (envOverrides = undefined, { scrubNpmEnv = false } = {}) => {
   const env = { ...process.env, ...(envOverrides ?? {}) };
 
@@ -105,6 +119,13 @@ const assertInstalledPackage = (prefix, label) => {
     `${label}: installed package version mismatch`
   );
 
+  for (const exportTarget of collectExportTargetPaths(installedPackageJson.exports)) {
+    expect(
+      fs.existsSync(path.join(installedRoot, exportTarget)),
+      `${label}: missing export target ${exportTarget}`
+    );
+  }
+
   for (const relativePath of requiredInstalledFiles) {
     expect(
       fs.existsSync(path.join(installedRoot, relativePath)),
@@ -171,6 +192,10 @@ const verifyPackedFiles = (packMetadata) => {
       !unexpectedPackedPrefixes.some((prefix) => relativePath.startsWith(prefix)),
       `npm pack: unexpected file ${relativePath}`
     );
+  }
+
+  for (const exportTarget of collectExportTargetPaths(packageJson.exports)) {
+    expect(packedPaths.has(exportTarget), `npm pack: missing export target ${exportTarget}`);
   }
 };
 

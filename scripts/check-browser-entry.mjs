@@ -5,6 +5,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { getBrowserRuntimeExports } from "./browser-exports.mjs";
 import { installDomGlobals } from "./install-dom-globals.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,67 +18,7 @@ if (!browserExport || !browserExport.import || !browserExport.require) {
   throw new Error('package.json must expose "./browser" with both import and require targets.');
 }
 
-const expectedExports = [
-  "parseURDF",
-  "serializeURDF",
-  "parseLinkData",
-  "parseLinkDataFromDocument",
-  "parseSensors",
-  "parseSensorsFromDocument",
-  "parseJointAxesFromDocument",
-  "parseJointAxesFromURDF",
-  "parseJointLimitsFromDocument",
-  "parseJointLimitsFromURDF",
-  "getJointLimits",
-  "parseJointHierarchyFromDocument",
-  "parseJointHierarchy",
-  "parseLinkNamesFromDocument",
-  "parseLinkNames",
-  "getJointLinks",
-  "findNamedUrdfElement",
-  "hasXacroSyntax",
-  "parsePlainUrdfDocument",
-  "parseUrdfDocument",
-  "getUrdfElementByName",
-  "serializeUrdfDocument",
-  "canonicalOrderURDF",
-  "compareUrdfs",
-  "guessOrientation",
-  "normalizeJointAxis",
-  "normalizeJointAxes",
-  "snapJointAxes",
-  "prettyPrintURDF",
-  "sanitizeNames",
-  "alignJointToLocalZ",
-  "convertURDFToUSD",
-  "createInlineUsdMeshPrim",
-  "createUsdStage",
-  "mapUrdfToUsdPrim",
-  "buildOrientationMappingRotation",
-  "applyOrientationToRobot",
-  "rotateRobot90Degrees",
-  "isSafeMeshPath",
-  "normalizeMeshPath",
-  "parseMeshReference",
-  "computeMeshBoundsFromArrayBuffer",
-  "resolveMeshCandidates",
-  "buildPackageRootsFromMeshBlobMap",
-  "resolveMeshBlob",
-  "resolveMeshBlobFromReference",
-  "resolveMeshResourceBlob",
-  "stripMeshSchemes",
-  "normalizeMeshPathForMatch",
-  "fixMeshPaths",
-  "fixMissingMeshReferences",
-  "inspectRepositoryCandidates",
-  "collectPackageResourceFilesForMatchedFiles",
-  "resolveRepositoryXacroTargetPath",
-  "buildRepositoryFileEntriesFromPaths",
-  "buildPackageRootsFromRepositoryFiles",
-  "extractPackageNameFromPackageXml",
-  "resolveRepositoryFileReference",
-  "resolveRepositoryMeshReferences",
-];
+const expectedExports = getBrowserRuntimeExports(root);
 
 const resolveExportPath = (relativePath) => path.join(root, relativePath.replace(/^\.\//, ""));
 

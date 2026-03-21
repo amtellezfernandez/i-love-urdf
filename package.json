@@ -84,7 +84,6 @@
       "require": "./dist/browser.js",
       "default": "./dist/browser.mjs"
     },
-    "./src": "./src/index.ts",
     "./package.json": "./package.json"
   },
   "devDependencies": {
