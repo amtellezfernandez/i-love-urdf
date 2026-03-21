@@ -28,6 +28,11 @@ export interface AxisNormalizationResult {
   snapped: AxisCorrection[];
 }
 
+export type JointAxisInput =
+  | [number, number, number]
+  | { x: number; y: number; z: number }
+  | string;
+
 const DEFAULT_EPSILON = 1e-6;
 const DEFAULT_SNAP_TOLERANCE = 1e-3;
 const DEFAULT_AXIS: [number, number, number] = [1, 0, 0];
@@ -51,6 +56,19 @@ function parseAxis(axisStr: string): [number, number, number] | null {
   }
   return [values[0], values[1], values[2]];
 }
+
+const coerceAxisInput = (axis: JointAxisInput): [number, number, number] | null => {
+  if (typeof axis === "string") {
+    return parseAxis(axis);
+  }
+  if (Array.isArray(axis)) {
+    return axis.length === 3 ? [Number(axis[0]), Number(axis[1]), Number(axis[2])] : null;
+  }
+  if (axis && typeof axis === "object") {
+    return [Number(axis.x), Number(axis.y), Number(axis.z)];
+  }
+  return null;
+};
 
 function magnitude(vec: [number, number, number]): number {
   return Math.sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
@@ -100,6 +118,42 @@ function findCanonicalSnapTarget(
   }
 
   return bestTarget;
+}
+
+export function normalizeJointAxis(
+  axis: JointAxisInput,
+  options: AxisNormalizationOptions = {}
+): [number, number, number] {
+  const epsilon = options.epsilon ?? DEFAULT_EPSILON;
+  const defaultAxis = options.defaultAxis ?? DEFAULT_AXIS;
+  const snapTolerance = options.snapTolerance ?? DEFAULT_SNAP_TOLERANCE;
+  const snapToCanonical = options.snapToCanonical ?? false;
+
+  const parsedAxis = coerceAxisInput(axis);
+  if (!parsedAxis || parsedAxis.some((value) => !Number.isFinite(value))) {
+    return defaultAxis;
+  }
+
+  const mag = magnitude(parsedAxis);
+  if (mag < epsilon) {
+    return defaultAxis;
+  }
+
+  let correctedAxis = normalize(parsedAxis);
+  correctedAxis = epsilonClamp(correctedAxis, epsilon);
+  const reNormalizedMagnitude = magnitude(correctedAxis);
+  if (reNormalizedMagnitude > epsilon) {
+    correctedAxis = normalize(correctedAxis);
+  }
+
+  if (snapToCanonical) {
+    const snapTarget = findCanonicalSnapTarget(correctedAxis, snapTolerance);
+    if (snapTarget) {
+      correctedAxis = snapTarget;
+    }
+  }
+
+  return correctedAxis;
 }
 
 export function normalizeJointAxes(
@@ -197,13 +251,12 @@ export function normalizeJointAxes(
       continue;
     }
 
-    let correctedAxis = normalize(parsedAxis);
-    correctedAxis = epsilonClamp(correctedAxis, epsilon);
-
-    const reNormalizedMagnitude = magnitude(correctedAxis);
-    if (reNormalizedMagnitude > epsilon) {
-      correctedAxis = normalize(correctedAxis);
-    }
+    let correctedAxis = normalizeJointAxis(parsedAxis, {
+      epsilon,
+      defaultAxis,
+      snapTolerance,
+      snapToCanonical,
+    });
 
     let correctionReason =
       Math.abs(mag - 1.0) > epsilon
@@ -213,7 +266,6 @@ export function normalizeJointAxes(
     if (snapToCanonical) {
       const snapTarget = findCanonicalSnapTarget(correctedAxis, snapTolerance);
       if (snapTarget) {
-        correctedAxis = snapTarget;
         correctionReason = `Snapped near-canonical axis within tolerance ${snapTolerance}`;
       }
     }

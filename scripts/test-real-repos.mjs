@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const cliPath = path.join(root, "dist", "cli.js");
@@ -105,11 +105,6 @@ const requireXacroArg = (candidate, name, expectedDefaultValue) => {
   }
   return match;
 };
-
-execFileSync(process.execPath, [path.join(root, "scripts", "build-package.mjs")], {
-  stdio: "inherit",
-  cwd: root,
-});
 
 const xacroRuntime = runCliJson([
   "setup-xacro-runtime",

@@ -1,4 +1,5 @@
 import { guessUrdfOrientation } from "./guessOrientation";
+import { HEALTH_CHECK_REPORT_CONTRACT } from "../contracts/outputContracts";
 export type HealthCheckLevel = "error" | "warning" | "info";
 export interface HealthCheckFinding {
     level: HealthCheckLevel;
@@ -12,6 +13,8 @@ export interface HealthCheckOptions {
     includeOrientation?: boolean;
 }
 export interface HealthCheckReport {
+    schema: typeof HEALTH_CHECK_REPORT_CONTRACT.schema;
+    schemaVersion: typeof HEALTH_CHECK_REPORT_CONTRACT.schemaVersion;
     ok: boolean;
     findings: HealthCheckFinding[];
     summary: {

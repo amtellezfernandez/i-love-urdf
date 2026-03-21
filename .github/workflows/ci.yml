@@ -32,10 +32,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: pnpm build
+        run: pnpm build:package
+
+      - name: Check Dist Is Current
+        run: git diff --exit-code -- dist
+
+      - name: Check Install Paths
+        run: pnpm check:install
 
       - name: Check Browser Entry
         run: pnpm check:browser-entry
+
+      - name: Targeted Tests
+        run: pnpm test
 
       - name: Setup XACRO Runtime
         run: pnpm setup:xacro

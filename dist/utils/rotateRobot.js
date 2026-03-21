@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildOrientationMappingRotation = buildOrientationMappingRotation;
+exports.applyGlobalRotation = applyGlobalRotation;
 exports.applyOrientationToRobot = applyOrientationToRobot;
 exports.rotateRobot90Degrees = rotateRobot90Degrees;
 const xmlDom_1 = require("../xmlDom");
@@ -34,7 +35,7 @@ function buildOrientationMappingRotation(options) {
     const targetBasis = basisFromForwardUp(options.targetForwardAxis ?? "x", options.targetUpAxis ?? "z");
     return (0, rotationMath_1.multiplyMatrices)(targetBasis, (0, rotationMath_1.transpose)(sourceBasis));
 }
-function applyRotationMatrixToRobotBase(urdfContent, R) {
+function applyGlobalRotation(urdfContent, R) {
     const xmlDoc = (0, xmlDom_1.parseXml)(urdfContent);
     const parserError = xmlDoc.querySelector("parsererror");
     if (parserError) {
@@ -74,9 +75,9 @@ function applyRotationMatrixToRobotBase(urdfContent, R) {
 }
 function applyOrientationToRobot(urdfContent, options) {
     const rotation = buildOrientationMappingRotation(options);
-    return applyRotationMatrixToRobotBase(urdfContent, rotation);
+    return applyGlobalRotation(urdfContent, rotation);
 }
 function rotateRobot90Degrees(urdfContent, axis) {
     const R = (0, rotationMath_1.createRotation90Degrees)(axis);
-    return applyRotationMatrixToRobotBase(urdfContent, R);
+    return applyGlobalRotation(urdfContent, R);
 }

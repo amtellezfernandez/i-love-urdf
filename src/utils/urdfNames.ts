@@ -14,3 +14,24 @@ export const sanitizeUrdfName = (name: string, allowHyphen = true): string => {
   }
   return sanitized;
 };
+
+export type SanitizeNamesOptions = {
+  allowHyphen?: boolean;
+  lowerCase?: boolean;
+};
+
+export const sanitizeNames = (
+  name: string,
+  options: SanitizeNamesOptions = {}
+): string => {
+  const allowHyphen = options.allowHyphen ?? false;
+  const lowerCase = options.lowerCase ?? true;
+  const sanitized = sanitizeUrdfName(name, allowHyphen)
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  if (!sanitized) return "";
+
+  const normalized = lowerCase ? sanitized.toLowerCase() : sanitized;
+  return /^\d/.test(normalized) ? `_${normalized}` : normalized;
+};

@@ -1,0 +1,142 @@
+{
+  "schema": "i-love-urdf/robot-orientation-card",
+  "schemaVersion": "1.0.0",
+  "isValid": true,
+  "robotName": "research_wheeled_y_up",
+  "summary": {
+    "classification": "y-up",
+    "confidence": 0.89,
+    "likelyUpAxis": "y",
+    "likelyUpDirection": "+y",
+    "likelyForwardAxis": "x",
+    "likelyForwardDirection": "+x",
+    "likelyLateralAxis": "z",
+    "likelyLateralDirection": "-z"
+  },
+  "targetBasis": {
+    "up": "+z",
+    "forward": "+x"
+  },
+  "spans": {
+    "x": 1,
+    "y": 0.30000000000000004,
+    "z": 0.65
+  },
+  "jointAxisVotes": {
+    "x": 0,
+    "y": 0,
+    "z": 2
+  },
+  "wheelAxisVotes": {
+    "x": 0,
+    "y": 0,
+    "z": 4
+  },
+  "wheelJointNames": [
+    "left_wheel_joint",
+    "right_wheel_joint"
+  ],
+  "signals": [
+    {
+      "kind": "wheel-axis",
+      "weight": 0.9400000000000001,
+      "message": "Detected wheel-like joints around Z and used the remaining span contrast to infer forward/up."
+    },
+    {
+      "kind": "geometry-span",
+      "weight": 0.25,
+      "message": "Nominal span estimate: X=1.000, Y=0.300, Z=0.650."
+    },
+    {
+      "kind": "pca-forward",
+      "weight": 0.12384997900192313,
+      "message": "PCA direction cue suggests forward +y."
+    },
+    {
+      "kind": "pca-up",
+      "weight": 0.7919756518126743,
+      "message": "PCA direction cue suggests up +z."
+    }
+  ],
+  "report": {
+    "evidence": [
+      {
+        "label": "Wheel axis inference",
+        "role": "lateral",
+        "axis": "+z",
+        "score": 1,
+        "weight": 0.55,
+        "contribution": 0.55,
+        "details": "Wheel-like joints: left_wheel_joint, right_wheel_joint."
+      },
+      {
+        "label": "Geometry span",
+        "role": "up",
+        "axis": "+y",
+        "score": 1,
+        "weight": 0.28,
+        "contribution": 0.28,
+        "details": "Shortest span was treated as the best up candidate: X=1.000, Y=0.300, Z=0.650."
+      },
+      {
+        "label": "Geometry span",
+        "role": "forward",
+        "axis": "+x",
+        "score": 1,
+        "weight": 0.18,
+        "contribution": 0.18,
+        "details": "Forward span X=1.000 vs lateral Z=0.650."
+      },
+      {
+        "label": "Joint axis votes",
+        "role": "up",
+        "axis": "+y",
+        "score": 0,
+        "weight": 0.22,
+        "contribution": 0,
+        "details": "Revolute/prismatic world-axis votes: X=0.00, Y=0.00, Z=2.00."
+      },
+      {
+        "label": "PCA forward cue",
+        "role": "forward",
+        "axis": "+y",
+        "score": 0.12384997900192313,
+        "weight": 0.3,
+        "contribution": -0.037154993700576934,
+        "details": "Principal-axis asymmetry suggests forward +y. Primary basis=1.000 -0.000 0.000."
+      },
+      {
+        "label": "PCA up cue",
+        "role": "up",
+        "axis": "+z",
+        "score": 0.7919756518126743,
+        "weight": 0.26,
+        "contribution": -0.2059136694712953,
+        "details": "Principal-axis shape suggests up +z. Secondary basis=0.000 0.987 -0.163, tertiary basis=0.000 0.163 0.987."
+      }
+    ],
+    "conflicts": [
+      "PCA up cue suggests +z, while the final basis kept Y as up."
+    ]
+  },
+  "assumptions": [
+    "Orientation is inferred from the nominal zero-pose URDF or expanded XACRO output.",
+    "Signed forward and up directions use geometry asymmetry and can stay ambiguous on highly symmetric robots."
+  ],
+  "suggestedRotate90": {
+    "axes": [
+      "x"
+    ],
+    "commandSequence": [
+      "ilu rotate-90 --urdf robot.urdf --axis x --out robot.rotated1.urdf"
+    ],
+    "note": "This only aligns the guessed up-axis to the target up-axis. Use apply-orientation when forward sign matters too."
+  },
+  "suggestedApplyOrientation": {
+    "sourceUpAxis": "+y",
+    "sourceForwardAxis": "+x",
+    "targetUpAxis": "+z",
+    "targetForwardAxis": "+x",
+    "command": "ilu apply-orientation --urdf robot.urdf --source-up +y --source-forward +x --target-up +z --target-forward +x --out robot.oriented.urdf"
+  }
+}

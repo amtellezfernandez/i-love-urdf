@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeJointAxis = normalizeJointAxis;
 exports.normalizeJointAxes = normalizeJointAxes;
 exports.snapJointAxes = snapJointAxes;
 const urdfParser_1 = require("../parsing/urdfParser");
@@ -24,6 +25,18 @@ function parseAxis(axisStr) {
     }
     return [values[0], values[1], values[2]];
 }
+const coerceAxisInput = (axis) => {
+    if (typeof axis === "string") {
+        return parseAxis(axis);
+    }
+    if (Array.isArray(axis)) {
+        return axis.length === 3 ? [Number(axis[0]), Number(axis[1]), Number(axis[2])] : null;
+    }
+    if (axis && typeof axis === "object") {
+        return [Number(axis.x), Number(axis.y), Number(axis.z)];
+    }
+    return null;
+};
 function magnitude(vec) {
     return Math.sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
 }
@@ -61,6 +74,33 @@ function findCanonicalSnapTarget(normalizedAxis, snapTolerance) {
         }
     }
     return bestTarget;
+}
+function normalizeJointAxis(axis, options = {}) {
+    const epsilon = options.epsilon ?? DEFAULT_EPSILON;
+    const defaultAxis = options.defaultAxis ?? DEFAULT_AXIS;
+    const snapTolerance = options.snapTolerance ?? DEFAULT_SNAP_TOLERANCE;
+    const snapToCanonical = options.snapToCanonical ?? false;
+    const parsedAxis = coerceAxisInput(axis);
+    if (!parsedAxis || parsedAxis.some((value) => !Number.isFinite(value))) {
+        return defaultAxis;
+    }
+    const mag = magnitude(parsedAxis);
+    if (mag < epsilon) {
+        return defaultAxis;
+    }
+    let correctedAxis = normalize(parsedAxis);
+    correctedAxis = epsilonClamp(correctedAxis, epsilon);
+    const reNormalizedMagnitude = magnitude(correctedAxis);
+    if (reNormalizedMagnitude > epsilon) {
+        correctedAxis = normalize(correctedAxis);
+    }
+    if (snapToCanonical) {
+        const snapTarget = findCanonicalSnapTarget(correctedAxis, snapTolerance);
+        if (snapTarget) {
+            correctedAxis = snapTarget;
+        }
+    }
+    return correctedAxis;
 }
 function normalizeJointAxes(urdfContent, options = {}) {
     const epsilon = options.epsilon ?? DEFAULT_EPSILON;
@@ -143,19 +183,18 @@ function normalizeJointAxes(urdfContent, options = {}) {
             });
             continue;
         }
-        let correctedAxis = normalize(parsedAxis);
-        correctedAxis = epsilonClamp(correctedAxis, epsilon);
-        const reNormalizedMagnitude = magnitude(correctedAxis);
-        if (reNormalizedMagnitude > epsilon) {
-            correctedAxis = normalize(correctedAxis);
-        }
+        let correctedAxis = normalizeJointAxis(parsedAxis, {
+            epsilon,
+            defaultAxis,
+            snapTolerance,
+            snapToCanonical,
+        });
         let correctionReason = Math.abs(mag - 1.0) > epsilon
             ? `Non-unit vector (magnitude: ${mag.toFixed(4)})`
             : "Cleaned up floating point precision";
         if (snapToCanonical) {
             const snapTarget = findCanonicalSnapTarget(correctedAxis, snapTolerance);
             if (snapTarget) {
-                correctedAxis = snapTarget;
                 correctionReason = `Snapped near-canonical axis within tolerance ${snapTolerance}`;
             }
         }

@@ -1,2 +1,3 @@
 export * from "./stlBinary";
-export * from "./mujocoMeshPrep";
+export * from "./meshBoundsNode";
+export * from "./meshPrep";

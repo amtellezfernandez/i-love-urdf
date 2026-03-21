@@ -7,10 +7,10 @@ import {
   writeBinaryStl,
 } from "./stlBinary";
 
-export const DEFAULT_MUJOCO_MAX_STL_FACES = 200_000;
-export const DEFAULT_MESH_COMPRESSION_MAX_FACES = DEFAULT_MUJOCO_MAX_STL_FACES;
+export const DEFAULT_STL_FACE_BUDGET = 200_000;
+export const DEFAULT_MESH_COMPRESSION_MAX_FACES = DEFAULT_STL_FACE_BUDGET;
 
-export interface MujocoMeshPrepOptions {
+export interface MeshPrepOptions {
   meshDir: string;
   maxFaces?: number;
   inPlace?: boolean;
@@ -19,7 +19,7 @@ export interface MujocoMeshPrepOptions {
   limits?: Record<string, number>;
 }
 
-export interface MujocoMeshPrepResultEntry {
+export interface MeshPrepResultEntry {
   path: string;
   format: string;
   faceCountBefore: number;
@@ -29,19 +29,19 @@ export interface MujocoMeshPrepResultEntry {
   reason: string | null;
 }
 
-export interface MujocoMeshPrepResult {
+export interface MeshPrepResult {
   meshDir: string;
   targetDir: string | null;
   maxFaces: number;
   inspected: number;
   overLimit: number;
   rewritten: number;
-  results: MujocoMeshPrepResultEntry[];
+  results: MeshPrepResultEntry[];
 }
 
-export type CompressMeshesOptions = MujocoMeshPrepOptions;
-export type CompressMeshesResultEntry = MujocoMeshPrepResultEntry;
-export type CompressMeshesResult = MujocoMeshPrepResult;
+export type CompressMeshesOptions = MeshPrepOptions;
+export type CompressMeshesResultEntry = MeshPrepResultEntry;
+export type CompressMeshesResult = MeshPrepResult;
 
 export interface InspectMeshesOptions {
   meshDir: string;
@@ -218,13 +218,13 @@ export function compressMeshes(options: CompressMeshesOptions): CompressMeshesRe
     limits: options.limits,
   });
 
-  const results: MujocoMeshPrepResultEntry[] = [];
+  const results: MeshPrepResultEntry[] = [];
   let rewritten = 0;
 
   for (const inspectionEntry of inspection.results) {
     const absolutePath = path.join(meshDir, inspectionEntry.path);
     const targetPath = outDir ? path.join(outDir, inspectionEntry.path) : absolutePath;
-    const entry: MujocoMeshPrepResultEntry = {
+    const entry: MeshPrepResultEntry = {
       path: inspectionEntry.path,
       format: "stl",
       faceCountBefore: inspectionEntry.faceCount,
@@ -239,20 +239,18 @@ export function compressMeshes(options: CompressMeshesOptions): CompressMeshesRe
       continue;
     }
 
-    if (inspectionEntry.overLimit) {
-      if (shouldWrite) {
-        const mesh = readBinaryStl(absolutePath);
-        const simplified = chooseSimplifiedBinaryStl(mesh.triangles, inspectionEntry.targetMaxFaces);
-        writeBinaryStl(targetPath, mesh.header, simplified.triangles);
-        entry.faceCountAfter = simplified.faceCount;
-        entry.changed = simplified.faceCount !== inspectionEntry.faceCount;
-        entry.divisions = Number.isFinite(simplified.divisions) ? simplified.divisions : null;
-        rewritten += entry.changed ? 1 : 0;
-        if (simplified.faceCount > inspectionEntry.targetMaxFaces) {
-          entry.reason = `Still above target face limit after simplification: ${simplified.faceCount} > ${inspectionEntry.targetMaxFaces}.`;
-        } else {
-          entry.reason = null;
-        }
+    if (inspectionEntry.overLimit && shouldWrite) {
+      const mesh = readBinaryStl(absolutePath);
+      const simplified = chooseSimplifiedBinaryStl(mesh.triangles, inspectionEntry.targetMaxFaces);
+      writeBinaryStl(targetPath, mesh.header, simplified.triangles);
+      entry.faceCountAfter = simplified.faceCount;
+      entry.changed = simplified.faceCount !== inspectionEntry.faceCount;
+      entry.divisions = Number.isFinite(simplified.divisions) ? simplified.divisions : null;
+      rewritten += entry.changed ? 1 : 0;
+      if (simplified.faceCount > inspectionEntry.targetMaxFaces) {
+        entry.reason = `Still above target face limit after simplification: ${simplified.faceCount} > ${inspectionEntry.targetMaxFaces}.`;
+      } else {
+        entry.reason = null;
       }
     }
 

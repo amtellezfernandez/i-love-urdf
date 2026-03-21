@@ -149,7 +149,7 @@ const loadSourceFromGitHub = async (options) => {
             ref,
             entryPath,
             entryFormat,
-            urdf: await (0, githubRepositoryInspection_1.fetchGitHubTextFile)(options.reference.owner, options.reference.repo, targetFile.path, targetFile.sha, options.accessToken),
+            urdf: await (0, githubRepositoryInspection_1.fetchGitHubTextFile)(options.reference.owner, options.reference.repo, targetFile.path, targetFile.sha, options.accessToken, ref, targetFile.download_url),
             candidateCount: summary.candidateCount,
             primaryCandidatePath: summary.primaryCandidatePath,
         });

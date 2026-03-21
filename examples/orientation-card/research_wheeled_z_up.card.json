@@ -1,0 +1,134 @@
+{
+  "schema": "i-love-urdf/robot-orientation-card",
+  "schemaVersion": "1.0.0",
+  "isValid": true,
+  "robotName": "research_wheeled_z_up",
+  "summary": {
+    "classification": "z-up",
+    "confidence": 0.89,
+    "likelyUpAxis": "z",
+    "likelyUpDirection": "+z",
+    "likelyForwardAxis": "x",
+    "likelyForwardDirection": "+x",
+    "likelyLateralAxis": "y",
+    "likelyLateralDirection": "+y"
+  },
+  "targetBasis": {
+    "up": "+z",
+    "forward": "+x"
+  },
+  "spans": {
+    "x": 1,
+    "y": 0.65,
+    "z": 0.30000000000000004
+  },
+  "jointAxisVotes": {
+    "x": 0,
+    "y": 2,
+    "z": 0
+  },
+  "wheelAxisVotes": {
+    "x": 0,
+    "y": 4,
+    "z": 0
+  },
+  "wheelJointNames": [
+    "left_wheel_joint",
+    "right_wheel_joint"
+  ],
+  "signals": [
+    {
+      "kind": "wheel-axis",
+      "weight": 0.9400000000000001,
+      "message": "Detected wheel-like joints around Y and used the remaining span contrast to infer forward/up."
+    },
+    {
+      "kind": "geometry-span",
+      "weight": 0.25,
+      "message": "Nominal span estimate: X=1.000, Y=0.650, Z=0.300."
+    },
+    {
+      "kind": "pca-forward",
+      "weight": 0.15309588301911842,
+      "message": "PCA direction cue suggests forward +z."
+    },
+    {
+      "kind": "pca-up",
+      "weight": 0.7899999999999999,
+      "message": "PCA direction cue suggests up +x."
+    }
+  ],
+  "report": {
+    "evidence": [
+      {
+        "label": "Wheel axis inference",
+        "role": "lateral",
+        "axis": "+y",
+        "score": 1,
+        "weight": 0.55,
+        "contribution": 0.55,
+        "details": "Wheel-like joints: left_wheel_joint, right_wheel_joint."
+      },
+      {
+        "label": "Geometry span",
+        "role": "up",
+        "axis": "+z",
+        "score": 1,
+        "weight": 0.28,
+        "contribution": 0.28,
+        "details": "Shortest span was treated as the best up candidate: X=1.000, Y=0.650, Z=0.300."
+      },
+      {
+        "label": "Geometry span",
+        "role": "forward",
+        "axis": "+x",
+        "score": 1,
+        "weight": 0.18,
+        "contribution": 0.18,
+        "details": "Forward span X=1.000 vs lateral Y=0.650."
+      },
+      {
+        "label": "Joint axis votes",
+        "role": "up",
+        "axis": "+z",
+        "score": 0,
+        "weight": 0.22,
+        "contribution": 0,
+        "details": "Revolute/prismatic world-axis votes: X=0.00, Y=2.00, Z=0.00."
+      },
+      {
+        "label": "PCA forward cue",
+        "role": "forward",
+        "axis": "+z",
+        "score": 0.15309588301911842,
+        "weight": 0.3,
+        "contribution": -0.045928764905735525,
+        "details": "Principal-axis asymmetry suggests forward +z. Primary basis=1.000 -0.000 -0.000."
+      },
+      {
+        "label": "PCA up cue",
+        "role": "up",
+        "axis": "+x",
+        "score": 0.7899999999999999,
+        "weight": 0.26,
+        "contribution": -0.2054,
+        "details": "Principal-axis shape suggests up +x. Secondary basis=0.000 1.000 0.000, tertiary basis=0.000 -0.000 1.000."
+      }
+    ],
+    "conflicts": [
+      "PCA up cue suggests +x, while the final basis kept Z as up."
+    ]
+  },
+  "assumptions": [
+    "Orientation is inferred from the nominal zero-pose URDF or expanded XACRO output.",
+    "Signed forward and up directions use geometry asymmetry and can stay ambiguous on highly symmetric robots."
+  ],
+  "suggestedRotate90": null,
+  "suggestedApplyOrientation": {
+    "sourceUpAxis": "+z",
+    "sourceForwardAxis": "+x",
+    "targetUpAxis": "+z",
+    "targetForwardAxis": "+x",
+    "command": "ilu apply-orientation --urdf robot.urdf --source-up +z --source-forward +x --target-up +z --target-forward +x --out robot.oriented.urdf"
+  }
+}

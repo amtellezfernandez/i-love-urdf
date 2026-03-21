@@ -1,4 +1,9 @@
 import { guessUrdfOrientation } from "./guessOrientation";
+import {
+  HEALTH_CHECK_REPORT_CONTRACT,
+  type OutputContract,
+  withOutputContract,
+} from "../contracts/outputContracts";
 import { parseURDF } from "../parsing/urdfParser";
 import { validateUrdf, type UrdfValidationIssue } from "../validation/validateUrdf";
 
@@ -18,6 +23,8 @@ export interface HealthCheckOptions {
 }
 
 export interface HealthCheckReport {
+  schema: typeof HEALTH_CHECK_REPORT_CONTRACT.schema;
+  schemaVersion: typeof HEALTH_CHECK_REPORT_CONTRACT.schemaVersion;
   ok: boolean;
   findings: HealthCheckFinding[];
   summary: {
@@ -84,6 +91,10 @@ const countSummary = (findings: HealthCheckFinding[]) => ({
   infos: findings.filter((finding) => finding.level === "info").length,
 });
 
+const buildHealthCheckReport = (
+  payload: Omit<HealthCheckReport, keyof OutputContract<typeof HEALTH_CHECK_REPORT_CONTRACT.schema>>
+): HealthCheckReport => withOutputContract(HEALTH_CHECK_REPORT_CONTRACT, payload);
+
 export function healthCheckUrdf(
   urdfContent: string,
   options: HealthCheckOptions = {}
@@ -97,11 +108,11 @@ export function healthCheckUrdf(
   const parsed = parseURDF(urdfContent);
   if (!parsed.isValid) {
     const summary = countSummary(findings);
-    return {
+    return buildHealthCheckReport({
       ok: summary.errors === 0,
       findings,
       summary,
-    };
+    });
   }
 
   const robot = parsed.document.querySelector("robot");
@@ -112,11 +123,11 @@ export function healthCheckUrdf(
       message: "No <robot> element found in URDF.",
     });
     const summary = countSummary(findings);
-    return {
+    return buildHealthCheckReport({
       ok: summary.errors === 0,
       findings,
       summary,
-    };
+    });
   }
 
   Array.from(robot.querySelectorAll(":scope > link")).forEach((link) => {
@@ -276,10 +287,10 @@ export function healthCheckUrdf(
   }
 
   const summary = countSummary(findings);
-  return {
+  return buildHealthCheckReport({
     ok: summary.errors === 0,
     findings,
     summary,
     orientationGuess,
-  };
+  });
 }

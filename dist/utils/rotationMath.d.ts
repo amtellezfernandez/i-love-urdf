@@ -1,5 +1,13 @@
 export type Vec3 = [number, number, number];
 export type Mat3 = [Vec3, Vec3, Vec3];
+export type InertiaTensor = {
+    ixx: number;
+    ixy: number;
+    ixz: number;
+    iyy: number;
+    iyz: number;
+    izz: number;
+};
 export type Rpy = {
     r: number;
     p: number;
@@ -27,4 +35,6 @@ export declare function ensureOriginElement(element: Element): Element;
 export declare function applyRotationToElementOrigin(element: Element, R: Mat3, RT?: Mat3): void;
 export declare function applyLeftRotationToElementOrigin(element: Element, R: Mat3): void;
 export declare function applyRightRotationToElementOrigin(element: Element, R: Mat3): void;
+export declare function rotateInertiaTensor(tensor: InertiaTensor, R: Mat3): InertiaTensor;
+export declare function fixInertiaThresholds(tensor: InertiaTensor, epsilon?: number): InertiaTensor;
 export declare function rotateInertiaTensorElement(inertia: Element, R: Mat3): void;

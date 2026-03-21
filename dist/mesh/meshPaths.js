@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizeMeshPathForMatch = exports.parseMeshReference = exports.normalizeMeshPath = exports.isSafeMeshPath = void 0;
+exports.resolvePackagePaths = exports.normalizeMeshPathForMatch = exports.parseMeshReference = exports.normalizeMeshPath = exports.isSafeMeshPath = void 0;
 const traversalPattern = /(^|[\\/])\.\.([\\/]|$)/;
 const isSafeMeshPath = (path) => {
     if (!path)
@@ -58,3 +58,28 @@ const normalizeMeshPathForMatch = (path) => {
     return collapsePathSegments(cleaned);
 };
 exports.normalizeMeshPathForMatch = normalizeMeshPathForMatch;
+const getPackageRoot = (packageMap, packageName) => {
+    if (packageMap instanceof Map) {
+        return packageMap.get(packageName)?.trim() || null;
+    }
+    return packageMap[packageName]?.trim() || null;
+};
+const resolvePackagePaths = (ref, packageMap) => {
+    const refInfo = (0, exports.parseMeshReference)(ref);
+    if (refInfo.scheme === "package") {
+        if (!refInfo.packageName)
+            return null;
+        const packageRoot = getPackageRoot(packageMap, refInfo.packageName);
+        if (!packageRoot)
+            return null;
+        const normalizedRoot = packageRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+        const normalizedPath = (0, exports.normalizeMeshPathForMatch)(refInfo.path);
+        return normalizedPath ? `${normalizedRoot}/${normalizedPath}` : normalizedRoot;
+    }
+    if (refInfo.scheme === "file") {
+        return refInfo.path.replace(/\\/g, "/");
+    }
+    const normalized = (0, exports.normalizeMeshPathForMatch)(refInfo.path || refInfo.raw);
+    return normalized || null;
+};
+exports.resolvePackagePaths = resolvePackagePaths;

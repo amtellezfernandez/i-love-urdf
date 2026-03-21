@@ -1,8 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.alignJointToLocalZ = void 0;
 exports.canonicalizeJointFrames = canonicalizeJointFrames;
 const urdfParser_1 = require("../parsing/urdfParser");
 const rotationMath_1 = require("../utils/rotationMath");
+const alignJointToLocalZ = (urdfContent, jointName) => canonicalizeJointFrames(urdfContent, {
+    targetAxis: "z",
+    joints: [jointName],
+});
+exports.alignJointToLocalZ = alignJointToLocalZ;
 const DEFAULT_AXIS = [1, 0, 0];
 const ELIGIBLE_JOINT_TYPES = new Set(["revolute", "continuous", "prismatic"]);
 const axisLabelToVector = (axis) => {

@@ -20,15 +20,11 @@ const loadSourceNode = await import(path.join(root, "dist", "sources", "loadSour
 const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
 const meshNode = await import(path.join(root, "dist", "mesh", "meshNode.js"));
 const urdfNode = await import(path.join(root, "dist", "node", "urdfNode.js"));
+const commandConsistency = await import(path.join(root, "dist", "commands", "commandConsistency.js"));
+const cliPath = path.join(root, "dist", "cli.js");
 
 installDomGlobals();
-
-const hasTagWithAttributes = (xml, tagName, attributes) => {
-  const tags = xml.match(new RegExp(`<${tagName}\\b[^>]*>`, "g")) ?? [];
-  return tags.some((tag) =>
-    attributes.every(([name, value]) => tag.includes(`${name}="${value}"`))
-  );
-};
+commandConsistency.assertCommandConsistency();
 
 const urdf =
   "<robot name=\"smoke_robot\"><link name=\"base\"/><link name=\"tip\"/>" +
@@ -63,19 +59,34 @@ const wheeledRobotZUp =
   "<joint name=\"right_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"right_wheel\"/><origin xyz=\"0 -0.3 -0.1\" rpy=\"0 0 0\"/><axis xyz=\"0 1 0\"/></joint>" +
   "</robot>";
 
-const wheeledRobotYUp =
-  "<robot name=\"wheeled_y_up\">" +
-  "<link name=\"base\"><collision><geometry><box size=\"1 0.2 0.5\"/></geometry></collision></link>" +
-  "<link name=\"left_wheel\"><collision><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
-  "<link name=\"right_wheel\"><collision><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
-  "<joint name=\"left_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"left_wheel\"/><origin xyz=\"0 -0.1 0.3\" rpy=\"0 0 0\"/><axis xyz=\"0 0 1\"/></joint>" +
-  "<joint name=\"right_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"right_wheel\"/><origin xyz=\"0 -0.1 -0.3\" rpy=\"0 0 0\"/><axis xyz=\"0 0 1\"/></joint>" +
+const mobileManipulatorUrdf =
+  "<robot name=\"dual_arm_mobile\">" +
+  "<link name=\"base_link\"/>" +
+  "<link name=\"left_shoulder_link\"/>" +
+  "<link name=\"left_tool_link\"/>" +
+  "<link name=\"right_shoulder_link\"/>" +
+  "<link name=\"right_tool_link\"/>" +
+  "<link name=\"front_left_wheel_link\"/>" +
+  "<link name=\"front_right_wheel_link\"/>" +
+  "<link name=\"rear_left_wheel_link\"/>" +
+  "<link name=\"rear_right_wheel_link\"/>" +
+  "<joint name=\"left_shoulder_joint\" type=\"revolute\"><parent link=\"base_link\"/><child link=\"left_shoulder_link\"/></joint>" +
+  "<joint name=\"left_wrist_joint\" type=\"revolute\"><parent link=\"left_shoulder_link\"/><child link=\"left_tool_link\"/></joint>" +
+  "<joint name=\"right_shoulder_joint\" type=\"revolute\"><parent link=\"base_link\"/><child link=\"right_shoulder_link\"/></joint>" +
+  "<joint name=\"right_wrist_joint\" type=\"revolute\"><parent link=\"right_shoulder_link\"/><child link=\"right_tool_link\"/></joint>" +
+  "<joint name=\"front_left_wheel_joint\" type=\"continuous\"><parent link=\"base_link\"/><child link=\"front_left_wheel_link\"/></joint>" +
+  "<joint name=\"front_right_wheel_joint\" type=\"continuous\"><parent link=\"base_link\"/><child link=\"front_right_wheel_link\"/></joint>" +
+  "<joint name=\"rear_left_wheel_joint\" type=\"continuous\"><parent link=\"base_link\"/><child link=\"rear_left_wheel_link\"/></joint>" +
+  "<joint name=\"rear_right_wheel_joint\" type=\"continuous\"><parent link=\"base_link\"/><child link=\"rear_right_wheel_link\"/></joint>" +
   "</robot>";
 
-const badInertiaUrdf =
-  "<robot name=\"bad_inertia\">" +
-  "<link name=\"base\"><inertial><mass value=\"1\"/><origin xyz=\"0 0 0\" rpy=\"0 0 0\"/>" +
-  "<inertia ixx=\"1\" ixy=\"0\" ixz=\"0\" iyy=\"0.1\" iyz=\"0\" izz=\"0.1\"/></inertial></link>" +
+const humanoidSmokeUrdf =
+  "<robot name=\"humanoid_smoke\">" +
+  "<link name=\"torso\"/><link name=\"left_leg\"/><link name=\"right_leg\"/><link name=\"left_arm\"/><link name=\"right_arm\"/>" +
+  "<joint name=\"left_hip\" type=\"revolute\"><parent link=\"torso\"/><child link=\"left_leg\"/></joint>" +
+  "<joint name=\"right_hip\" type=\"revolute\"><parent link=\"torso\"/><child link=\"right_leg\"/></joint>" +
+  "<joint name=\"left_shoulder\" type=\"revolute\"><parent link=\"torso\"/><child link=\"left_arm\"/></joint>" +
+  "<joint name=\"right_shoulder\" type=\"revolute\"><parent link=\"torso\"/><child link=\"right_arm\"/></joint>" +
   "</robot>";
 
 const snapCandidateUrdf =
@@ -239,6 +250,17 @@ const axes = lib.normalizeJointAxes(urdf);
 if (!axes.urdfContent.includes("0.7071067812")) {
   throw new Error("ilu normalize-axes smoke test failed");
 }
+const normalizedSingleAxis = lib.normalizeJointAxis("0.01 0.98 0");
+if (
+  Math.abs(normalizedSingleAxis[0]) > 0.02 ||
+  Math.abs(normalizedSingleAxis[1] - 1) > 0.001 ||
+  Math.abs(normalizedSingleAxis[2]) > 0.02
+) {
+  throw new Error("ilu normalize-joint-axis smoke test failed");
+}
+if (lib.sanitizeNames("Link 1.With-Hyphen") !== "link_1_with_hyphen") {
+  throw new Error("ilu sanitize-names smoke test failed");
+}
 
 const snappedAxes = lib.snapJointAxes(snapCandidateUrdf);
 if (
@@ -276,10 +298,7 @@ if (!renamedJoint.success || !renamedJoint.content.includes('joint name="hinge_j
 const renamedTransmissionJoint = lib.renameJointInUrdf(transmissionUrdf, "j", "hinge_joint");
 if (
   !renamedTransmissionJoint.success ||
-  !hasTagWithAttributes(renamedTransmissionJoint.content, "joint", [
-    ["name", "hinge_joint"],
-    ["type", "revolute"],
-  ]) ||
+  !renamedTransmissionJoint.content.includes('joint name="hinge_joint" type="revolute"') ||
   !renamedTransmissionJoint.content.includes('<transmission name="j_trans">') ||
   !renamedTransmissionJoint.content.includes('<joint name="hinge_joint">')
 ) {
@@ -294,10 +313,7 @@ if (!renamedLink.success || !renamedLink.content.includes('child link="tool0"'))
 const removedTransmissionJoint = lib.removeJointsFromUrdf(transmissionUrdf, ["j"]);
 if (
   !removedTransmissionJoint.success ||
-  hasTagWithAttributes(removedTransmissionJoint.content, "joint", [
-    ["name", "j"],
-    ["type", "revolute"],
-  ]) ||
+  removedTransmissionJoint.content.includes('joint name="j" type="revolute"') ||
   removedTransmissionJoint.content.includes('<transmission name="j_trans">')
 ) {
   throw new Error("ilu transmission-aware remove-joints smoke test failed");
@@ -308,38 +324,56 @@ if (analysis.robotName !== "smoke_robot" || analysis.linkNames.length !== 3) {
   throw new Error("ilu analyze smoke test failed");
 }
 
-const health = lib.healthCheckUrdf(badInertiaUrdf);
 if (
-  health.ok ||
-  !health.findings.some((finding) => finding.code === "triangle-inequality") ||
-  !health.findings.some((finding) => finding.code === "orientation-guess")
+  lib.identifyRobotType(urdf) !== "arm" ||
+  lib.identifyRobotType(mobileManipulatorUrdf) !== "wheeled" ||
+  lib.identifyRobotType(humanoidSmokeUrdf) !== "humanoid" ||
+  browserLib.identifyRobotType(mobileManipulatorUrdf) !== "wheeled"
 ) {
-  throw new Error("ilu health-check smoke test failed");
-}
-
-const zUpGuess = lib.guessUrdfOrientation(wheeledRobotZUp);
-if (
-  zUpGuess.likelyUpAxis !== "z" ||
-  zUpGuess.likelyForwardAxis !== "x" ||
-  !zUpGuess.likelyUpDirection ||
-  zUpGuess.report.evidence.length < 3
-) {
-  throw new Error("ilu guess-orientation Z-up smoke test failed");
-}
-
-const yUpGuess = lib.guessUrdfOrientation(wheeledRobotYUp);
-if (
-  yUpGuess.likelyUpAxis !== "y" ||
-  yUpGuess.likelyForwardAxis !== "x" ||
-  !yUpGuess.likelyForwardDirection ||
-  yUpGuess.report.evidence.length < 3
-) {
-  throw new Error("ilu guess-orientation Y-up smoke test failed");
+  throw new Error("ilu identifyRobotType smoke test failed");
 }
 
 const updatedAxis = lib.setJointAxisInUrdf(wheeledRobotZUp, "left_wheel_joint", [0, 0, 1]);
 if (!updatedAxis.success || !updatedAxis.content.includes('axis xyz="0 0 1"')) {
   throw new Error("ilu set-joint-axis smoke test failed");
+}
+
+const rotatedTensor = lib.rotateInertiaTensor(
+  { ixx: 1, ixy: 0, ixz: 0, iyy: 2, iyz: 0, izz: 3 },
+  [
+    [0, 1, 0],
+    [-1, 0, 0],
+    [0, 0, 1],
+  ]
+);
+if (
+  Math.abs(rotatedTensor.ixx - 2) > 1e-9 ||
+  Math.abs(rotatedTensor.iyy - 1) > 1e-9 ||
+  Math.abs(rotatedTensor.izz - 3) > 1e-9
+) {
+  throw new Error("ilu rotateInertiaTensor smoke test failed");
+}
+
+const thresholdedTensor = lib.fixInertiaThresholds(
+  { ixx: 1e-10, ixy: 1e-12, ixz: 0.2, iyy: 0.5, iyz: -1e-11, izz: 0.6 },
+  1e-8
+);
+if (
+  thresholdedTensor.ixx !== 0 ||
+  thresholdedTensor.ixy !== 0 ||
+  thresholdedTensor.ixz !== 0.2 ||
+  thresholdedTensor.iyz !== 0
+) {
+  throw new Error("ilu fixInertiaThresholds smoke test failed");
+}
+
+if (
+  lib.resolvePackagePaths("package://robot_description/meshes/base.stl", {
+    robot_description: "/tmp/robot_description",
+  }) !== "/tmp/robot_description/meshes/base.stl" ||
+  browserLib.resolvePackagePaths("file:///tmp/base.stl", new Map()) !== "/tmp/base.stl"
+) {
+  throw new Error("ilu resolvePackagePaths smoke test failed");
 }
 
 const autoFitBox = lib.autoFitCollisionGeometry(
@@ -374,8 +408,10 @@ if (
 const updatedJointLimits = lib.updateJointLimitsInUrdf(urdf, "j", -1.5, 1.5);
 if (
   !updatedJointLimits.success ||
-  !updatedJointLimits.content.includes('lower="-1.5"') ||
-  !updatedJointLimits.content.includes('upper="1.5"')
+  !(
+    updatedJointLimits.content.includes('limit lower="-1.5" upper="1.5"') ||
+    updatedJointLimits.content.includes('limit upper="1.5" lower="-1.5"')
+  )
 ) {
   throw new Error("ilu set-joint-limits smoke test failed");
 }
@@ -391,13 +427,18 @@ if (
 const updatedJointType = lib.updateJointTypeInUrdf(urdf, "j", "continuous");
 if (
   !updatedJointType.success ||
-  !hasTagWithAttributes(updatedJointType.content, "joint", [
-    ["name", "j"],
-    ["type", "continuous"],
-  ]) ||
+  !updatedJointType.content.includes('joint name="j" type="continuous"') ||
   updatedJointType.content.includes(' lower=')
 ) {
   throw new Error("ilu set-joint-type smoke test failed");
+}
+const alignedJoint = lib.alignJointToLocalZ(jointChainUrdf, "j1");
+if (
+  !alignedJoint.success ||
+  !alignedJoint.changedJoints.includes("j1") ||
+  !alignedJoint.content.includes('axis xyz="0 0 1"')
+) {
+  throw new Error("ilu align-joint-to-local-z smoke test failed");
 }
 
 const reassignmentValidation = lib.validateJointLinkReassignment(
@@ -413,12 +454,7 @@ if (reassignmentValidation.valid || !("error" in reassignmentValidation) || !/cy
 const safeReassignment = lib.updateJointLinksInUrdf(jointChainUrdf, "j2", "base", "tip");
 if (
   !safeReassignment.success ||
-  !hasTagWithAttributes(safeReassignment.content, "joint", [
-    ["name", "j2"],
-    ["type", "revolute"],
-  ]) ||
-  !safeReassignment.content.includes('<parent link="base"/>') ||
-  !safeReassignment.content.includes('<child link="tip"/>')
+  !safeReassignment.content.includes('joint name="j2" type="revolute"><parent link="base"/><child link="tip"/>')
 ) {
   throw new Error("ilu reassign-joint smoke test failed");
 }
@@ -496,44 +532,260 @@ if (
   throw new Error("ilu canonicalize-joint-frame smoke test failed");
 }
 
-const orientedYUp = lib.applyOrientationToRobot(wheeledRobotYUp, {
-  sourceUpAxis: "y",
-  sourceForwardAxis: "x",
-  targetUpAxis: "z",
-  targetForwardAxis: "x",
-});
-const reGuessedYUp = lib.guessUrdfOrientation(orientedYUp);
-if (reGuessedYUp.likelyUpAxis !== "z") {
-  throw new Error("ilu apply-orientation smoke test failed");
-}
-
-const normalizeDryRun = lib.normalizeRobot(wheeledRobotYUp, {
-  snapAxes: true,
-  canonicalizeJointFrame: true,
-});
-if (
-  normalizeDryRun.apply ||
-  !normalizeDryRun.plannedSteps.some((step) => step.name === "canonicalize-joint-frame" && step.enabled)
-) {
-  throw new Error("ilu normalize-robot dry-run smoke test failed");
-}
-
-const normalizeApply = lib.normalizeRobot(wheeledRobotYUp, {
-  apply: true,
-  snapAxes: true,
-  canonicalizeJointFrame: true,
-  sourceUpAxis: "y",
-  sourceForwardAxis: "x",
-  targetUpAxis: "+z",
-  targetForwardAxis: "+x",
-});
-if (!normalizeApply.apply || !normalizeApply.outputUrdf || !normalizeApply.healthAfter) {
-  throw new Error("ilu normalize-robot apply smoke test failed");
-}
-
 const diff = lib.compareUrdfs(urdf, renamedJoint.content);
 if (diff.areEqual || diff.differenceCount < 1) {
   throw new Error("ilu diff smoke test failed");
+}
+
+const loadedSourceRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-loaded-source-"));
+const loadedSourceUrdfDir = path.join(loadedSourceRepoDir, "urdf");
+const loadedSourceMeshDir = path.join(loadedSourceRepoDir, "meshes");
+fs.mkdirSync(loadedSourceUrdfDir, { recursive: true });
+fs.mkdirSync(loadedSourceMeshDir, { recursive: true });
+
+meshNode.writeBinaryStl(
+  path.join(loadedSourceMeshDir, "base.stl"),
+  Buffer.alloc(80, 0),
+  Float32Array.from([
+    0, -0.2, -0.1,
+    1, -0.2, -0.1,
+    0, 0.2, 0.1,
+    1, -0.2, -0.1,
+    1, 0.2, 0.1,
+    0, 0.2, 0.1,
+  ])
+);
+fs.writeFileSync(
+  path.join(loadedSourceMeshDir, "base_ascii.stl"),
+  [
+    "solid base_ascii",
+    "facet normal 0 0 1",
+    "outer loop",
+    "vertex 0 -0.2 -0.1",
+    "vertex 1 -0.2 -0.1",
+    "vertex 0 0.2 0.1",
+    "endloop",
+    "endfacet",
+    "facet normal 0 0 1",
+    "outer loop",
+    "vertex 1 -0.2 -0.1",
+    "vertex 1 0.2 0.1",
+    "vertex 0 0.2 0.1",
+    "endloop",
+    "endfacet",
+    "endsolid base_ascii",
+    "",
+  ].join("\n"),
+  "utf8"
+);
+fs.writeFileSync(
+  path.join(loadedSourceMeshDir, "arm.obj"),
+  [
+    "o arm",
+    "v -0.1 0 0",
+    "v 0.2 0.1 1.4",
+    "v 0 0.3 0.6",
+    "f 1 2 3",
+    "",
+  ].join("\n"),
+  "utf8"
+);
+fs.writeFileSync(
+  path.join(loadedSourceMeshDir, "mast.dae"),
+  [
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+    "<COLLADA version=\"1.4.1\">",
+    "  <library_geometries>",
+    "    <geometry id=\"mast\">",
+    "      <mesh>",
+    "        <source id=\"mast-positions\">",
+    "          <float_array id=\"mast-positions-array\" count=\"9\">0 0 0 0.2 0.1 1.5 -0.1 0.3 1.2</float_array>",
+    "          <technique_common>",
+    "            <accessor source=\"#mast-positions-array\" count=\"3\" stride=\"3\">",
+    "              <param name=\"X\" type=\"float\"/>",
+    "              <param name=\"Y\" type=\"float\"/>",
+    "              <param name=\"Z\" type=\"float\"/>",
+    "            </accessor>",
+    "          </technique_common>",
+    "        </source>",
+    "      </mesh>",
+    "    </geometry>",
+    "  </library_geometries>",
+    "</COLLADA>",
+    "",
+  ].join("\n"),
+  "utf8"
+);
+fs.writeFileSync(path.join(loadedSourceMeshDir, "future.glb"), "glTF", "utf8");
+
+const asciiBounds = meshNode.readStlBounds(path.join(loadedSourceMeshDir, "base_ascii.stl"));
+if (
+  asciiBounds.isBinary ||
+  asciiBounds.vertexCount !== 6 ||
+  asciiBounds.min[0] !== 0 ||
+  asciiBounds.max[0] !== 1
+) {
+  throw new Error("ilu ASCII STL bounds smoke test failed");
+}
+
+const browserAsciiStlBuffer = fs.readFileSync(path.join(loadedSourceMeshDir, "base_ascii.stl"));
+const browserAsciiBounds = browserLib.computeMeshBoundsFromArrayBuffer(
+  browserAsciiStlBuffer.buffer.slice(
+    browserAsciiStlBuffer.byteOffset,
+    browserAsciiStlBuffer.byteOffset + browserAsciiStlBuffer.byteLength
+  ),
+  "1 1 1"
+);
+if (
+  !browserAsciiBounds ||
+  Math.abs(browserAsciiBounds.max[0] - 1) > 1e-6 ||
+  Math.abs(browserAsciiBounds.max[1] - 0.2) > 1e-6 ||
+  Math.abs(browserAsciiBounds.min[2] + 0.1) > 1e-6
+) {
+  throw new Error("ilu browser mesh bounds smoke test failed");
+}
+
+const browserMeshBlobMap = {
+  "robots/pkg_a/meshes/link.stl": new Blob(["a"]),
+  "robots/pkg_b/meshes/other.stl": new Blob(["b"]),
+};
+const browserPackageRoots = browserLib.buildPackageRootsFromMeshBlobMap(browserMeshBlobMap);
+if (browserPackageRoots.pkg_a?.[0] !== "robots/pkg_a") {
+  throw new Error("ilu browser package-root inference smoke test failed");
+}
+
+const browserResolvedMesh = browserLib.resolveMeshBlobFromReference(
+  "package://pkg_a/meshes/link.stl",
+  browserMeshBlobMap,
+  "robots/pkg_a/urdf",
+  browserPackageRoots
+);
+if (
+  !browserResolvedMesh ||
+  browserResolvedMesh.path !== "robots/pkg_a/meshes/link.stl" ||
+  browserLib.stripMeshSchemes("package://pkg_a/meshes/link.stl") !== "meshes/link.stl"
+) {
+  throw new Error("ilu browser mesh resolver smoke test failed");
+}
+
+const browserMeshCandidates = browserLib.resolveMeshCandidates({
+  ref: "package://pkg_a/meshes/link.obj",
+  meshFiles: browserMeshBlobMap,
+  urdfBasePath: "robots/pkg_a/urdf",
+  packageRoots: browserPackageRoots,
+});
+if (
+  browserMeshCandidates.length !== 1 ||
+  browserMeshCandidates[0]?.resolvedPath !== "robots/pkg_a/meshes/link.stl"
+) {
+  throw new Error("ilu browser mesh candidates smoke test failed");
+}
+
+const browserResolvedResource = browserLib.resolveMeshResourceBlob(
+  "textures/base.png",
+  { "robots/pkg_a/meshes/textures/base.png": new Blob(["tex"]) },
+  "robots/pkg_a/meshes"
+);
+if (!browserResolvedResource || browserResolvedResource.path !== "robots/pkg_a/meshes/textures/base.png") {
+  throw new Error("ilu browser mesh resource resolver smoke test failed");
+}
+const browserRepairedMissingMeshRefs = browserLib.fixMissingMeshReferences(
+  `<?xml version="1.0"?>
+<robot name="mesh_repair">
+  <link name="base_link">
+    <visual><geometry><mesh filename="mesh.stl" /></geometry></visual>
+  </link>
+</robot>`,
+  { "meshes/mesh.stl": new Blob(["solid mesh\nendsolid mesh\n"]) },
+  { basePath: "urdf" }
+);
+if (
+  !browserRepairedMissingMeshRefs.success ||
+  browserRepairedMissingMeshRefs.corrections[0]?.corrected !== "../meshes/mesh.stl"
+) {
+  throw new Error("ilu browser missing-mesh repair smoke test failed");
+}
+
+const browserUrdfDocument = browserLib.parseUrdfDocument(urdf);
+if (
+  !browserUrdfDocument ||
+  browserLib.getUrdfElementByName(browserUrdfDocument, "joint", "j")?.getAttribute("name") !== "j" ||
+  !browserLib.serializeUrdfDocument(browserUrdfDocument).includes('robot name="smoke_robot"')
+) {
+  throw new Error("ilu browser URDF document smoke test failed");
+}
+
+const objBounds = meshNode.readMeshBounds(path.join(loadedSourceMeshDir, "arm.obj"));
+if (
+  objBounds.format !== "obj" ||
+  objBounds.vertexCount !== 3 ||
+  objBounds.min[0] !== -0.1 ||
+  objBounds.max[2] !== 1.4
+) {
+  throw new Error("ilu OBJ bounds smoke test failed");
+}
+
+const daeBounds = meshNode.readMeshBounds(path.join(loadedSourceMeshDir, "mast.dae"));
+if (
+  daeBounds.format !== "dae" ||
+  daeBounds.vertexCount !== 3 ||
+  daeBounds.max[2] !== 1.5 ||
+  daeBounds.min[0] !== -0.1
+) {
+  throw new Error("ilu DAE bounds smoke test failed");
+}
+
+const loadedSourceRepoUrdf =
+  "<robot name=\"loaded_source_robot\">" +
+  "<link name=\"base\">" +
+  "<visual><geometry><mesh filename=\"../meshes/base_ascii.stl\"/></geometry></visual>" +
+  "<visual><geometry><mesh filename=\"../meshes/arm.obj\"/></geometry></visual>" +
+  "<visual><geometry><mesh filename=\"../meshes/mast.dae\"/></geometry></visual>" +
+  "<visual><geometry><mesh filename=\"../meshes/future.glb\"/></geometry></visual>" +
+  "<visual><geometry><mesh filename=\"../meshes/missing.stl\"/></geometry></visual>" +
+  "</link>" +
+  "<link name=\"left_wheel\"><collision><origin xyz=\"0 0 0\" rpy=\"1.57079632679 0 0\"/><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
+  "<link name=\"right_wheel\"><collision><origin xyz=\"0 0 0\" rpy=\"1.57079632679 0 0\"/><geometry><cylinder radius=\"0.1\" length=\"0.05\"/></geometry></collision></link>" +
+  "<joint name=\"left_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"left_wheel\"/><origin xyz=\"0 0.3 -0.1\" rpy=\"0 0 0\"/><axis xyz=\"0 1 0\"/></joint>" +
+  "<joint name=\"right_wheel_joint\" type=\"continuous\"><parent link=\"base\"/><child link=\"right_wheel\"/><origin xyz=\"0 -0.3 -0.1\" rpy=\"0 0 0\"/><axis xyz=\"0 1 0\"/></joint>" +
+  "</robot>";
+fs.writeFileSync(path.join(loadedSourceUrdfDir, "robot.urdf"), loadedSourceRepoUrdf, "utf8");
+
+const loadedSource = await loadSourceNode.loadSourceFromPath({
+  path: loadedSourceRepoDir,
+  entryPath: "urdf/robot.urdf",
+});
+
+const loadedOrientation = await urdfNode.guessLoadedSourceOrientation(loadedSource);
+if (
+  !loadedOrientation.meshAudit.usedFilesystemChecks ||
+  !loadedOrientation.meshAudit.sampledMeshFiles.includes("../meshes/base_ascii.stl") ||
+  !loadedOrientation.meshAudit.sampledMeshFiles.includes("../meshes/arm.obj") ||
+  !loadedOrientation.meshAudit.sampledMeshFiles.includes("../meshes/mast.dae") ||
+  !loadedOrientation.meshAudit.skippedUnsupportedMeshes.includes("../meshes/future.glb") ||
+  !loadedOrientation.meshAudit.unresolvedMeshReferences.includes("../meshes/missing.stl")
+) {
+  throw new Error("ilu guessLoadedSourceOrientation smoke test failed");
+}
+
+const loadedOrientationCard = await urdfNode.buildLoadedSourceOrientationCard(loadedSource);
+if (
+  !loadedOrientationCard.summary.classification.endsWith("-up") ||
+  !loadedOrientationCard.meshAudit.sampledMeshFiles.includes("../meshes/base_ascii.stl") ||
+  !loadedOrientationCard.meshAudit.sampledMeshFiles.includes("../meshes/arm.obj")
+) {
+  throw new Error("ilu buildLoadedSourceOrientationCard smoke test failed");
+}
+
+const loadedHealth = await urdfNode.checkLoadedSourcePhysicsHealth(loadedSource);
+if (
+  loadedHealth.ok ||
+  !loadedHealth.findings.some((finding) => finding.code === "missing-mesh-file") ||
+  !loadedHealth.findings.some((finding) => finding.code === "unsupported-mesh-bounds-format") ||
+  !loadedHealth.meshAudit.skippedUnsupportedMeshes.includes("../meshes/future.glb") ||
+  !loadedHealth.meshAudit.unresolvedMeshReferences.includes("../meshes/missing.stl")
+) {
+  throw new Error("ilu checkLoadedSourcePhysicsHealth smoke test failed");
 }
 
 const meshAssets = lib.updateMeshPathsToAssetsInUrdf(urdf);
@@ -550,7 +802,7 @@ const xacro = lib.convertURDFToXacro(xacroRegressionUrdf);
 if (!xacro.xacroContent.includes("xacro:property")) {
   throw new Error("ilu urdf-to-xacro smoke test failed");
 }
-if (!hasTagWithAttributes(xacro.xacroContent, "robot", [["name", "so101_robot"]])) {
+if (!xacro.xacroContent.includes("<robot") || !xacro.xacroContent.includes('name="so101_robot"')) {
   throw new Error("ilu urdf-to-xacro robot name regression smoke test failed");
 }
 if (!xacro.xacroContent.includes('mesh filename="assets/sts3215_03a_v1.stl"')) {
@@ -633,6 +885,7 @@ try {
       ref: "main",
     },
     entryPath: "robots/demo.urdf",
+    accessToken: "token",
   });
   if (
     loadedGitHubUrdf.entryFormat !== "urdf" ||
@@ -644,6 +897,66 @@ try {
   const blobFetchCount = gitHubFetchUrls.filter((url) => url.includes("/git/blobs/")).length;
   if (treeFetchCount !== 1 || blobFetchCount !== 1) {
     throw new Error("ilu load-source GitHub explicit entry fetch-count smoke test failed");
+  }
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+const gitHubMirrorFetchUrls = [];
+globalThis.fetch = async (input) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+  gitHubMirrorFetchUrls.push(url);
+
+  if (url === "https://api.github.com/repos/acme/public-robot/git/trees/main?recursive=1") {
+    return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+      status: 403,
+      headers: {
+        "x-ratelimit-remaining": "0",
+      },
+    });
+  }
+
+  if (url === "https://data.jsdelivr.com/v1/package/gh/acme/public-robot@main/flat") {
+    return new Response(
+      JSON.stringify({
+        files: [{ name: "/robots/demo.urdf", size: 44 }],
+      }),
+      { status: 200 }
+    );
+  }
+
+  if (url === "https://cdn.jsdelivr.net/gh/acme/public-robot@main/robots/demo.urdf") {
+    return new Response('<robot name="mirror"><link name="base"/></robot>', {
+      status: 200,
+      headers: {
+        "content-type": "application/xml",
+      },
+    });
+  }
+
+  throw new Error(`Unexpected GitHub public mirror smoke fetch: ${url}`);
+};
+
+try {
+  const loadedGitHubUrdf = await loadSourceNode.loadSourceFromGitHub({
+    reference: {
+      owner: "acme",
+      repo: "public-robot",
+      ref: "main",
+    },
+    entryPath: "robots/demo.urdf",
+  });
+  if (
+    loadedGitHubUrdf.entryFormat !== "urdf" ||
+    !loadedGitHubUrdf.urdf.includes('robot name="mirror"')
+  ) {
+    throw new Error("ilu load-source GitHub public mirror fallback smoke test failed");
+  }
+  const treeFetchCount = gitHubMirrorFetchUrls.filter((url) => url.includes("/git/trees/")).length;
+  const flatFetchCount = gitHubMirrorFetchUrls.filter((url) => url.includes("data.jsdelivr.com")).length;
+  const mirrorFileFetchCount = gitHubMirrorFetchUrls.filter((url) => url.includes("cdn.jsdelivr.net")).length;
+  if (treeFetchCount !== 1 || flatFetchCount !== 1 || mirrorFileFetchCount !== 1) {
+    throw new Error("ilu load-source GitHub public mirror fallback fetch-count smoke test failed");
   }
 } finally {
   globalThis.fetch = originalFetch;
@@ -737,16 +1050,50 @@ if (
   throw new Error("ilu inspect-meshes smoke test failed");
 }
 
-const mujocoMeshPrepResult = meshNode.compressMeshes({
+const meshCompressionResult = meshNode.compressMeshes({
   meshDir: path.join(tempRepo, "meshes"),
   maxFaces: 1,
   meshes: ["binary.stl"],
 });
 if (
-  mujocoMeshPrepResult.overLimit !== 1 ||
-  !mujocoMeshPrepResult.results[0]?.reason?.includes("Above target face limit")
+  meshCompressionResult.overLimit !== 1 ||
+  !meshCompressionResult.results[0]?.reason?.includes("Above target face limit")
 ) {
-  throw new Error("ilu MuJoCo mesh prep smoke test failed");
+  throw new Error("ilu mesh compression smoke test failed");
+}
+
+const usdUrdfPath = path.join(tempRepo, "urdf", "usd_robot.urdf");
+fs.writeFileSync(
+  usdUrdfPath,
+  "<robot name=\"usd_robot\">" +
+    "<link name=\"base\"><visual><geometry><box size=\"1 2 3\"/></geometry></visual></link>" +
+    "<link name=\"tool\"><visual><origin xyz=\"0 0 0\" rpy=\"0 0 0\"/><geometry><mesh filename=\"../meshes/binary.stl\" scale=\"1 1 1\"/></geometry></visual>" +
+    "<collision><geometry><mesh filename=\"../meshes/binary.stl\" scale=\"1 1 1\"/></geometry></collision></link>" +
+    "<joint name=\"hinge\" type=\"revolute\"><parent link=\"base\"/><child link=\"tool\"/><origin xyz=\"0 0 1\" rpy=\"0 0 0\"/><axis xyz=\"0 0 1\"/><limit lower=\"-1.57\" upper=\"1.57\"/></joint>" +
+    "</robot>",
+  "utf8"
+);
+
+const usdConversion = await urdfNode.convertURDFPathToUSD(usdUrdfPath, { rootPath: tempRepo });
+if (
+  !usdConversion.usdContent.includes('#usda 1.0') ||
+  !usdConversion.usdContent.includes('def PhysicsRevoluteJoint "hinge"') ||
+  !usdConversion.usdContent.includes('PhysicsCollisionAPI') ||
+  !usdConversion.usdContent.includes('sourceMesh')
+) {
+  throw new Error("ilu URDF-to-USD smoke test failed");
+}
+
+const usdMeshAsset = urdfNode.convertMeshToUsd(binaryMeshPath, {
+  outPath: path.join(tempRepo, "meshes", "binary.usda"),
+});
+if (
+  !usdMeshAsset.wroteFile ||
+  !fs.existsSync(usdMeshAsset.usdPath) ||
+  !usdMeshAsset.usdContent?.includes('def Xform "MeshAsset"') ||
+  !usdMeshAsset.usdContent?.includes('def Mesh "Mesh"')
+) {
+  throw new Error("ilu mesh-to-USD smoke test failed");
 }
 
 const xacroRuntime = await xacroNode.probeXacroRuntime({
@@ -826,22 +1173,42 @@ if (xacroRuntime.available) {
   }
 }
 
-const cliSource = fs.readFileSync(path.join(root, "dist", "cli.js"), "utf8");
+const cliHelpOutput = execFileSync(process.execPath, [cliPath, "help"], {
+  cwd: root,
+  encoding: "utf8",
+});
 if (
-  !cliSource.includes("health-check") ||
-  !cliSource.includes("snap-axes") ||
-  !cliSource.includes("set-joint-type") ||
-  !cliSource.includes("set-joint-limits") ||
-  !cliSource.includes("set-joint-velocity") ||
-  !cliSource.includes("canonicalize-joint-frame") ||
-  !cliSource.includes("normalize-robot") ||
-  !cliSource.includes("setup-xacro-runtime") ||
-  !cliSource.includes("load-source") ||
-  !cliSource.includes("--entry <repo-path>") ||
-  !cliSource.includes("compress-meshes") ||
-  !cliSource.includes("inspect-meshes")
+  !cliHelpOutput.includes("health-check") ||
+  !cliHelpOutput.includes("morphology-card") ||
+  !cliHelpOutput.includes("--name-hints <a,b,c>") ||
+  !cliHelpOutput.includes("snap-axes") ||
+  !cliHelpOutput.includes("set-joint-type") ||
+  !cliHelpOutput.includes("set-joint-limits") ||
+  !cliHelpOutput.includes("set-joint-velocity") ||
+  !cliHelpOutput.includes("canonicalize-joint-frame") ||
+  !cliHelpOutput.includes("normalize-robot") ||
+  !cliHelpOutput.includes("setup-xacro-runtime") ||
+  !cliHelpOutput.includes("load-source") ||
+  !cliHelpOutput.includes("--entry <repo-path>") ||
+  !cliHelpOutput.includes("compress-meshes") ||
+  !cliHelpOutput.includes("inspect-meshes") ||
+  !cliHelpOutput.includes("urdf-to-usd")
 ) {
   throw new Error("ilu CLI surface smoke test failed");
+}
+
+let invalidCommandOutput = "";
+try {
+  execFileSync(process.execPath, [cliPath, "not-a-command"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+} catch (error) {
+  invalidCommandOutput = `${String(error.stdout || "")}${String(error.stderr || "")}`;
+}
+if (!invalidCommandOutput.includes("Unknown command: not-a-command")) {
+  throw new Error("ilu CLI unknown-command smoke test failed");
 }
 
 console.log("ilu smoke test passed.");

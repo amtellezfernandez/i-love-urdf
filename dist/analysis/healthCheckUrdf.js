@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.healthCheckUrdf = healthCheckUrdf;
 const guessOrientation_1 = require("./guessOrientation");
+const outputContracts_1 = require("../contracts/outputContracts");
 const urdfParser_1 = require("../parsing/urdfParser");
 const validateUrdf_1 = require("../validation/validateUrdf");
 const DEFAULT_AXIS_SNAP_TOLERANCE = 1e-3;
@@ -47,6 +48,7 @@ const countSummary = (findings) => ({
     warnings: findings.filter((finding) => finding.level === "warning").length,
     infos: findings.filter((finding) => finding.level === "info").length,
 });
+const buildHealthCheckReport = (payload) => (0, outputContracts_1.withOutputContract)(outputContracts_1.HEALTH_CHECK_REPORT_CONTRACT, payload);
 function healthCheckUrdf(urdfContent, options = {}) {
     const axisSnapTolerance = options.axisSnapTolerance ?? DEFAULT_AXIS_SNAP_TOLERANCE;
     const findings = [];
@@ -55,11 +57,11 @@ function healthCheckUrdf(urdfContent, options = {}) {
     const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
     if (!parsed.isValid) {
         const summary = countSummary(findings);
-        return {
+        return buildHealthCheckReport({
             ok: summary.errors === 0,
             findings,
             summary,
-        };
+        });
     }
     const robot = parsed.document.querySelector("robot");
     if (!robot) {
@@ -69,11 +71,11 @@ function healthCheckUrdf(urdfContent, options = {}) {
             message: "No <robot> element found in URDF.",
         });
         const summary = countSummary(findings);
-        return {
+        return buildHealthCheckReport({
             ok: summary.errors === 0,
             findings,
             summary,
-        };
+        });
     }
     Array.from(robot.querySelectorAll(":scope > link")).forEach((link) => {
         const linkName = link.getAttribute("name") || "unnamed";
@@ -215,10 +217,10 @@ function healthCheckUrdf(urdfContent, options = {}) {
         });
     }
     const summary = countSummary(findings);
-    return {
+    return buildHealthCheckReport({
         ok: summary.errors === 0,
         findings,
         summary,
         orientationGuess,
-    };
+    });
 }

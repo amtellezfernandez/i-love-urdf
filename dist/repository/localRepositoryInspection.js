@@ -6,8 +6,45 @@ const path = require("node:path");
 const fixMissingMeshReferences_1 = require("./fixMissingMeshReferences");
 const repositoryInspection_1 = require("./repositoryInspection");
 const repositoryMeshResolution_1 = require("./repositoryMeshResolution");
+const isSkippableWalkError = (error) => {
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    return code === "EACCES" || code === "EPERM" || code === "ENOENT";
+};
+const readDirectoryEntries = async (absolutePath, { allowSkip = true } = {}) => {
+    try {
+        return await fs.readdir(absolutePath, { withFileTypes: true });
+    }
+    catch (error) {
+        if (allowSkip && isSkippableWalkError(error)) {
+            return null;
+        }
+        throw error;
+    }
+};
+const readFileStats = async (absolutePath, { allowSkip = true } = {}) => {
+    try {
+        return await fs.stat(absolutePath);
+    }
+    catch (error) {
+        if (allowSkip && isSkippableWalkError(error)) {
+            return null;
+        }
+        throw error;
+    }
+};
+const resolveLocalRepositoryReference = async (reference) => {
+    const inspectedPath = path.resolve(reference.path);
+    const stats = await readFileStats(inspectedPath, { allowSkip: false });
+    const rootPath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
+    return { inspectedPath, stats, rootPath };
+};
 const walkLocalRepository = async (absoluteRootPath, currentAbsolutePath, entries) => {
-    const dirEntries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
+    const dirEntries = await readDirectoryEntries(currentAbsolutePath, {
+        allowSkip: currentAbsolutePath !== absoluteRootPath,
+    });
+    if (!dirEntries) {
+        return;
+    }
     for (const dirEntry of dirEntries) {
         const absolutePath = path.join(currentAbsolutePath, dirEntry.name);
         const relativePath = (0, repositoryMeshResolution_1.normalizeRepositoryPath)(path.relative(absoluteRootPath, absolutePath));
@@ -24,7 +61,10 @@ const walkLocalRepository = async (absoluteRootPath, currentAbsolutePath, entrie
         if (!dirEntry.isFile()) {
             continue;
         }
-        const stats = await fs.stat(absolutePath);
+        const stats = await readFileStats(absolutePath);
+        if (!stats) {
+            continue;
+        }
         entries.push({
             name: dirEntry.name,
             path: relativePath,
@@ -41,9 +81,7 @@ const collectLocalRepositoryFiles = async (absoluteRootPath) => {
 };
 exports.collectLocalRepositoryFiles = collectLocalRepositoryFiles;
 const resolveLocalRepositoryTarget = async (reference, requestedUrdfPath) => {
-    const inspectedPath = path.resolve(reference.path);
-    const stats = await fs.stat(inspectedPath);
-    const rootPath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
+    const { inspectedPath, stats, rootPath } = await resolveLocalRepositoryReference(reference);
     const absoluteUrdfPath = stats.isDirectory()
         ? (() => {
             if (!requestedUrdfPath) {
@@ -56,7 +94,7 @@ const resolveLocalRepositoryTarget = async (reference, requestedUrdfPath) => {
     if (!normalizedUrdfPath || normalizedUrdfPath.startsWith("..")) {
         throw new Error("Target URDF must stay inside the local repository root.");
     }
-    const urdfStats = await fs.stat(absoluteUrdfPath);
+    const urdfStats = await readFileStats(absoluteUrdfPath, { allowSkip: false });
     if (!urdfStats.isFile()) {
         throw new Error(`Local repository target is not a file: ${absoluteUrdfPath}`);
     }
@@ -73,14 +111,12 @@ const resolveLocalRepositoryTarget = async (reference, requestedUrdfPath) => {
     };
 };
 const inspectLocalRepositoryUrdfs = async (reference, options = {}) => {
-    const inspectedPath = path.resolve(reference.path);
-    const stats = await fs.stat(inspectedPath);
-    const absoluteRootPath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
+    const { inspectedPath, stats, rootPath } = await resolveLocalRepositoryReference(reference);
     const candidateFilter = stats.isFile()
         ? (candidatePath) => (0, repositoryMeshResolution_1.normalizeRepositoryPath)(candidatePath) ===
-            (0, repositoryMeshResolution_1.normalizeRepositoryPath)(path.relative(absoluteRootPath, inspectedPath))
+            (0, repositoryMeshResolution_1.normalizeRepositoryPath)(path.relative(rootPath, inspectedPath))
         : null;
-    const files = await (0, exports.collectLocalRepositoryFiles)(absoluteRootPath);
+    const files = await (0, exports.collectLocalRepositoryFiles)(rootPath);
     const summary = await (0, repositoryInspection_1.inspectRepositoryFiles)(files, async (_candidate, file) => fs.readFile(file.absolutePath, "utf8"), {
         ...options,
         candidateFilter: (candidate) => {
@@ -91,7 +127,7 @@ const inspectLocalRepositoryUrdfs = async (reference, options = {}) => {
     });
     return {
         source: "local",
-        rootPath: absoluteRootPath,
+        rootPath,
         inspectedPath,
         ...summary,
     };

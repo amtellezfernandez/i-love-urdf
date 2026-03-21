@@ -1,9 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.guessOrientation = void 0;
 exports.guessUrdfOrientation = guessUrdfOrientation;
 const analyzeUrdf_1 = require("./analyzeUrdf");
 const orientationCues_1 = require("./orientationCues");
+const outputContracts_1 = require("../contracts/outputContracts");
 const xmlDom_1 = require("../xmlDom");
+const buildOrientationGuess = (payload) => (0, outputContracts_1.withOutputContract)(outputContracts_1.ORIENTATION_GUESS_CONTRACT, payload);
 const AXES = ["x", "y", "z"];
 const IDENTITY_ROTATION = [
     [1, 0, 0],
@@ -394,7 +397,7 @@ function guessUrdfOrientation(urdfContent, options = {}) {
     const targetForwardAxis = options.targetForwardAxis ?? "x";
     const analysis = (0, analyzeUrdf_1.analyzeUrdf)(urdfContent);
     if (!analysis.isValid) {
-        return {
+        return buildOrientationGuess({
             isValid: false,
             error: analysis.error ?? "Invalid URDF",
             robotName: analysis.robotName,
@@ -416,12 +419,15 @@ function guessUrdfOrientation(urdfContent, options = {}) {
             signals: [],
             report: { evidence: [], conflicts: [] },
             assumptions: [],
-        };
+        });
     }
     const xmlDoc = (0, xmlDom_1.parseXml)(urdfContent);
     const joints = collectJointRecords(xmlDoc);
     const { linkTransforms, jointWorldTransforms, unresolvedJoints } = computeLinkWorldTransforms(xmlDoc, joints);
     const { bounds: geometryBounds, rawPoints } = collectGeometrySamplePoints(analysis, linkTransforms, jointWorldTransforms);
+    (options.additionalSamplePoints ?? []).forEach((point) => {
+        pushSamplePoint(geometryBounds, rawPoints, point);
+    });
     const directionSamples = buildDirectionSamples(rawPoints);
     const spans = Number.isFinite(geometryBounds.min[0]) && Number.isFinite(geometryBounds.max[0])
         ? axisValuesFromBounds(geometryBounds.min, geometryBounds.max)
@@ -618,7 +624,7 @@ function guessUrdfOrientation(urdfContent, options = {}) {
             note: "This only aligns the guessed up-axis to the target up-axis. Use apply-orientation when forward sign matters too.",
         }
         : null;
-    return {
+    return buildOrientationGuess({
         isValid: true,
         robotName: analysis.robotName,
         likelyUpAxis,
@@ -648,5 +654,6 @@ function guessUrdfOrientation(urdfContent, options = {}) {
             conflicts,
         },
         assumptions,
-    };
+    });
 }
+exports.guessOrientation = guessUrdfOrientation;

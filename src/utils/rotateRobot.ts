@@ -65,7 +65,7 @@ export function buildOrientationMappingRotation(options: {
   return multiplyMatrices(targetBasis, transpose(sourceBasis));
 }
 
-function applyRotationMatrixToRobotBase(urdfContent: string, R: Mat3): string {
+export function applyGlobalRotation(urdfContent: string, R: Mat3): string {
   const xmlDoc = parseXml(urdfContent);
 
   const parserError = xmlDoc.querySelector("parsererror");
@@ -126,10 +126,10 @@ export function applyOrientationToRobot(
   }
 ): string {
   const rotation = buildOrientationMappingRotation(options);
-  return applyRotationMatrixToRobotBase(urdfContent, rotation);
+  return applyGlobalRotation(urdfContent, rotation);
 }
 
 export function rotateRobot90Degrees(urdfContent: string, axis: "x" | "y" | "z"): string {
   const R = createRotation90Degrees(axis);
-  return applyRotationMatrixToRobotBase(urdfContent, R);
+  return applyGlobalRotation(urdfContent, R);
 }

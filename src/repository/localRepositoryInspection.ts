@@ -43,12 +43,61 @@ export type LocalRepositoryMeshRepairResult = FixMissingMeshReferencesResult & {
   urdfPath: string;
 };
 
+const isSkippableWalkError = (error: unknown): boolean => {
+  const code =
+    typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code) : "";
+  return code === "EACCES" || code === "EPERM" || code === "ENOENT";
+};
+
+const readDirectoryEntries = async (
+  absolutePath: string,
+  { allowSkip = true }: { allowSkip?: boolean } = {}
+) => {
+  try {
+    return await fs.readdir(absolutePath, { withFileTypes: true });
+  } catch (error) {
+    if (allowSkip && isSkippableWalkError(error)) {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const readFileStats = async (
+  absolutePath: string,
+  { allowSkip = true }: { allowSkip?: boolean } = {}
+) => {
+  try {
+    return await fs.stat(absolutePath);
+  } catch (error) {
+    if (allowSkip && isSkippableWalkError(error)) {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const resolveLocalRepositoryReference = async (
+  reference: LocalRepositoryReference
+) => {
+  const inspectedPath = path.resolve(reference.path);
+  const stats = await readFileStats(inspectedPath, { allowSkip: false });
+  const rootPath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
+  return { inspectedPath, stats, rootPath };
+};
+
 const walkLocalRepository = async (
   absoluteRootPath: string,
   currentAbsolutePath: string,
   entries: LocalRepositoryFile[]
 ): Promise<void> => {
-  const dirEntries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
+  const dirEntries = await readDirectoryEntries(currentAbsolutePath, {
+    allowSkip: currentAbsolutePath !== absoluteRootPath,
+  });
+
+  if (!dirEntries) {
+    return;
+  }
 
   for (const dirEntry of dirEntries) {
     const absolutePath = path.join(currentAbsolutePath, dirEntry.name);
@@ -69,7 +118,12 @@ const walkLocalRepository = async (
       continue;
     }
 
-    const stats = await fs.stat(absolutePath);
+    const stats = await readFileStats(absolutePath);
+
+    if (!stats) {
+      continue;
+    }
+
     entries.push({
       name: dirEntry.name,
       path: relativePath,
@@ -98,9 +152,7 @@ const resolveLocalRepositoryTarget = async (
   urdfPath: string;
   urdfContent: string;
 }> => {
-  const inspectedPath = path.resolve(reference.path);
-  const stats = await fs.stat(inspectedPath);
-  const rootPath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
+  const { inspectedPath, stats, rootPath } = await resolveLocalRepositoryReference(reference);
 
   const absoluteUrdfPath = stats.isDirectory()
     ? (() => {
@@ -116,7 +168,7 @@ const resolveLocalRepositoryTarget = async (
     throw new Error("Target URDF must stay inside the local repository root.");
   }
 
-  const urdfStats = await fs.stat(absoluteUrdfPath);
+  const urdfStats = await readFileStats(absoluteUrdfPath, { allowSkip: false });
   if (!urdfStats.isFile()) {
     throw new Error(`Local repository target is not a file: ${absoluteUrdfPath}`);
   }
@@ -139,18 +191,15 @@ export const inspectLocalRepositoryUrdfs = async (
   reference: LocalRepositoryReference,
   options: InspectLocalRepositoryOptions = {}
 ): Promise<LocalRepositoryInspectionResult> => {
-  const inspectedPath = path.resolve(reference.path);
-  const stats = await fs.stat(inspectedPath);
-
-  const absoluteRootPath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
+  const { inspectedPath, stats, rootPath } = await resolveLocalRepositoryReference(reference);
   const candidateFilter =
     stats.isFile()
       ? (candidatePath: string) =>
           normalizeRepositoryPath(candidatePath) ===
-          normalizeRepositoryPath(path.relative(absoluteRootPath, inspectedPath))
+          normalizeRepositoryPath(path.relative(rootPath, inspectedPath))
       : null;
 
-  const files = await collectLocalRepositoryFiles(absoluteRootPath);
+  const files = await collectLocalRepositoryFiles(rootPath);
   const summary = await inspectRepositoryFiles(
     files,
     async (_candidate, file) => fs.readFile(file.absolutePath, "utf8"),
@@ -166,7 +215,7 @@ export const inspectLocalRepositoryUrdfs = async (
 
   return {
     source: "local",
-    rootPath: absoluteRootPath,
+    rootPath,
     inspectedPath,
     ...summary,
   };

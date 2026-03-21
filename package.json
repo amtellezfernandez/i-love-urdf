@@ -15,12 +15,15 @@
     "i-love-urdf": "./dist/cli.js"
   },
   "scripts": {
-    "build": "node ./scripts/build-package.mjs",
     "check:browser-entry": "node ./scripts/check-browser-entry.mjs",
+    "check:install": "node ./scripts/check-install.mjs",
+    "refresh:global": "node ./scripts/build-package.mjs && npm install -g .",
     "ilu": "node ./scripts/run-cli.mjs",
     "setup:xacro": "node ./scripts/run-cli.mjs setup-xacro-runtime",
     "smoke": "node ./scripts/smoke-cli.mjs",
-    "test:real-repos": "node ./scripts/test-real-repos.mjs"
+    "test": "node ./scripts/build-package.mjs && node --test",
+    "test:real-repos": "node ./scripts/build-package.mjs && node ./scripts/test-real-repos.mjs",
+    "build:package": "node ./scripts/build-package.mjs"
   },
   "dependencies": {
     "linkedom": "^0.18.12",

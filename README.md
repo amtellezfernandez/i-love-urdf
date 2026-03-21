@@ -40,11 +40,13 @@ Requirements:
 Install the CLI globally from GitHub:
 
 ```sh
-npm install -g https://github.com/amtellezfernandez/i-love-urdf/archive/refs/heads/main.tar.gz
+npm install -g --install-links=true git+https://github.com/amtellezfernandez/i-love-urdf.git
 ilu --help
 ```
 
-GitHub installs use the prebuilt `dist/` shipped in this repo, so no local TypeScript build step is required.
+Use `--install-links=true` for GitHub installs so npm writes a real global package instead of a temp cache link.
+Current GitHub installs ship the built `dist/` tree directly from the repo, so rerunning the same command upgrades the global CLI in place.
+If you are reinstalling an older checkout or release that still used npm git-dependency preparation, run `npm uninstall -g i-love-urdf` first and then rerun the install command.
 
 Install the CLI globally from a release tarball:
 
@@ -62,6 +64,18 @@ npm install -g .
 ilu --help
 ```
 
+When you change a local checkout and want the global `ilu` binary to pick up the latest code again, run:
+
+```sh
+corepack pnpm refresh:global
+```
+
+When you are preparing a GitHub-installable commit or a release tarball from this repo, rebuild the tracked package output first:
+
+```sh
+corepack pnpm build:package
+```
+
 If you are developing from a repo checkout instead of installing the CLI globally, use the repo-local workflow below.
 
 Repo-development requirements:
@@ -77,6 +91,12 @@ corepack pnpm install
 # run the CLI from this repo checkout
 corepack pnpm ilu --help
 
+# run the targeted contract/invariant tests
+corepack pnpm test
+
+# verify git, tarball, and local-checkout install paths
+corepack pnpm check:install
+
 # optional: enable local XACRO expansion once per clone
 corepack pnpm setup:xacro
 corepack pnpm ilu probe-xacro-runtime
@@ -90,6 +110,27 @@ Use plain `ilu ...` only when the package is installed as a real CLI in your env
 When working against GitHub repos, pass the repository with `--github <owner/repo|url>`.
 For example, use `inspect-repo --github ANYbotics/anymal_b_simple_description` or `inspect-repo --github https://github.com/ANYbotics/anymal_b_simple_description`.
 Do not write a `--https=...` flag; the URL belongs to the value of `--github`.
+
+Before you use a `--github` command on a new machine, do this once first:
+
+```sh
+gh auth login
+gh auth status
+```
+
+If `gh` is already logged in, `ilu` can reuse that session for GitHub repo commands.
+
+GitHub auth for `--github` commands follows this order:
+
+- `--token <token>`
+- `GITHUB_TOKEN`
+- `GH_TOKEN`
+- GitHub CLI stored auth token when `gh` is installed and already logged in
+
+If you already use `gh auth login` in your terminal, you usually do not need to pass `--token` manually.
+If `gh` is not installed, use `--token`, `GITHUB_TOKEN`, or `GH_TOKEN` instead.
+For CI or headless shells, set `GITHUB_TOKEN` or `GH_TOKEN` explicitly.
+Git config identity such as `user.name` / `user.email` is not used for GitHub API auth.
 
 ## Common CLI Commands
 
@@ -122,6 +163,7 @@ ilu fix-mesh-paths --urdf robot.urdf --out robot.fixed.urdf
 ilu inspect-meshes --mesh-dir ./meshes
 ilu compress-meshes --mesh-dir ./meshes --in-place
 ilu urdf-to-mjcf --urdf robot.urdf --out robot.xml
+ilu urdf-to-usd --urdf robot.urdf --root ./robot-repo --out robot.usda
 ilu urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
 ilu xacro-to-urdf --xacro robot.urdf.xacro --out robot.urdf
 ```
@@ -150,6 +192,8 @@ Example output:
 
 ```json
 {
+  "schema": "i-love-urdf/robot-morphology-card",
+  "schemaVersion": "1.0.0",
   "summary": {
     "armCount": 2,
     "legCount": 2,
@@ -176,12 +220,13 @@ This is meant to be:
 - deterministic where possible
 - explainable through explicit reasons
 - machine-readable for robotics pipelines and dataset tooling
+- versioned through stable `schema` and `schemaVersion` fields
 - separate from product/UI wording
 
 ## Orientation Reports
 
 Use `guess-orientation` and `buildRobotOrientationCard(...)` when you need a
-compact, explainable orientation guess before normalization or simulator import.
+compact, explainable orientation guess before normalization or downstream conversion.
 
 For pure/core usage, the guess is built from URDF geometry, link/joint structure,
 wheel-axis votes, and PCA over sampled points. For local loaded sources in Node,
@@ -204,6 +249,8 @@ Example output:
 
 ```json
 {
+  "schema": "i-love-urdf/robot-orientation-card",
+  "schemaVersion": "1.0.0",
   "summary": {
     "classification": "y-up",
     "confidence": 0.89,
@@ -229,7 +276,8 @@ This layer is meant to be:
 
 - deterministic at the basis-selection level
 - explainable through spans, wheel/joint votes, and PCA cues
-- machine-readable for repair and simulator-prep pipelines
+- machine-readable for repair and downstream-prep pipelines
+- versioned through stable `schema` and `schemaVersion` fields
 - explicit about evidence conflicts instead of hiding them
 
 ## Node API
@@ -249,6 +297,7 @@ import { loadSourceFromPath } from "i-love-urdf/load-source-node";
 import {
   buildLoadedSourceOrientationCard,
   checkLoadedSourcePhysicsHealth,
+  convertLoadedSourceToUSD,
 } from "i-love-urdf/urdf-node";
 
 const loaded = await loadSourceFromPath({ path: "./robot.urdf.xacro" });
@@ -267,18 +316,80 @@ const orientation = buildRobotOrientationCard(
 );
 const localOrientation = await buildLoadedSourceOrientationCard(loaded);
 const localPhysics = await checkLoadedSourcePhysicsHealth(loaded);
+const usd = await convertLoadedSourceToUSD(loaded, {
+  outputPath: "./robot.usda",
+});
 
 console.log(
   validation.isValid,
   robotType,
   physics.ok,
   mjcf.stats.bodiesCreated,
+  usd.stats.linksConverted,
   card.canonicalTags,
   orientation.summary.classification,
   localOrientation.meshAudit.sampledMeshFiles.length,
   localPhysics.meshAudit.unresolvedMeshReferences.length
 );
 ```
+
+## Core Today
+
+The industrial runtime-prep core that already exists in `i-love-urdf` is:
+
+- `guessOrientation(...)` / `guessUrdfOrientation(...)`
+- `identifyRobotType(...)`
+- `checkPhysicsHealth(...)`
+- `applyGlobalRotation(...)`
+- `rotateInertiaTensor(...)`
+- `normalizeJointAxis(...)`
+- `alignJointToLocalZ(...)`
+- `sanitizeNames(...)`
+- `resolvePackagePaths(...)`
+- `fixInertiaThresholds(...)`
+- `convertURDFToUSD(...)`
+- `convertURDFPathToUSD(...)`
+- `convertLoadedSourceToUSD(...)`
+- `convertMeshToUsd(...)`
+
+```ts
+import {
+  alignJointToLocalZ,
+  applyGlobalRotation,
+  checkPhysicsHealth,
+  convertURDFToUSD,
+  fixInertiaThresholds,
+  guessOrientation,
+  identifyRobotType,
+  normalizeJointAxis,
+  rotateInertiaTensor,
+  sanitizeNames,
+} from "i-love-urdf";
+
+const orientation = guessOrientation(robotUrdf);
+const robotType = identifyRobotType(robotUrdf);
+const physics = checkPhysicsHealth(robotUrdf);
+const usd = convertURDFToUSD(robotUrdf);
+const axis = normalizeJointAxis("0.01 0.98 0", { snapToCanonical: true });
+const safeName = sanitizeNames("Left Arm.Link-1");
+```
+
+`URDF -> USD` now exists as a first-pass USDA exporter:
+
+- stage metadata: `upAxis`, `metersPerUnit`, `kilogramsPerUnit`, `PhysicsScene`
+- articulated link hierarchy with `PhysicsRigidBodyAPI`
+- revolute / prismatic / fixed joints
+- primitive visuals and collisions
+- inline STL mesh export
+- local-repo mesh resolution for `package://` and relative paths via `convertURDFPathToUSD(...)` / `convertLoadedSourceToUSD(...)`
+
+Current limits are explicit:
+
+- output is ASCII USDA, not binary USD
+- local mesh conversion is STL-first today
+- existing USD mesh assets can be referenced directly
+- OBJ / DAE / GLB are not converted to USD yet
+- the exporter is a strong first pass for USD-based prep, not a full scene-authoring pipeline
 
 For browser bundlers, use the browser-safe entrypoint:
 

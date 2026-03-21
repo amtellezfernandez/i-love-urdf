@@ -14,6 +14,10 @@ import {
 const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_ACCEPT_HEADER = "application/vnd.github.v3+json";
 const GITHUB_BAD_CREDENTIALS_PATTERN = /bad credentials/i;
+const JSDELIVR_DATA_BASE_URL = "https://data.jsdelivr.com/v1";
+const JSDELIVR_CDN_BASE_URL = "https://cdn.jsdelivr.net";
+const GITHUB_NETWORK_ERROR_PATTERN =
+  /Failed to fetch|NetworkError|fetch failed|Load failed|ECONNREFUSED|ERR_CONNECTION_REFUSED|ERR_NETWORK/i;
 
 type GitHubTreeEntry = {
   path: string;
@@ -33,6 +37,12 @@ type GitHubTreeResponse = {
 type GitHubBlobResponse = {
   content?: string;
   encoding?: string;
+};
+
+type JsDelivrFlatFileEntry = {
+  name?: string;
+  path?: string;
+  size?: number;
 };
 
 export type GitHubRepositoryReference = {
@@ -92,6 +102,36 @@ const buildGitHubHeaders = (accessToken?: string): Headers => {
     headers.set("Authorization", `token ${accessToken}`);
   }
   return headers;
+};
+
+const buildJsDelivrFlatUrl = (owner: string, repo: string, ref?: string): string =>
+  `${JSDELIVR_DATA_BASE_URL}/package/gh/${owner}/${repo}${ref ? `@${encodeURIComponent(ref)}` : ""}/flat`;
+
+const buildJsDelivrFileUrl = (
+  owner: string,
+  repo: string,
+  filePath: string,
+  ref?: string
+): string => {
+  const encodedPath = normalizeRepositoryPath(filePath)
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${JSDELIVR_CDN_BASE_URL}/gh/${owner}/${repo}${ref ? `@${encodeURIComponent(ref)}` : ""}/${encodedPath}`;
+};
+
+const isRecoverableGitHubError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  return (
+    /rate limit/i.test(error.message) ||
+    /too many requests/i.test(error.message) ||
+    /abuse detection/i.test(error.message) ||
+    /secondary rate limit/i.test(error.message) ||
+    /temporarily throttled/i.test(error.message) ||
+    /token has no access/i.test(error.message) ||
+    GITHUB_NETWORK_ERROR_PATTERN.test(error.message)
+  );
 };
 
 const fetchGitHubResponse = async (
@@ -174,6 +214,83 @@ const readGitHubJson = async <T>(
   return (await response.json()) as T;
 };
 
+const readPublicMirrorJson = async <T>(
+  url: string,
+  {
+    notFoundMessage,
+    contextLabel,
+  }: {
+    notFoundMessage: string;
+    contextLabel: string;
+  }
+): Promise<T> => {
+  let response: Response;
+
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Public mirror request failed while ${contextLabel}: ${error.message}`);
+    }
+    throw new Error(`Public mirror request failed while ${contextLabel}.`);
+  }
+
+  if (response.status === 404) {
+    throw new Error(notFoundMessage);
+  }
+
+  if (response.status === 403) {
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      `Public mirror refused this repository request${
+        details ? `: ${details.slice(0, 200)}` : "."
+      }`
+    );
+  }
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      `Public mirror request failed while ${contextLabel}: ${response.status} ${response.statusText}${
+        details ? ` - ${details.slice(0, 200)}` : ""
+      }`
+    );
+  }
+
+  return (await response.json()) as T;
+};
+
+const readPublicMirrorBytes = async (
+  url: string,
+  filePath: string
+): Promise<Uint8Array> => {
+  let response: Response;
+
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Public mirror request failed while reading ${filePath}: ${error.message}`);
+    }
+    throw new Error(`Public mirror request failed while reading ${filePath}.`);
+  }
+
+  if (response.status === 404) {
+    throw new Error(`GitHub file not found: ${filePath}`);
+  }
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      `Public mirror request failed while reading ${filePath}: ${response.status} ${response.statusText}${
+        details ? ` - ${details.slice(0, 200)}` : ""
+      }`
+    );
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
+};
+
 const decodeBase64ToBytes = (base64: string): Uint8Array => {
   const cleaned = base64.replace(/\s/g, "");
   if (typeof Buffer !== "undefined") {
@@ -251,7 +368,12 @@ const getDefaultBranch = async (
 
 const convertTreeToRepositoryFiles = (
   treeEntries: GitHubTreeEntry[],
-  pathPrefix: string = ""
+  pathPrefix: string = "",
+  options: {
+    owner?: string;
+    repo?: string;
+    ref?: string;
+  } = {}
 ): GitHubRepositoryFile[] => {
   const files: GitHubRepositoryFile[] = [];
   const directories = new Set<string>();
@@ -274,7 +396,10 @@ const convertTreeToRepositoryFiles = (
         name,
         path: fullPath,
         type: "file",
-        download_url: null,
+        download_url:
+          options.owner && options.repo
+            ? buildJsDelivrFileUrl(options.owner, options.repo, fullPath, options.ref)
+            : null,
         size: entry.size || 0,
         sha: entry.sha,
         encoding: "sha",
@@ -300,11 +425,103 @@ const convertTreeToRepositoryFiles = (
   return files;
 };
 
+const fetchPublicMirrorRepositoryFiles = async (
+  reference: GitHubRepositoryReference,
+  ref: string | undefined,
+  pathPrefix: string
+): Promise<GitHubRepositoryFile[]> => {
+  const listing = await readPublicMirrorJson<{ files?: JsDelivrFlatFileEntry[] }>(
+    buildJsDelivrFlatUrl(reference.owner, reference.repo, ref),
+    {
+      notFoundMessage: pathPrefix
+        ? "GitHub repository path not found."
+        : "GitHub repository not found.",
+      contextLabel: "reading repository listing",
+    }
+  );
+
+  if (!Array.isArray(listing.files)) {
+    throw new Error("Public mirror returned an invalid repository listing.");
+  }
+
+  const normalizedPrefix = normalizeRepositoryPath(pathPrefix);
+  const files: GitHubRepositoryFile[] = [];
+  const directories = new Set<string>();
+
+  for (const entry of listing.files) {
+    const rawPath = typeof entry.name === "string" ? entry.name : entry.path;
+    const repoPath = normalizeRepositoryPath(rawPath || "").replace(/^\/+/, "");
+    if (!repoPath) continue;
+    if (
+      normalizedPrefix &&
+      repoPath !== normalizedPrefix &&
+      !repoPath.startsWith(`${normalizedPrefix}/`)
+    ) {
+      continue;
+    }
+
+    const parts = repoPath.split("/").filter(Boolean);
+    for (let index = 1; index < parts.length; index += 1) {
+      directories.add(parts.slice(0, index).join("/"));
+    }
+
+    files.push({
+      name: parts[parts.length - 1] || repoPath,
+      path: repoPath,
+      type: "file",
+      download_url: buildJsDelivrFileUrl(reference.owner, reference.repo, repoPath, ref),
+      size: Number.isFinite(entry.size) ? entry.size : undefined,
+    });
+  }
+
+  directories.forEach((dirPath) => {
+    if (
+      normalizedPrefix &&
+      dirPath !== normalizedPrefix &&
+      !dirPath.startsWith(`${normalizedPrefix}/`)
+    ) {
+      return;
+    }
+    files.push({
+      name: dirPath.split("/").pop() || dirPath,
+      path: dirPath,
+      type: "dir",
+      download_url: null,
+      size: 0,
+    });
+  });
+
+  files.sort((left, right) => {
+    if (left.path === right.path) {
+      if (left.type === right.type) return 0;
+      return left.type === "dir" ? -1 : 1;
+    }
+    return left.path.localeCompare(right.path);
+  });
+
+  return files;
+};
+
 export const fetchGitHubRepositoryFiles = async (
   reference: GitHubRepositoryReference,
   accessToken?: string
 ): Promise<{ ref: string; files: GitHubRepositoryFile[] }> => {
-  const ref = reference.ref || (await getDefaultBranch(reference.owner, reference.repo, accessToken));
+  let ref = reference.ref;
+  if (!ref) {
+    try {
+      ref = await getDefaultBranch(reference.owner, reference.repo, accessToken);
+    } catch (error) {
+      if (!isRecoverableGitHubError(error)) {
+        throw error;
+      }
+
+      const files = await fetchPublicMirrorRepositoryFiles(reference, undefined, normalizeRepositoryPath(reference.path || ""));
+      return {
+        ref: "HEAD",
+        files,
+      };
+    }
+  }
   const normalizedPath = normalizeRepositoryPath(reference.path || "");
 
   const readTree = async (treePath: string) =>
@@ -325,9 +542,20 @@ export const fetchGitHubRepositoryFiles = async (
     const tree = await readTree(normalizedPath);
     return {
       ref,
-      files: convertTreeToRepositoryFiles(tree.tree ?? [], normalizedPath),
+      files: convertTreeToRepositoryFiles(tree.tree ?? [], normalizedPath, {
+        owner: reference.owner,
+        repo: reference.repo,
+        ref,
+      }),
     };
   } catch (error) {
+    if (isRecoverableGitHubError(error)) {
+      return {
+        ref,
+        files: await fetchPublicMirrorRepositoryFiles(reference, ref, normalizedPath),
+      };
+    }
+
     if (!normalizedPath || !(error instanceof Error) || error.message !== "GitHub repository path not found.") {
       throw error;
     }
@@ -339,7 +567,11 @@ export const fetchGitHubRepositoryFiles = async (
     }
     return {
       ref,
-      files: convertTreeToRepositoryFiles(filtered, normalizedPath),
+      files: convertTreeToRepositoryFiles(filtered, normalizedPath, {
+        owner: reference.owner,
+        repo: reference.repo,
+        ref,
+      }),
     };
   }
 };
@@ -349,9 +581,19 @@ export const fetchGitHubTextFile = async (
   repo: string,
   filePath: string,
   blobSha?: string,
-  accessToken?: string
+  accessToken?: string,
+  ref?: string,
+  downloadUrl?: string | null
 ): Promise<string> => {
-  const bytes = await fetchGitHubFileBytes(owner, repo, filePath, blobSha, accessToken);
+  const bytes = await fetchGitHubFileBytes(
+    owner,
+    repo,
+    filePath,
+    blobSha,
+    accessToken,
+    ref,
+    downloadUrl
+  );
   return new TextDecoder().decode(bytes);
 };
 
@@ -360,16 +602,32 @@ export const fetchGitHubFileBytes = async (
   repo: string,
   filePath: string,
   blobSha?: string,
-  accessToken?: string
+  accessToken?: string,
+  ref?: string,
+  downloadUrl?: string | null
 ): Promise<Uint8Array> => {
+  const publicMirrorUrl = downloadUrl || buildJsDelivrFileUrl(owner, repo, filePath, ref);
+
+  if (!accessToken && publicMirrorUrl) {
+    return readPublicMirrorBytes(publicMirrorUrl, filePath);
+  }
+
   const endpoint = blobSha
     ? `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/git/blobs/${blobSha}`
     : `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}/contents/${filePath}`;
-  const data = await readGitHubJson<GitHubBlobResponse>(endpoint, {
-    accessToken,
-    notFoundMessage: `GitHub file not found: ${filePath}`,
-    contextLabel: `reading ${filePath}`,
-  });
+  let data: GitHubBlobResponse;
+  try {
+    data = await readGitHubJson<GitHubBlobResponse>(endpoint, {
+      accessToken,
+      notFoundMessage: `GitHub file not found: ${filePath}`,
+      contextLabel: `reading ${filePath}`,
+    });
+  } catch (error) {
+    if (!publicMirrorUrl || !isRecoverableGitHubError(error)) {
+      throw error;
+    }
+    return readPublicMirrorBytes(publicMirrorUrl, filePath);
+  }
 
   if (!data.content || data.encoding !== "base64") {
     throw new Error(`Unsupported GitHub content encoding for ${filePath}.`);
@@ -391,7 +649,9 @@ export const inspectGitHubRepositoryUrdfs = async (
         reference.repo,
         file.path,
         file.sha,
-        options.accessToken
+        options.accessToken,
+        ref,
+        file.download_url
       ),
     options
   );
@@ -430,7 +690,9 @@ export const repairGitHubRepositoryMeshReferences = async (
     reference.repo,
     targetFile.path,
     targetFile.sha,
-    options.accessToken
+    options.accessToken,
+    ref,
+    targetFile.download_url
   );
   const result = fixMissingMeshReferencesInRepository(
     urdfContent,

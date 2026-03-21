@@ -90,7 +90,6 @@ fs.writeFileSync(
   buildManifestPath,
   JSON.stringify(
     {
-      generatedAt: new Date().toISOString(),
       outputs,
     },
     null,

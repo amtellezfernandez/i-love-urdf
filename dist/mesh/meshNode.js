@@ -15,4 +15,5 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./stlBinary"), exports);
-__exportStar(require("./mujocoMeshPrep"), exports);
+__exportStar(require("./meshBoundsNode"), exports);
+__exportStar(require("./meshPrep"), exports);

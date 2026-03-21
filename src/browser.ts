@@ -52,38 +52,174 @@ export {
   type PlainUrdfDocumentIssue,
 } from "./parsing/safeUrdfDocument";
 export {
+  getUrdfElementByName,
+  parseUrdfDocument,
+  serializeUrdfDocument,
+  type UrdfElementLookupOptions,
+  type UrdfParseOptions,
+} from "./parsing/urdfDocumentBrowser";
+export {
+  analyzeUrdf,
+  analyzeUrdfDocument,
+  type CollisionEntry,
+  type InertialEntry,
+  type UrdfAnalysis,
+} from "./analysis/analyzeUrdf";
+export {
+  analyzeRobotMorphology,
+  buildRobotStructureLabels,
+  getJointTypeDegreesOfFreedom,
+  isControllableJointType,
+  type RobotMorphologyFamily,
+  type RobotMorphologySummary,
+  type RobotStructureBranchKind,
+  type RobotStructureLabels,
+  type RobotStructureSideHint,
+} from "./analysis/robotMorphology";
+export {
+  buildRobotMorphologyCard,
+  getRobotMorphologyDisplayTags,
+  type RobotMorphologyCard,
+  type RobotMorphologyCardOptions,
+  type RobotMorphologyDisplayTag,
+  type RobotMorphologyTag,
+  type RobotMorphologyTagConfidence,
+  type RobotMorphologyTagName,
+  type RobotMorphologyTagSource,
+} from "./analysis/robotMorphologyCard";
+export {
+  buildRobotOrientationCard,
+  type RobotOrientationCard,
+  type RobotOrientationCardSummary,
+  type RobotOrientationClassification,
+} from "./analysis/robotOrientationCard";
+export {
+  identifyRobotType,
+  type RobotType,
+} from "./analysis/robotType";
+export {
+  healthCheckUrdf as checkPhysicsHealth,
+  type HealthCheckFinding as PhysicsHealthFinding,
+  type HealthCheckLevel as PhysicsHealthLevel,
+  type HealthCheckOptions as PhysicsHealthOptions,
+  type HealthCheckReport as PhysicsHealthReport,
+} from "./analysis/healthCheckUrdf";
+export {
+  guessUrdfOrientation,
+  guessOrientation,
+  type OrientationAxis,
+  type OrientationEvidence,
+  type OrientationGuess,
+  type OrientationGuessOptions,
+  type OrientationReport,
+  type OrientationSignal,
+} from "./analysis/guessOrientation";
+export {
+  parseUrdfStats,
+  type UrdfParseStats,
+} from "./analysis/urdfStats";
+export {
   canonicalOrderURDF,
 } from "./utils/canonicalOrdering";
 export {
   compareUrdfs,
 } from "./utils/urdfDiffUtils";
 export {
+  normalizeJointAxis,
   normalizeJointAxes,
   snapJointAxes,
   type AxisCorrection,
   type AxisError,
   type AxisNormalizationOptions,
   type AxisNormalizationResult,
+  type JointAxisInput,
 } from "./utils/normalizeJointAxes";
 export {
   prettyPrintURDF,
 } from "./utils/prettyPrintURDF";
 export {
+  sanitizeNames,
+  sanitizeUrdfName,
+  type SanitizeNamesOptions,
+} from "./utils/urdfNames";
+export {
+  alignJointToLocalZ,
+  canonicalizeJointFrames,
+  type CanonicalizeJointFrameOptions,
+  type CanonicalizeJointFrameResult,
+  type CanonicalizeJointFrameSkip,
+} from "./transforms/canonicalizeJointFrames";
+export {
+  convertURDFToUSD,
+  createInlineUsdMeshPrim,
+  createUsdStage,
+  mapUrdfToUsdPrim,
+  type ConvertURDFToUSDOptions,
+  type CreateUsdStageOptions,
+  type InlineUsdMesh,
+  type InlineUsdMeshPrimOptions,
+  type MapUrdfToUsdPrimOptions,
+  type ResolvedUsdMesh,
+  type URDFToUSDConversionResult,
+  type UsdMeshResolveRequest,
+  type UsdPrim,
+  type UsdQuaternion,
+  type UsdStage,
+  type UsdUpAxis,
+} from "./convert/urdfToUSD";
+export {
   buildOrientationMappingRotation,
+  applyGlobalRotation,
   applyOrientationToRobot,
   rotateRobot90Degrees,
   type AxisSpec,
 } from "./utils/rotateRobot";
 export {
+  rotateInertiaTensor,
+  fixInertiaThresholds,
+  type InertiaTensor,
+  type Mat3,
+  type Vec3,
+} from "./utils/rotationMath";
+export {
   isSafeMeshPath,
   normalizeMeshPath,
   normalizeMeshPathForMatch,
   parseMeshReference,
+  resolvePackagePaths,
+  type PackagePathMap,
   type MeshReference,
 } from "./mesh/meshPaths";
 export {
+  computeMeshBoundsFromArrayBuffer,
+} from "./mesh/meshBoundsBrowser";
+export {
+  type MeshBounds,
+} from "./mesh/collisionAutoFit";
+export {
+  resolveMeshCandidates,
+  type ResolvedMeshCandidate,
+} from "./mesh/meshCandidatesBrowser";
+export {
+  buildPackageRootsFromMeshBlobMap,
+  resolveMeshBlob,
+  resolveMeshBlobFromReference,
+  resolveMeshResourceBlob,
+  stripMeshSchemes,
+  type MeshBlobMap,
+  type PackageRootMap,
+  type ResolveMeshBlobOptions,
+  type ResolvedMeshBlob,
+} from "./mesh/meshResolverBrowser";
+export {
   fixMeshPaths,
 } from "./mesh/fixMeshPaths";
+export {
+  fixMissingMeshReferences,
+  type FixMissingMeshReferencesBrowserOptions,
+  type FixMissingMeshReferencesResult,
+  type MeshReferenceCorrection,
+} from "./repository/fixMissingMeshReferencesBrowser";
 export {
   inspectRepositoryCandidates,
   type InspectRepositoryCandidatesOptions,

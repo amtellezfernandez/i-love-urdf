@@ -22,5 +22,11 @@ export interface AxisNormalizationResult {
     errors: AxisError[];
     snapped: AxisCorrection[];
 }
+export type JointAxisInput = [number, number, number] | {
+    x: number;
+    y: number;
+    z: number;
+} | string;
+export declare function normalizeJointAxis(axis: JointAxisInput, options?: AxisNormalizationOptions): [number, number, number];
 export declare function normalizeJointAxes(urdfContent: string, options?: AxisNormalizationOptions): AxisNormalizationResult;
 export declare function snapJointAxes(urdfContent: string, options?: Omit<AxisNormalizationOptions, "snapToCanonical">): AxisNormalizationResult;

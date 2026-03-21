@@ -1,3 +1,4 @@
+import { ORIENTATION_GUESS_CONTRACT } from "../contracts/outputContracts";
 import type { AxisSpec } from "../utils/rotateRobot";
 export type OrientationAxis = "x" | "y" | "z";
 export type OrientationSignal = {
@@ -21,8 +22,11 @@ export type OrientationReport = {
 export type OrientationGuessOptions = {
     targetUpAxis?: OrientationAxis;
     targetForwardAxis?: OrientationAxis;
+    additionalSamplePoints?: Array<[number, number, number]>;
 };
 export type OrientationGuess = {
+    schema: typeof ORIENTATION_GUESS_CONTRACT.schema;
+    schemaVersion: typeof ORIENTATION_GUESS_CONTRACT.schemaVersion;
     isValid: boolean;
     error?: string;
     robotName: string | null;
@@ -56,3 +60,4 @@ export type OrientationGuess = {
     assumptions: string[];
 };
 export declare function guessUrdfOrientation(urdfContent: string, options?: OrientationGuessOptions): OrientationGuess;
+export declare const guessOrientation: typeof guessUrdfOrientation;

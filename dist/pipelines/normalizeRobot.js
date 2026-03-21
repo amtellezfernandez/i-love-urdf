@@ -36,7 +36,7 @@ function normalizeRobot(urdfContent, options = {}) {
             enabled: options.canonicalizeJointFrame ?? false,
             reason: options.canonicalizeJointFrame
                 ? `Enabled explicitly with target axis ${options.targetJointAxis ?? "z"}.`
-                : "Disabled by default; enable when simulator control expects a canonical joint-local axis.",
+                : "Disabled by default; enable when downstream control expects a canonical joint-local axis.",
         },
         {
             name: "pretty-print",

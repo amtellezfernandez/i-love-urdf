@@ -26,6 +26,15 @@ export interface CanonicalizeJointFrameResult extends UrdfTransformResult {
   skippedJoints: CanonicalizeJointFrameSkip[];
 }
 
+export const alignJointToLocalZ = (
+  urdfContent: string,
+  jointName: string
+): CanonicalizeJointFrameResult =>
+  canonicalizeJointFrames(urdfContent, {
+    targetAxis: "z",
+    joints: [jointName],
+  });
+
 const DEFAULT_AXIS: Vec3 = [1, 0, 0];
 const ELIGIBLE_JOINT_TYPES = new Set(["revolute", "continuous", "prismatic"]);
 

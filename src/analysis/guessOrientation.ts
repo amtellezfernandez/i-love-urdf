@@ -5,6 +5,11 @@ import {
   resolveUpCueFromDirectionSamples,
   type DirectionSample,
 } from "./orientationCues";
+import {
+  ORIENTATION_GUESS_CONTRACT,
+  type OutputContract,
+  withOutputContract,
+} from "../contracts/outputContracts";
 import type { AxisSpec } from "../utils/rotateRobot";
 import { parseXml } from "../xmlDom";
 
@@ -58,9 +63,12 @@ export type OrientationReport = {
 export type OrientationGuessOptions = {
   targetUpAxis?: OrientationAxis;
   targetForwardAxis?: OrientationAxis;
+  additionalSamplePoints?: Array<[number, number, number]>;
 };
 
 export type OrientationGuess = {
+  schema: typeof ORIENTATION_GUESS_CONTRACT.schema;
+  schemaVersion: typeof ORIENTATION_GUESS_CONTRACT.schemaVersion;
   isValid: boolean;
   error?: string;
   robotName: string | null;
@@ -97,6 +105,10 @@ export type OrientationGuess = {
   report: OrientationReport;
   assumptions: string[];
 };
+
+const buildOrientationGuess = (
+  payload: Omit<OrientationGuess, keyof OutputContract<typeof ORIENTATION_GUESS_CONTRACT.schema>>
+): OrientationGuess => withOutputContract(ORIENTATION_GUESS_CONTRACT, payload);
 
 const AXES: OrientationAxis[] = ["x", "y", "z"];
 const IDENTITY_ROTATION: Mat3 = [
@@ -605,7 +617,7 @@ export function guessUrdfOrientation(
   const targetForwardAxis = options.targetForwardAxis ?? "x";
   const analysis = analyzeUrdf(urdfContent);
   if (!analysis.isValid) {
-    return {
+    return buildOrientationGuess({
       isValid: false,
       error: analysis.error ?? "Invalid URDF",
       robotName: analysis.robotName,
@@ -627,7 +639,7 @@ export function guessUrdfOrientation(
       signals: [],
       report: { evidence: [], conflicts: [] },
       assumptions: [],
-    };
+    });
   }
 
   const xmlDoc = parseXml(urdfContent);
@@ -639,6 +651,9 @@ export function guessUrdfOrientation(
     linkTransforms,
     jointWorldTransforms
   );
+  (options.additionalSamplePoints ?? []).forEach((point) => {
+    pushSamplePoint(geometryBounds, rawPoints, point);
+  });
   const directionSamples = buildDirectionSamples(rawPoints);
 
   const spans =
@@ -979,7 +994,7 @@ export function guessUrdfOrientation(
         }
       : null;
 
-  return {
+  return buildOrientationGuess({
     isValid: true,
     robotName: analysis.robotName,
     likelyUpAxis,
@@ -1009,5 +1024,7 @@ export function guessUrdfOrientation(
       conflicts,
     },
     assumptions,
-  };
+  });
 }
+
+export const guessOrientation = guessUrdfOrientation;

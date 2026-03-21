@@ -1,0 +1,85 @@
+{
+  "schema": "i-love-urdf/robot-morphology-card",
+  "schemaVersion": "1.0.0",
+  "robotName": "research_mobile_manipulator_gripper",
+  "nameHints": [
+    "research_mobile_manipulator_gripper"
+  ],
+  "summary": {
+    "structureLabels": {
+      "linkByName": {
+        "base_link": "base",
+        "left_shoulder_link": "arm1",
+        "left_gripper_link": "arm1",
+        "right_shoulder_link": "arm2",
+        "right_gripper_link": "arm2",
+        "front_left_wheel_link": "wheel1",
+        "rear_left_wheel_link": "wheel2",
+        "front_right_wheel_link": "wheel3",
+        "rear_right_wheel_link": "wheel4"
+      },
+      "jointByName": {
+        "left_shoulder_joint": "arm1",
+        "left_gripper_joint": "arm1",
+        "right_shoulder_joint": "arm2",
+        "right_gripper_joint": "arm2",
+        "front_left_wheel_joint": "wheel1",
+        "rear_left_wheel_joint": "wheel2",
+        "front_right_wheel_joint": "wheel3",
+        "rear_right_wheel_joint": "wheel4"
+      }
+    },
+    "linkCount": 9,
+    "jointCount": 8,
+    "controllableJointCount": 8,
+    "dofCount": 8,
+    "armCount": 2,
+    "legCount": 0,
+    "wheelCount": 4,
+    "primaryFamily": "mobile-manipulator",
+    "families": [
+      "mobile-manipulator",
+      "wheeled"
+    ],
+    "isHumanoidLike": false,
+    "isQuadrupedLike": false,
+    "isWheeledLike": true,
+    "isMobileManipulatorLike": true
+  },
+  "canonicalTags": [
+    "mobile-manipulator",
+    "wheeled",
+    "end-effector"
+  ],
+  "displayTags": [
+    "Mobile Manipulator",
+    "Wheeled",
+    "End Effector"
+  ],
+  "tags": [
+    {
+      "tag": "mobile-manipulator",
+      "confidence": "high",
+      "source": "structure",
+      "reasons": [
+        "Detected 2 arm branches and 4 wheel branches."
+      ]
+    },
+    {
+      "tag": "wheeled",
+      "confidence": "high",
+      "source": "structure",
+      "reasons": [
+        "Detected 4 wheel branches."
+      ]
+    },
+    {
+      "tag": "end-effector",
+      "confidence": "medium",
+      "source": "name",
+      "reasons": [
+        "Name hints matched end-effector tokens in \"research mobile manipulator gripper\"."
+      ]
+    }
+  ]
+}

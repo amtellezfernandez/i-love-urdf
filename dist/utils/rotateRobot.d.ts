@@ -6,6 +6,7 @@ export declare function buildOrientationMappingRotation(options: {
     targetForwardAxis?: AxisSpec;
     targetUpAxis?: AxisSpec;
 }): Mat3;
+export declare function applyGlobalRotation(urdfContent: string, R: Mat3): string;
 export declare function applyOrientationToRobot(urdfContent: string, options: {
     sourceForwardAxis: AxisSpec;
     sourceUpAxis: AxisSpec;

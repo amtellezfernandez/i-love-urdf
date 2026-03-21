@@ -1,13 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEFAULT_MESH_COMPRESSION_MAX_FACES = exports.DEFAULT_MUJOCO_MAX_STL_FACES = void 0;
+exports.DEFAULT_MESH_COMPRESSION_MAX_FACES = exports.DEFAULT_STL_FACE_BUDGET = void 0;
 exports.inspectMeshes = inspectMeshes;
 exports.compressMeshes = compressMeshes;
 const fs = require("node:fs");
 const path = require("node:path");
 const stlBinary_1 = require("./stlBinary");
-exports.DEFAULT_MUJOCO_MAX_STL_FACES = 200000;
-exports.DEFAULT_MESH_COMPRESSION_MAX_FACES = exports.DEFAULT_MUJOCO_MAX_STL_FACES;
+exports.DEFAULT_STL_FACE_BUDGET = 200000;
+exports.DEFAULT_MESH_COMPRESSION_MAX_FACES = exports.DEFAULT_STL_FACE_BUDGET;
 const listFilesRecursive = (rootDir) => {
     const results = [];
     const walk = (dirPath) => {
@@ -148,21 +148,19 @@ function compressMeshes(options) {
             results.push(entry);
             continue;
         }
-        if (inspectionEntry.overLimit) {
-            if (shouldWrite) {
-                const mesh = (0, stlBinary_1.readBinaryStl)(absolutePath);
-                const simplified = (0, stlBinary_1.chooseSimplifiedBinaryStl)(mesh.triangles, inspectionEntry.targetMaxFaces);
-                (0, stlBinary_1.writeBinaryStl)(targetPath, mesh.header, simplified.triangles);
-                entry.faceCountAfter = simplified.faceCount;
-                entry.changed = simplified.faceCount !== inspectionEntry.faceCount;
-                entry.divisions = Number.isFinite(simplified.divisions) ? simplified.divisions : null;
-                rewritten += entry.changed ? 1 : 0;
-                if (simplified.faceCount > inspectionEntry.targetMaxFaces) {
-                    entry.reason = `Still above target face limit after simplification: ${simplified.faceCount} > ${inspectionEntry.targetMaxFaces}.`;
-                }
-                else {
-                    entry.reason = null;
-                }
+        if (inspectionEntry.overLimit && shouldWrite) {
+            const mesh = (0, stlBinary_1.readBinaryStl)(absolutePath);
+            const simplified = (0, stlBinary_1.chooseSimplifiedBinaryStl)(mesh.triangles, inspectionEntry.targetMaxFaces);
+            (0, stlBinary_1.writeBinaryStl)(targetPath, mesh.header, simplified.triangles);
+            entry.faceCountAfter = simplified.faceCount;
+            entry.changed = simplified.faceCount !== inspectionEntry.faceCount;
+            entry.divisions = Number.isFinite(simplified.divisions) ? simplified.divisions : null;
+            rewritten += entry.changed ? 1 : 0;
+            if (simplified.faceCount > inspectionEntry.targetMaxFaces) {
+                entry.reason = `Still above target face limit after simplification: ${simplified.faceCount} > ${inspectionEntry.targetMaxFaces}.`;
+            }
+            else {
+                entry.reason = null;
             }
         }
         results.push(entry);

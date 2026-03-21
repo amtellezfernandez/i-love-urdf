@@ -46,7 +46,7 @@ export declare const fetchGitHubRepositoryFiles: (reference: GitHubRepositoryRef
     ref: string;
     files: GitHubRepositoryFile[];
 }>;
-export declare const fetchGitHubTextFile: (owner: string, repo: string, filePath: string, blobSha?: string, accessToken?: string) => Promise<string>;
-export declare const fetchGitHubFileBytes: (owner: string, repo: string, filePath: string, blobSha?: string, accessToken?: string) => Promise<Uint8Array>;
+export declare const fetchGitHubTextFile: (owner: string, repo: string, filePath: string, blobSha?: string, accessToken?: string, ref?: string, downloadUrl?: string | null) => Promise<string>;
+export declare const fetchGitHubFileBytes: (owner: string, repo: string, filePath: string, blobSha?: string, accessToken?: string, ref?: string, downloadUrl?: string | null) => Promise<Uint8Array>;
 export declare const inspectGitHubRepositoryUrdfs: (reference: GitHubRepositoryReference, options?: InspectGitHubRepositoryOptions) => Promise<GitHubRepositoryInspectionResult>;
 export declare const repairGitHubRepositoryMeshReferences: (reference: GitHubRepositoryReference, options?: RepairGitHubRepositoryOptions) => Promise<GitHubRepositoryMeshRepairResult>;

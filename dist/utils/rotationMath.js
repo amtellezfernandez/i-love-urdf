@@ -22,6 +22,8 @@ exports.ensureOriginElement = ensureOriginElement;
 exports.applyRotationToElementOrigin = applyRotationToElementOrigin;
 exports.applyLeftRotationToElementOrigin = applyLeftRotationToElementOrigin;
 exports.applyRightRotationToElementOrigin = applyRightRotationToElementOrigin;
+exports.rotateInertiaTensor = rotateInertiaTensor;
+exports.fixInertiaThresholds = fixInertiaThresholds;
 exports.rotateInertiaTensorElement = rotateInertiaTensorElement;
 exports.IDENTITY_MATRIX = [
     [1, 0, 0],
@@ -227,24 +229,47 @@ function applyRightRotationToElementOrigin(element, R) {
     }
     origin.setAttribute("rpy", formatRpy(matrixToRpy(rotatedR)));
 }
-function rotateInertiaTensorElement(inertia, R) {
-    const ixx = parseFloat(inertia.getAttribute("ixx") || "0");
-    const ixy = parseFloat(inertia.getAttribute("ixy") || "0");
-    const ixz = parseFloat(inertia.getAttribute("ixz") || "0");
-    const iyy = parseFloat(inertia.getAttribute("iyy") || "0");
-    const iyz = parseFloat(inertia.getAttribute("iyz") || "0");
-    const izz = parseFloat(inertia.getAttribute("izz") || "0");
+function rotateInertiaTensor(tensor, R) {
     const I = [
-        [ixx, ixy, ixz],
-        [ixy, iyy, iyz],
-        [ixz, iyz, izz],
+        [tensor.ixx, tensor.ixy, tensor.ixz],
+        [tensor.ixy, tensor.iyy, tensor.iyz],
+        [tensor.ixz, tensor.iyz, tensor.izz],
     ];
     const RT = transpose(R);
     const rotated = multiplyMatrices(multiplyMatrices(R, I), RT);
-    inertia.setAttribute("ixx", formatScalar(rotated[0][0]));
-    inertia.setAttribute("ixy", formatScalar(rotated[0][1]));
-    inertia.setAttribute("ixz", formatScalar(rotated[0][2]));
-    inertia.setAttribute("iyy", formatScalar(rotated[1][1]));
-    inertia.setAttribute("iyz", formatScalar(rotated[1][2]));
-    inertia.setAttribute("izz", formatScalar(rotated[2][2]));
+    return {
+        ixx: rotated[0][0],
+        ixy: rotated[0][1],
+        ixz: rotated[0][2],
+        iyy: rotated[1][1],
+        iyz: rotated[1][2],
+        izz: rotated[2][2],
+    };
+}
+function fixInertiaThresholds(tensor, epsilon = 1e-8) {
+    const clamp = (value) => (Math.abs(value) < epsilon ? 0 : value);
+    return {
+        ixx: clamp(tensor.ixx),
+        ixy: clamp(tensor.ixy),
+        ixz: clamp(tensor.ixz),
+        iyy: clamp(tensor.iyy),
+        iyz: clamp(tensor.iyz),
+        izz: clamp(tensor.izz),
+    };
+}
+function rotateInertiaTensorElement(inertia, R) {
+    const rotated = rotateInertiaTensor({
+        ixx: parseFloat(inertia.getAttribute("ixx") || "0"),
+        ixy: parseFloat(inertia.getAttribute("ixy") || "0"),
+        ixz: parseFloat(inertia.getAttribute("ixz") || "0"),
+        iyy: parseFloat(inertia.getAttribute("iyy") || "0"),
+        iyz: parseFloat(inertia.getAttribute("iyz") || "0"),
+        izz: parseFloat(inertia.getAttribute("izz") || "0"),
+    }, R);
+    inertia.setAttribute("ixx", formatScalar(rotated.ixx));
+    inertia.setAttribute("ixy", formatScalar(rotated.ixy));
+    inertia.setAttribute("ixz", formatScalar(rotated.ixz));
+    inertia.setAttribute("iyy", formatScalar(rotated.iyy));
+    inertia.setAttribute("iyz", formatScalar(rotated.iyz));
+    inertia.setAttribute("izz", formatScalar(rotated.izz));
 }

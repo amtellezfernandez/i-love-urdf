@@ -3,6 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.inspectBinaryStlBuffer = inspectBinaryStlBuffer;
 exports.inspectBinaryStlFile = inspectBinaryStlFile;
 exports.readBinaryStl = readBinaryStl;
+exports.readAsciiStl = readAsciiStl;
+exports.computeTriangleBounds = computeTriangleBounds;
+exports.readBinaryStlBounds = readBinaryStlBounds;
+exports.readAsciiStlBounds = readAsciiStlBounds;
+exports.readStlBounds = readStlBounds;
+exports.readStlTriangles = readStlTriangles;
 exports.simplifyBinaryStlTriangles = simplifyBinaryStlTriangles;
 exports.chooseSimplifiedBinaryStl = chooseSimplifiedBinaryStl;
 exports.writeBinaryStl = writeBinaryStl;
@@ -61,6 +67,161 @@ function readBinaryStl(filePath) {
         header: Buffer.from(buffer.subarray(0, STL_HEADER_BYTES)),
         triangles,
     };
+}
+function readAsciiStl(filePath) {
+    const content = fs.readFileSync(filePath, "utf8");
+    const vertices = [];
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    for (const match of content.matchAll(ASCII_VERTEX_PATTERN)) {
+        const x = Number(match[1]);
+        const y = Number(match[2]);
+        const z = Number(match[3]);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+            continue;
+        }
+        vertices.push(x, y, z);
+        if (x < minX)
+            minX = x;
+        if (y < minY)
+            minY = y;
+        if (z < minZ)
+            minZ = z;
+        if (x > maxX)
+            maxX = x;
+        if (y > maxY)
+            maxY = y;
+        if (z > maxZ)
+            maxZ = z;
+    }
+    if (vertices.length === 0 || vertices.length % 9 !== 0) {
+        throw new Error(`Unsupported STL format for ${filePath}. No complete ASCII triangle records were found.`);
+    }
+    return {
+        min: [minX, minY, minZ],
+        max: [maxX, maxY, maxZ],
+        isBinary: false,
+        vertexCount: vertices.length / 3,
+        triangles: Float32Array.from(vertices),
+    };
+}
+function computeTriangleBounds(triangles) {
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < triangles.length; index += 3) {
+        const x = triangles[index];
+        const y = triangles[index + 1];
+        const z = triangles[index + 2];
+        if (x < minX)
+            minX = x;
+        if (y < minY)
+            minY = y;
+        if (z < minZ)
+            minZ = z;
+        if (x > maxX)
+            maxX = x;
+        if (y > maxY)
+            maxY = y;
+        if (z > maxZ)
+            maxZ = z;
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+        return {
+            min: [0, 0, 0],
+            max: [0, 0, 0],
+        };
+    }
+    return {
+        min: [minX, minY, minZ],
+        max: [maxX, maxY, maxZ],
+    };
+}
+function readBinaryStlBounds(filePath) {
+    return computeTriangleBounds(readBinaryStl(filePath).triangles);
+}
+const ASCII_VERTEX_PATTERN = /vertex\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s+([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)/g;
+function readAsciiStlBounds(filePath) {
+    const content = fs.readFileSync(filePath, "utf8");
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    let matched = 0;
+    for (const match of content.matchAll(ASCII_VERTEX_PATTERN)) {
+        const x = Number(match[1]);
+        const y = Number(match[2]);
+        const z = Number(match[3]);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+            continue;
+        }
+        matched += 1;
+        if (x < minX)
+            minX = x;
+        if (y < minY)
+            minY = y;
+        if (z < minZ)
+            minZ = z;
+        if (x > maxX)
+            maxX = x;
+        if (y > maxY)
+            maxY = y;
+        if (z > maxZ)
+            maxZ = z;
+    }
+    if (matched === 0) {
+        throw new Error(`Unsupported STL format for ${filePath}. No ASCII vertex records were found.`);
+    }
+    return {
+        min: [minX, minY, minZ],
+        max: [maxX, maxY, maxZ],
+    };
+}
+function readStlBounds(filePath) {
+    const buffer = fs.readFileSync(filePath);
+    const binaryMetadata = inspectBinaryStlBuffer(buffer);
+    if (binaryMetadata.isBinary) {
+        const bounds = computeTriangleBounds(readBinaryStl(filePath).triangles);
+        return {
+            ...bounds,
+            isBinary: true,
+            vertexCount: binaryMetadata.faceCount * 3,
+        };
+    }
+    const content = buffer.toString("utf8");
+    let vertexCount = 0;
+    for (const _ of content.matchAll(ASCII_VERTEX_PATTERN)) {
+        vertexCount += 1;
+    }
+    const bounds = readAsciiStlBounds(filePath);
+    return {
+        ...bounds,
+        isBinary: false,
+        vertexCount,
+    };
+}
+function readStlTriangles(filePath) {
+    const binary = inspectBinaryStlFile(filePath);
+    if (binary.isBinary) {
+        const mesh = readBinaryStl(filePath);
+        const bounds = computeTriangleBounds(mesh.triangles);
+        return {
+            ...bounds,
+            isBinary: true,
+            vertexCount: mesh.triangles.length / 3,
+            triangles: mesh.triangles,
+        };
+    }
+    return readAsciiStl(filePath);
 }
 function simplifyBinaryStlTriangles(triangles, divisions) {
     if (divisions < 2) {

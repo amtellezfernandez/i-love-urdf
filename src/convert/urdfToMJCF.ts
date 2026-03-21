@@ -1,7 +1,7 @@
 /**
- * URDF to MJCF (MuJoCo XML Format) Converter
+ * URDF to MJCF converter.
  *
- * Converts URDF robot descriptions to MuJoCo's MJCF format.
+ * Converts URDF robot descriptions to MJCF.
  * Based on the structure used by urdf2mjcf (https://github.com/kscalelabs/urdf2mjcf)
  */
 
@@ -66,7 +66,7 @@ function parseOrigin(element: Element | null): { xyz: number[]; rpy: number[] } 
 }
 
 /**
- * Converts RPY (roll-pitch-yaw) to quaternion for MuJoCo
+ * Converts RPY (roll-pitch-yaw) to quaternion for MJCF.
  */
 function rpyToQuat(rpy: number[]): number[] {
   const [roll, pitch, yaw] = rpy;
@@ -292,7 +292,7 @@ function parseJoint(jointElement: Element): JointData {
 }
 
 /**
- * Maps URDF joint type to MuJoCo joint type
+ * Maps a URDF joint type to an MJCF joint type.
  */
 function mapJointType(urdfType: string): string {
   switch (urdfType) {
@@ -302,7 +302,7 @@ function mapJointType(urdfType: string): string {
     case "prismatic":
       return "slide";
     case "fixed":
-      return ""; // Fixed joints don't need a joint element in MuJoCo
+      return ""; // Fixed joints do not need a joint element in MJCF output.
     case "floating":
       return "free";
     case "planar":
@@ -313,7 +313,7 @@ function mapJointType(urdfType: string): string {
 }
 
 /**
- * Converts URDF geometry to MuJoCo geom string
+ * Converts URDF geometry to an MJCF geom string.
  */
 function geometryToMJCF(geom: GeometryData, indent: string, groupType: string): string {
   const quat = rpyToQuat(geom.origin.rpy || [0, 0, 0]);
@@ -332,14 +332,14 @@ function geometryToMJCF(geom: GeometryData, indent: string, groupType: string): 
 
   switch (geom.type) {
     case "box": {
-      // MuJoCo uses half-sizes
+      // MJCF uses half-sizes.
       const halfSize = geom.size!.map((s) => (s / 2).toFixed(6)).join(" ");
       geomStr += `type="box" size="${halfSize}"`;
       break;
     }
 
     case "cylinder": {
-      // MuJoCo cylinder: radius, half-length
+      // MJCF cylinder: radius, half-length.
       const cylSize = `${geom.radius!.toFixed(6)} ${(geom.length! / 2).toFixed(6)}`;
       geomStr += `type="cylinder" size="${cylSize}"`;
       break;

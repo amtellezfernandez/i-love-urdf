@@ -29,7 +29,7 @@ class NodeXmlDomParser {
   parseFromString(xml: string, mimeType: string): Document {
     const validationError = getXmlValidationError(xml);
     const parser = new LinkedomDOMParser();
-    const normalizedMimeType = mimeType.includes("html")
+    const normalizedMimeType: "image/svg+xml" | "text/html" | "text/xml" = mimeType.includes("html")
       ? "text/html"
       : mimeType.includes("svg")
         ? "image/svg+xml"

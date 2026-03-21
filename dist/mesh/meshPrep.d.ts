@@ -1,6 +1,6 @@
-export declare const DEFAULT_MUJOCO_MAX_STL_FACES = 200000;
+export declare const DEFAULT_STL_FACE_BUDGET = 200000;
 export declare const DEFAULT_MESH_COMPRESSION_MAX_FACES = 200000;
-export interface MujocoMeshPrepOptions {
+export interface MeshPrepOptions {
     meshDir: string;
     maxFaces?: number;
     inPlace?: boolean;
@@ -8,7 +8,7 @@ export interface MujocoMeshPrepOptions {
     meshes?: string[];
     limits?: Record<string, number>;
 }
-export interface MujocoMeshPrepResultEntry {
+export interface MeshPrepResultEntry {
     path: string;
     format: string;
     faceCountBefore: number;
@@ -17,18 +17,18 @@ export interface MujocoMeshPrepResultEntry {
     divisions: number | null;
     reason: string | null;
 }
-export interface MujocoMeshPrepResult {
+export interface MeshPrepResult {
     meshDir: string;
     targetDir: string | null;
     maxFaces: number;
     inspected: number;
     overLimit: number;
     rewritten: number;
-    results: MujocoMeshPrepResultEntry[];
+    results: MeshPrepResultEntry[];
 }
-export type CompressMeshesOptions = MujocoMeshPrepOptions;
-export type CompressMeshesResultEntry = MujocoMeshPrepResultEntry;
-export type CompressMeshesResult = MujocoMeshPrepResult;
+export type CompressMeshesOptions = MeshPrepOptions;
+export type CompressMeshesResultEntry = MeshPrepResultEntry;
+export type CompressMeshesResult = MeshPrepResult;
 export interface InspectMeshesOptions {
     meshDir: string;
     maxFaces?: number;

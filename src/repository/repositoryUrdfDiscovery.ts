@@ -115,15 +115,26 @@ const scoreRepositoryUrdfCandidate = (candidate: RepositoryUrdfCandidate): numbe
   const pathLower = candidate.path.toLowerCase();
   const nameLower = candidate.name.toLowerCase();
   let score = 0;
+  const isUrdfXacro = isUrdfXacroPath(nameLower);
+  const isPlainUrdf = nameLower.endsWith(".urdf");
 
   if (candidate.hasMeshesFolder) score += 50;
-  if (pathLower.includes("/urdf/")) score += 20;
-  if (pathLower.includes("/robots/")) score += 10;
-  if (pathLower.includes("/description/")) score += 10;
+  // In ROS repos, wrappers under robots/ are usually the instantiable entrypoints,
+  // while urdf/ often contains support pieces and partial assemblies.
+  if (pathLower.includes("/robots/")) score += 35;
+  if (pathLower.includes("/urdf/")) score += 8;
+  if (pathLower.includes("/description/")) score += 12;
+  if (isUrdfXacro) score += 15;
+  if (isPlainUrdf) score += 12;
   if (nameLower.includes("robot")) score += 10;
   if (nameLower.includes("description")) score += 8;
   if (nameLower.includes("model")) score += 6;
 
+  if (hasPathSegment(candidate.path, "config")) score -= 25;
+  if (hasPathSegment(candidate.path, "launch")) score -= 20;
+  if (hasPathSegment(candidate.path, "test")) score -= 20;
+  if (hasPathSegment(candidate.path, "ros2_control")) score -= 15;
+  if (hasPathSegment(candidate.path, "module")) score -= 12;
   if (nameLower.startsWith("_")) score -= 40;
   if (nameLower.includes("macro")) score -= 30;
   if (nameLower.includes("gazebo")) score -= 25;
@@ -134,7 +145,8 @@ const scoreRepositoryUrdfCandidate = (candidate: RepositoryUrdfCandidate): numbe
   if (nameLower.includes("common")) score -= 10;
   if (nameLower.includes("include")) score -= 10;
 
-  if (candidate.isXacro) score -= 2;
+  if (candidate.isXacro && !isUrdfXacro) score -= 10;
+  else if (candidate.isXacro) score -= 2;
   return score;
 };
 

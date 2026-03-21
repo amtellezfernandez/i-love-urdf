@@ -1,8 +1,8 @@
 "use strict";
 /**
- * URDF to MJCF (MuJoCo XML Format) Converter
+ * URDF to MJCF converter.
  *
- * Converts URDF robot descriptions to MuJoCo's MJCF format.
+ * Converts URDF robot descriptions to MJCF.
  * Based on the structure used by urdf2mjcf (https://github.com/kscalelabs/urdf2mjcf)
  */
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -22,7 +22,7 @@ function parseOrigin(element) {
     return { xyz, rpy };
 }
 /**
- * Converts RPY (roll-pitch-yaw) to quaternion for MuJoCo
+ * Converts RPY (roll-pitch-yaw) to quaternion for MJCF.
  */
 function rpyToQuat(rpy) {
     const [roll, pitch, yaw] = rpy;
@@ -215,7 +215,7 @@ function parseJoint(jointElement) {
     return jointData;
 }
 /**
- * Maps URDF joint type to MuJoCo joint type
+ * Maps a URDF joint type to an MJCF joint type.
  */
 function mapJointType(urdfType) {
     switch (urdfType) {
@@ -225,7 +225,7 @@ function mapJointType(urdfType) {
         case "prismatic":
             return "slide";
         case "fixed":
-            return ""; // Fixed joints don't need a joint element in MuJoCo
+            return ""; // Fixed joints do not need a joint element in MJCF output.
         case "floating":
             return "free";
         case "planar":
@@ -235,7 +235,7 @@ function mapJointType(urdfType) {
     }
 }
 /**
- * Converts URDF geometry to MuJoCo geom string
+ * Converts URDF geometry to an MJCF geom string.
  */
 function geometryToMJCF(geom, indent, groupType) {
     const quat = rpyToQuat(geom.origin.rpy || [0, 0, 0]);
@@ -251,13 +251,13 @@ function geometryToMJCF(geom, indent, groupType) {
     geomStr += `pos="${pos}" quat="${quatStr}" `;
     switch (geom.type) {
         case "box": {
-            // MuJoCo uses half-sizes
+            // MJCF uses half-sizes.
             const halfSize = geom.size.map((s) => (s / 2).toFixed(6)).join(" ");
             geomStr += `type="box" size="${halfSize}"`;
             break;
         }
         case "cylinder": {
-            // MuJoCo cylinder: radius, half-length
+            // MJCF cylinder: radius, half-length.
             const cylSize = `${geom.radius.toFixed(6)} ${(geom.length / 2).toFixed(6)}`;
             geomStr += `type="cylinder" size="${cylSize}"`;
             break;

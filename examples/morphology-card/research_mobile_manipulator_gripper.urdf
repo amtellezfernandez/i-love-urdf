@@ -1,0 +1,49 @@
+<robot name="research_mobile_manipulator_gripper">
+  <link name="base_link"/>
+  <link name="left_shoulder_link"/>
+  <link name="left_gripper_link"/>
+  <link name="right_shoulder_link"/>
+  <link name="right_gripper_link"/>
+  <link name="front_left_wheel_link"/>
+  <link name="front_right_wheel_link"/>
+  <link name="rear_left_wheel_link"/>
+  <link name="rear_right_wheel_link"/>
+
+  <joint name="left_shoulder_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="left_shoulder_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="left_gripper_joint" type="revolute">
+    <parent link="left_shoulder_link"/>
+    <child link="left_gripper_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="right_shoulder_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="right_shoulder_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="right_gripper_joint" type="revolute">
+    <parent link="right_shoulder_link"/>
+    <child link="right_gripper_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+
+  <joint name="front_left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="front_left_wheel_link"/>
+  </joint>
+  <joint name="front_right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="front_right_wheel_link"/>
+  </joint>
+  <joint name="rear_left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rear_left_wheel_link"/>
+  </joint>
+  <joint name="rear_right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rear_right_wheel_link"/>
+  </joint>
+</robot>

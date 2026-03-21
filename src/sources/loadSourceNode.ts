@@ -246,7 +246,9 @@ export const loadSourceFromGitHub = async (
         options.reference.repo,
         targetFile.path,
         targetFile.sha,
-        options.accessToken
+        options.accessToken,
+        ref,
+        targetFile.download_url
       ),
       candidateCount: summary.candidateCount,
       primaryCandidatePath: summary.primaryCandidatePath,

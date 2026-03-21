@@ -16,6 +16,10 @@ export type MeshReference = {
   isAbsoluteFile: boolean;
 };
 
+export type PackagePathMap =
+  | ReadonlyMap<string, string | null | undefined>
+  | Record<string, string | null | undefined>;
+
 const WINDOWS_ABS_PATH = /^[A-Za-z]:[\\/]/;
 
 export const parseMeshReference = (ref: string): MeshReference => {
@@ -61,4 +65,34 @@ const collapsePathSegments = (path: string): string => {
 export const normalizeMeshPathForMatch = (path: string): string => {
   const cleaned = path.trim().replace(/\\/g, "/").replace(/^\/+/, "");
   return collapsePathSegments(cleaned);
+};
+
+const getPackageRoot = (
+  packageMap: PackagePathMap,
+  packageName: string
+): string | null => {
+  if (packageMap instanceof Map) {
+    return packageMap.get(packageName)?.trim() || null;
+  }
+  return packageMap[packageName]?.trim() || null;
+};
+
+export const resolvePackagePaths = (
+  ref: string,
+  packageMap: PackagePathMap
+): string | null => {
+  const refInfo = parseMeshReference(ref);
+  if (refInfo.scheme === "package") {
+    if (!refInfo.packageName) return null;
+    const packageRoot = getPackageRoot(packageMap, refInfo.packageName);
+    if (!packageRoot) return null;
+    const normalizedRoot = packageRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+    const normalizedPath = normalizeMeshPathForMatch(refInfo.path);
+    return normalizedPath ? `${normalizedRoot}/${normalizedPath}` : normalizedRoot;
+  }
+  if (refInfo.scheme === "file") {
+    return refInfo.path.replace(/\\/g, "/");
+  }
+  const normalized = normalizeMeshPathForMatch(refInfo.path || refInfo.raw);
+  return normalized || null;
 };

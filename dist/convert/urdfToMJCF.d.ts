@@ -1,7 +1,7 @@
 /**
- * URDF to MJCF (MuJoCo XML Format) Converter
+ * URDF to MJCF converter.
  *
- * Converts URDF robot descriptions to MuJoCo's MJCF format.
+ * Converts URDF robot descriptions to MJCF.
  * Based on the structure used by urdf2mjcf (https://github.com/kscalelabs/urdf2mjcf)
  */
 export interface MJCFConversionResult {

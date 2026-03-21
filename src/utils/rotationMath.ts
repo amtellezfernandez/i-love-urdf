@@ -1,5 +1,13 @@
 export type Vec3 = [number, number, number];
 export type Mat3 = [Vec3, Vec3, Vec3];
+export type InertiaTensor = {
+  ixx: number;
+  ixy: number;
+  ixz: number;
+  iyy: number;
+  iyz: number;
+  izz: number;
+};
 
 export type Rpy = {
   r: number;
@@ -243,27 +251,56 @@ export function applyRightRotationToElementOrigin(element: Element, R: Mat3): vo
   origin.setAttribute("rpy", formatRpy(matrixToRpy(rotatedR)));
 }
 
-export function rotateInertiaTensorElement(inertia: Element, R: Mat3): void {
-  const ixx = parseFloat(inertia.getAttribute("ixx") || "0");
-  const ixy = parseFloat(inertia.getAttribute("ixy") || "0");
-  const ixz = parseFloat(inertia.getAttribute("ixz") || "0");
-  const iyy = parseFloat(inertia.getAttribute("iyy") || "0");
-  const iyz = parseFloat(inertia.getAttribute("iyz") || "0");
-  const izz = parseFloat(inertia.getAttribute("izz") || "0");
-
+export function rotateInertiaTensor(tensor: InertiaTensor, R: Mat3): InertiaTensor {
   const I: Mat3 = [
-    [ixx, ixy, ixz],
-    [ixy, iyy, iyz],
-    [ixz, iyz, izz],
+    [tensor.ixx, tensor.ixy, tensor.ixz],
+    [tensor.ixy, tensor.iyy, tensor.iyz],
+    [tensor.ixz, tensor.iyz, tensor.izz],
   ];
-
   const RT = transpose(R);
   const rotated = multiplyMatrices(multiplyMatrices(R, I), RT);
+  return {
+    ixx: rotated[0][0],
+    ixy: rotated[0][1],
+    ixz: rotated[0][2],
+    iyy: rotated[1][1],
+    iyz: rotated[1][2],
+    izz: rotated[2][2],
+  };
+}
 
-  inertia.setAttribute("ixx", formatScalar(rotated[0][0]));
-  inertia.setAttribute("ixy", formatScalar(rotated[0][1]));
-  inertia.setAttribute("ixz", formatScalar(rotated[0][2]));
-  inertia.setAttribute("iyy", formatScalar(rotated[1][1]));
-  inertia.setAttribute("iyz", formatScalar(rotated[1][2]));
-  inertia.setAttribute("izz", formatScalar(rotated[2][2]));
+export function fixInertiaThresholds(
+  tensor: InertiaTensor,
+  epsilon: number = 1e-8
+): InertiaTensor {
+  const clamp = (value: number) => (Math.abs(value) < epsilon ? 0 : value);
+  return {
+    ixx: clamp(tensor.ixx),
+    ixy: clamp(tensor.ixy),
+    ixz: clamp(tensor.ixz),
+    iyy: clamp(tensor.iyy),
+    iyz: clamp(tensor.iyz),
+    izz: clamp(tensor.izz),
+  };
+}
+
+export function rotateInertiaTensorElement(inertia: Element, R: Mat3): void {
+  const rotated = rotateInertiaTensor(
+    {
+      ixx: parseFloat(inertia.getAttribute("ixx") || "0"),
+      ixy: parseFloat(inertia.getAttribute("ixy") || "0"),
+      ixz: parseFloat(inertia.getAttribute("ixz") || "0"),
+      iyy: parseFloat(inertia.getAttribute("iyy") || "0"),
+      iyz: parseFloat(inertia.getAttribute("iyz") || "0"),
+      izz: parseFloat(inertia.getAttribute("izz") || "0"),
+    },
+    R
+  );
+
+  inertia.setAttribute("ixx", formatScalar(rotated.ixx));
+  inertia.setAttribute("ixy", formatScalar(rotated.ixy));
+  inertia.setAttribute("ixz", formatScalar(rotated.ixz));
+  inertia.setAttribute("iyy", formatScalar(rotated.iyy));
+  inertia.setAttribute("iyz", formatScalar(rotated.iyz));
+  inertia.setAttribute("izz", formatScalar(rotated.izz));
 }

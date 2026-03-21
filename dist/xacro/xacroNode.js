@@ -12,9 +12,12 @@ const repositoryUrdfDiscovery_1 = require("../repository/repositoryUrdfDiscovery
 const repositoryMeshResolution_1 = require("../repository/repositoryMeshResolution");
 const xacroContract_1 = require("./xacroContract");
 const stabilizeExpandedXacroUrdf_1 = require("./stabilizeExpandedXacroUrdf");
+const nodeDomRuntime_1 = require("../node/nodeDomRuntime");
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const LATIN1_DECODER = new TextDecoder("latin1");
 const MAX_GITHUB_DEPENDENCY_ITERATIONS = 3;
+const MAX_GITHUB_RUNTIME_RECOVERY_ITERATIONS = 8;
+const XACRO_MISSING_PACKAGE_PATTERN = /Package '([^']+)' not found in uploaded files\./g;
 const MANAGED_XACRO_RUNTIME_SUBPATH = path.join(".i-love-urdf", "xacro-runtime");
 const PACKAGE_ROOT_PATH = path.resolve(__dirname, "..", "..");
 const getVenvPythonCandidatePaths = (venvPath) => [
@@ -66,6 +69,38 @@ const decodeSupportText = (bytes) => {
     catch {
         return LATIN1_DECODER.decode(bytes);
     }
+};
+const ensureNodeDomGlobals = () => {
+    (0, nodeDomRuntime_1.installNodeDomGlobals)();
+};
+const isSkippableMissingGitHubSupportFileError = (error) => error instanceof Error &&
+    (/GitHub file not found:/i.test(error.message) ||
+        /Public mirror request failed while reading .*: 404\b/i.test(error.message));
+const extractMissingGitHubSupportPathFromError = (error) => {
+    if (!(error instanceof Error))
+        return null;
+    const directMatch = error.message.match(/GitHub file not found:\s+(.+)$/i);
+    if (directMatch?.[1]) {
+        return (0, repositoryMeshResolution_1.normalizeRepositoryPath)(directMatch[1].trim());
+    }
+    const mirrorMatch = error.message.match(/Public mirror request failed while reading\s+(.+?):\s+404\b/i);
+    if (mirrorMatch?.[1]) {
+        return (0, repositoryMeshResolution_1.normalizeRepositoryPath)(mirrorMatch[1].trim());
+    }
+    return null;
+};
+const extractMissingPackageNamesFromXacroError = (error) => {
+    if (!(error instanceof Error) || !error.message)
+        return [];
+    const names = new Set();
+    XACRO_MISSING_PACKAGE_PATTERN.lastIndex = 0;
+    let match;
+    while ((match = XACRO_MISSING_PACKAGE_PATTERN.exec(error.message)) !== null) {
+        const packageName = match[1]?.trim();
+        if (packageName)
+            names.add(packageName);
+    }
+    return Array.from(names);
 };
 const getPythonExecutable = (options) => options?.pythonExecutable?.trim() ||
     process.env.I_LOVE_URDF_XACRO_PYTHON ||
@@ -282,6 +317,7 @@ const expandLocalXacroToUrdf = async (options) => {
         useInorder: options.useInorder,
     });
     const result = await (0, exports.expandXacroRequestPayload)(payload, options);
+    ensureNodeDomGlobals();
     const stabilized = (0, stabilizeExpandedXacroUrdf_1.stabilizeExpandedXacroUrdf)(result.urdf, relativeXacroPath, files);
     return {
         source: "local",
@@ -320,12 +356,14 @@ const buildGitHubReadKey = (file, fallbackOwner, fallbackRepo) => [
     file.sha || "",
 ].join("::");
 const fetchMissingGitHubDependencyFiles = async (params) => {
-    const { owner, accessToken, packageNames, existingFiles } = params;
+    const { owner, ref, accessToken, packageNames, existingFiles, skipExistingCheck } = params;
     const packageRoots = (0, repositoryMeshResolution_1.buildPackageRootsFromRepositoryFiles)(existingFiles);
-    const missingPackages = packageNames.filter((name) => !(packageRoots[name]?.length));
+    const missingPackages = skipExistingCheck
+        ? packageNames
+        : packageNames.filter((name) => !(packageRoots[name]?.length));
     if (missingPackages.length === 0)
         return [];
-    const repositoryCache = new Map();
+    const repositoryCache = params.repositoryCache ?? new Map();
     const dependencyFiles = [];
     for (const packageName of missingPackages) {
         let resolvedRepo = null;
@@ -334,7 +372,7 @@ const fetchMissingGitHubDependencyFiles = async (params) => {
             const cacheKey = `${owner}/${repoCandidate}`;
             if (!repositoryCache.has(cacheKey)) {
                 try {
-                    const fetched = await (0, githubRepositoryInspection_1.fetchGitHubRepositoryFiles)({ owner, repo: repoCandidate }, accessToken);
+                    const fetched = await (0, githubRepositoryInspection_1.fetchGitHubRepositoryFiles)({ owner, repo: repoCandidate, ref }, accessToken);
                     repositoryCache.set(cacheKey, fetched.files);
                 }
                 catch {
@@ -372,40 +410,118 @@ const expandFetchedGitHubRepositoryXacro = async (reference, ref, files, options
     }
     let resolvedFiles = files;
     const byteCache = new Map();
+    const dependencyRepositoryCache = new Map();
+    const skippedSupportPaths = new Set();
+    const attemptedRuntimeDependencyPackages = new Set();
     const readFileBytes = async (file) => {
         const cacheKey = buildGitHubReadKey(file, reference.owner, reference.repo);
         const cached = byteCache.get(cacheKey);
         if (cached)
             return cached;
-        const bytes = await (0, githubRepositoryInspection_1.fetchGitHubFileBytes)(file.sourceOwner || reference.owner, file.sourceRepo || reference.repo, file.sourcePath || file.path, file.sha, options.accessToken);
+        const bytes = await (0, githubRepositoryInspection_1.fetchGitHubFileBytes)(file.sourceOwner || reference.owner, file.sourceRepo || reference.repo, file.sourcePath || file.path, file.sha, options.accessToken, ref, file.download_url);
         byteCache.set(cacheKey, bytes);
         return bytes;
     };
-    for (let iteration = 0; iteration < MAX_GITHUB_DEPENDENCY_ITERATIONS; iteration += 1) {
-        const resolvedTargetPath = (0, repositoryUrdfDiscovery_1.resolveRepositoryXacroTargetPath)(resolvedFiles, requestedTargetPath);
-        const supportFiles = (0, repositoryMeshResolution_1.collectXacroSupportFilesFromRepository)(resolvedFiles, resolvedTargetPath).filter((file) => file.type === "file");
-        const packageNames = new Set();
-        for (const file of supportFiles) {
-            const text = decodeSupportText(await readFileBytes(file));
-            (0, repositoryUrdfDiscovery_1.collectPackageNamesFromText)(text).forEach((name) => packageNames.add(name));
+    const resolveStaticSupportDependencies = async () => {
+        for (let iteration = 0; iteration < MAX_GITHUB_RUNTIME_RECOVERY_ITERATIONS; iteration += 1) {
+            const resolvedTargetPath = (0, repositoryUrdfDiscovery_1.resolveRepositoryXacroTargetPath)(resolvedFiles, requestedTargetPath);
+            const supportFiles = (0, repositoryMeshResolution_1.collectXacroSupportFilesFromRepository)(resolvedFiles, resolvedTargetPath).filter((file) => file.type === "file" && !skippedSupportPaths.has(file.path));
+            const packageNames = new Set();
+            const supportTexts = await Promise.all(supportFiles.map(async (file) => {
+                try {
+                    return {
+                        file,
+                        text: decodeSupportText(await readFileBytes(file)),
+                    };
+                }
+                catch (error) {
+                    if (file.path !== resolvedTargetPath &&
+                        isSkippableMissingGitHubSupportFileError(error)) {
+                        skippedSupportPaths.add(file.path);
+                        return null;
+                    }
+                    throw error;
+                }
+            }));
+            supportTexts.forEach((entry) => {
+                if (!entry)
+                    return;
+                (0, repositoryUrdfDiscovery_1.collectPackageNamesFromText)(entry.text).forEach((name) => packageNames.add(name));
+            });
+            const dependencyFiles = await fetchMissingGitHubDependencyFiles({
+                owner: reference.owner,
+                ref,
+                accessToken: options.accessToken,
+                packageNames: Array.from(packageNames),
+                existingFiles: resolvedFiles,
+                repositoryCache: dependencyRepositoryCache,
+            });
+            if (dependencyFiles.length === 0) {
+                break;
+            }
+            resolvedFiles = mergeGitHubRepositoryFiles(resolvedFiles, dependencyFiles);
         }
-        const dependencyFiles = await fetchMissingGitHubDependencyFiles({
-            owner: reference.owner,
-            accessToken: options.accessToken,
-            packageNames: Array.from(packageNames),
-            existingFiles: resolvedFiles,
-        });
-        if (dependencyFiles.length === 0) {
+    };
+    await resolveStaticSupportDependencies();
+    let result = null;
+    let lastExpansionError = null;
+    for (let iteration = 0; iteration < MAX_GITHUB_DEPENDENCY_ITERATIONS; iteration += 1) {
+        let payload;
+        try {
+            payload = await (0, exports.buildXacroExpandPayloadFromRepository)(skippedSupportPaths.size === 0
+                ? resolvedFiles
+                : resolvedFiles.filter((file) => !skippedSupportPaths.has(file.path)), requestedTargetPath, readFileBytes, {
+                args: options.args,
+                useInorder: options.useInorder,
+            });
+        }
+        catch (error) {
+            const missingPath = extractMissingGitHubSupportPathFromError(error);
+            const skippedPath = missingPath
+                ? resolvedFiles.find((file) => (0, repositoryMeshResolution_1.normalizeRepositoryPath)(file.path) === missingPath ||
+                    (0, repositoryMeshResolution_1.normalizeRepositoryPath)(file.sourcePath || "") === missingPath)?.path || missingPath
+                : null;
+            if (skippedPath && !skippedSupportPaths.has(skippedPath)) {
+                skippedSupportPaths.add(skippedPath);
+                continue;
+            }
+            throw error;
+        }
+        try {
+            result = await (0, exports.expandXacroRequestPayload)(payload, options);
+            lastExpansionError = null;
             break;
         }
-        resolvedFiles = mergeGitHubRepositoryFiles(resolvedFiles, dependencyFiles);
+        catch (error) {
+            lastExpansionError = error;
+            const missingPackages = extractMissingPackageNamesFromXacroError(error).filter((packageName) => !attemptedRuntimeDependencyPackages.has(packageName));
+            if (missingPackages.length === 0) {
+                throw error;
+            }
+            missingPackages.forEach((packageName) => attemptedRuntimeDependencyPackages.add(packageName));
+            const dependencyFiles = await fetchMissingGitHubDependencyFiles({
+                owner: reference.owner,
+                ref,
+                accessToken: options.accessToken,
+                packageNames: missingPackages,
+                existingFiles: resolvedFiles,
+                skipExistingCheck: true,
+                repositoryCache: dependencyRepositoryCache,
+            });
+            if (dependencyFiles.length === 0) {
+                throw error;
+            }
+            resolvedFiles = mergeGitHubRepositoryFiles(resolvedFiles, dependencyFiles);
+            await resolveStaticSupportDependencies();
+        }
     }
-    const payload = await (0, exports.buildXacroExpandPayloadFromRepository)(resolvedFiles, requestedTargetPath, readFileBytes, {
-        args: options.args,
-        useInorder: options.useInorder,
-    });
-    const result = await (0, exports.expandXacroRequestPayload)(payload, options);
+    if (!result) {
+        throw (lastExpansionError instanceof Error
+            ? lastExpansionError
+            : new Error("GitHub Xacro expansion failed."));
+    }
     const resolvedTargetPath = (0, repositoryUrdfDiscovery_1.resolveRepositoryXacroTargetPath)(resolvedFiles, requestedTargetPath);
+    ensureNodeDomGlobals();
     const stabilized = (0, stabilizeExpandedXacroUrdf_1.stabilizeExpandedXacroUrdf)(result.urdf, resolvedTargetPath, resolvedFiles);
     return {
         source: "github",
