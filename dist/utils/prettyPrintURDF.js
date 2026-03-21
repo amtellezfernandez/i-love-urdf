@@ -60,7 +60,6 @@ function formatXML(xmlString, indentSize = 2) {
 function prettyPrintURDF(urdfContent, indentSize = 2) {
     const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
     if (!parsed.isValid) {
-        console.error("Cannot pretty-print an invalid URDF.");
         return urdfContent;
     }
     // Serialize the document first

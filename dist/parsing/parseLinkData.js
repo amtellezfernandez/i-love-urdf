@@ -194,8 +194,7 @@ function parseLinkDataFromDocument(xmlDoc, linkName) {
             name: linkName,
         };
     }
-    catch (error) {
-        console.error("Error parsing link data:", error);
+    catch {
         return null;
     }
 }

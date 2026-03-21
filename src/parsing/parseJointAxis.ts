@@ -18,7 +18,6 @@ export interface JointAxisMap {
 export function parseJointAxesFromDocument(xmlDoc: Document): JointAxisMap {
   const validation = validateURDFDocument(xmlDoc);
   if (!validation.robot) {
-    console.error(validation.error);
     return {};
   }
 

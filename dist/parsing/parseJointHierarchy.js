@@ -9,7 +9,6 @@ const urdfParser_1 = require("./urdfParser");
 function parseJointHierarchyFromDocument(xmlDoc) {
     const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
     if (!validation.robot) {
-        console.error(validation.error);
         return { rootJoints: [], allJoints: new Map(), orderedJoints: [] };
     }
     const allJoints = new Map();

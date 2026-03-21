@@ -24,7 +24,6 @@ interface JointHierarchy {
 export function parseJointHierarchyFromDocument(xmlDoc: Document): JointHierarchy {
   const validation = validateURDFDocument(xmlDoc);
   if (!validation.robot) {
-    console.error(validation.error);
     return { rootJoints: [], allJoints: new Map(), orderedJoints: [] };
   }
 

@@ -60,7 +60,6 @@ export function parseURDF(urdfContent: string): ParsedURDF {
     const xmlDoc = parseXml(urdfContent);
     const validation = validateURDFDocument(xmlDoc);
     if (!validation.robot) {
-      console.error(validation.error);
       return {
         document: xmlDoc,
         isValid: false,
@@ -74,7 +73,6 @@ export function parseURDF(urdfContent: string): ParsedURDF {
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    console.error("Error parsing URDF:", errorMessage);
     // Return a minimal document structure even on error
     const xmlDoc = createEmptyRobotDocument();
     return {

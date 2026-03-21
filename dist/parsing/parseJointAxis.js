@@ -12,7 +12,6 @@ const urdfParser_1 = require("./urdfParser");
 function parseJointAxesFromDocument(xmlDoc) {
     const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
     if (!validation.robot) {
-        console.error(validation.error);
         return {};
     }
     const joints = (0, urdfParser_1.getDirectChildrenByTag)(validation.robot, "joint");

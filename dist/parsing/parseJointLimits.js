@@ -33,7 +33,6 @@ function parseJointLimitsFromDocument(xmlDoc) {
     const limits = {};
     const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
     if (!validation.robot) {
-        console.error(validation.error);
         return limits;
     }
     const joints = (0, urdfParser_1.getDirectChildrenByTag)(validation.robot, "joint");
@@ -92,7 +91,6 @@ function parseJointLimitsFromDocument(xmlDoc) {
                 // No limit tag - for revolute, assume continuous (unlimited)
                 // For prismatic, this is unusual but we'll treat as unlimited
                 if (jointType === "revolute") {
-                    console.warn(`Revolute joint "${jointName}" has no <limit> tag, treating as continuous`);
                     lower = null;
                     upper = null;
                 }

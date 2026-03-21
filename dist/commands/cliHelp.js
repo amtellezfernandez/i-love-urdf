@@ -105,9 +105,8 @@ const renderHelp = (options = {}) => {
     return [
         theme.title("ILU CLI"),
         theme.summary("Source-first URDF parsing, validation, repair, and conversion."),
-        theme.summary("Installed binaries: ilu (canonical) and i-love-urdf (compatibility alias)."),
         "",
-        formatBlock("Usage", [formatUsageBannerLine("ilu", theme), formatUsageBannerLine("i-love-urdf", theme)], theme),
+        formatBlock("Usage", [formatUsageBannerLine("ilu", theme)], theme),
         "",
         formatBlock("Workflow", [
             "1. load-source or inspect-repo",

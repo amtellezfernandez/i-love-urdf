@@ -267,8 +267,7 @@ export function parseLinkDataFromDocument(xmlDoc: Document, linkName: string): L
       ...data,
       name: linkName,
     };
-  } catch (error) {
-    console.error("Error parsing link data:", error);
+  } catch {
     return null;
   }
 }

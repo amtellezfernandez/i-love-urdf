@@ -43,6 +43,16 @@ export type LocalRepositoryMeshRepairResult = FixMissingMeshReferencesResult & {
   urdfPath: string;
 };
 
+const LOCAL_REPOSITORY_SKIPPED_DIRS = new Set([
+  ".git",
+  "node_modules",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+]);
+
 const isSkippableWalkError = (error: unknown): boolean => {
   const code =
     typeof error === "object" && error && "code" in error ? String((error as { code?: string }).code) : "";
@@ -86,6 +96,48 @@ const resolveLocalRepositoryReference = async (
   return { inspectedPath, stats, rootPath };
 };
 
+export const resolveLocalRepositoryFile = async (
+  rootPath: string,
+  requestedPath: string,
+  messages: {
+    outsideRoot: string;
+    notFile: (absolutePath: string) => string;
+  }
+): Promise<{
+  filePath: string;
+  absolutePath: string;
+}> => {
+  const normalizedRequestedPath = normalizeRepositoryPath(requestedPath);
+  if (!normalizedRequestedPath || normalizedRequestedPath.startsWith("..")) {
+    throw new Error(messages.outsideRoot);
+  }
+
+  const absoluteRequestedPath = path.resolve(rootPath, normalizedRequestedPath);
+  const lexicalRelativePath = normalizeRepositoryPath(path.relative(rootPath, absoluteRequestedPath));
+  if (!lexicalRelativePath || lexicalRelativePath.startsWith("..")) {
+    throw new Error(messages.outsideRoot);
+  }
+
+  const [realRootPath, realTargetPath] = await Promise.all([
+    fs.realpath(rootPath),
+    fs.realpath(absoluteRequestedPath),
+  ]);
+  const canonicalRelativePath = normalizeRepositoryPath(path.relative(realRootPath, realTargetPath));
+  if (!canonicalRelativePath || canonicalRelativePath.startsWith("..")) {
+    throw new Error(messages.outsideRoot);
+  }
+
+  const stats = await readFileStats(realTargetPath, { allowSkip: false });
+  if (!stats.isFile()) {
+    throw new Error(messages.notFile(realTargetPath));
+  }
+
+  return {
+    filePath: canonicalRelativePath,
+    absolutePath: realTargetPath,
+  };
+};
+
 const walkLocalRepository = async (
   absoluteRootPath: string,
   currentAbsolutePath: string,
@@ -104,6 +156,9 @@ const walkLocalRepository = async (
     const relativePath = normalizeRepositoryPath(path.relative(absoluteRootPath, absolutePath));
 
     if (dirEntry.isDirectory()) {
+      if (LOCAL_REPOSITORY_SKIPPED_DIRS.has(dirEntry.name)) {
+        continue;
+      }
       entries.push({
         name: dirEntry.name,
         path: relativePath,
@@ -154,24 +209,20 @@ const resolveLocalRepositoryTarget = async (
 }> => {
   const { inspectedPath, stats, rootPath } = await resolveLocalRepositoryReference(reference);
 
-  const absoluteUrdfPath = stats.isDirectory()
-    ? (() => {
+  const { filePath: normalizedUrdfPath, absolutePath: absoluteUrdfPath } = stats.isDirectory()
+    ? await (() => {
         if (!requestedUrdfPath) {
           throw new Error("Local repository repair requires --urdf when --local points to a directory.");
         }
-        return path.resolve(rootPath, requestedUrdfPath);
+        return resolveLocalRepositoryFile(rootPath, requestedUrdfPath, {
+          outsideRoot: "Target URDF must stay inside the local repository root.",
+          notFile: (absolutePath) => `Local repository target is not a file: ${absolutePath}`,
+        });
       })()
-    : inspectedPath;
-
-  const normalizedUrdfPath = normalizeRepositoryPath(path.relative(rootPath, absoluteUrdfPath));
-  if (!normalizedUrdfPath || normalizedUrdfPath.startsWith("..")) {
-    throw new Error("Target URDF must stay inside the local repository root.");
-  }
-
-  const urdfStats = await readFileStats(absoluteUrdfPath, { allowSkip: false });
-  if (!urdfStats.isFile()) {
-    throw new Error(`Local repository target is not a file: ${absoluteUrdfPath}`);
-  }
+    : {
+        filePath: normalizeRepositoryPath(path.basename(inspectedPath)),
+        absolutePath: inspectedPath,
+      };
 
   const [files, urdfContent] = await Promise.all([
     collectLocalRepositoryFiles(rootPath),

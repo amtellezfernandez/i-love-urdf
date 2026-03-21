@@ -16,6 +16,8 @@ const GITHUB_API_ACCEPT_HEADER = "application/vnd.github.v3+json";
 const GITHUB_BAD_CREDENTIALS_PATTERN = /bad credentials/i;
 const JSDELIVR_DATA_BASE_URL = "https://data.jsdelivr.com/v1";
 const JSDELIVR_CDN_BASE_URL = "https://cdn.jsdelivr.net";
+const GITHUB_FETCH_TIMEOUT_MS = 20_000;
+const PUBLIC_MIRROR_FETCH_TIMEOUT_MS = 20_000;
 const GITHUB_NETWORK_ERROR_PATTERN =
   /Failed to fetch|NetworkError|fetch failed|Load failed|ECONNREFUSED|ERR_CONNECTION_REFUSED|ERR_NETWORK/i;
 
@@ -121,6 +123,29 @@ const buildJsDelivrFileUrl = (
   return `${JSDELIVR_CDN_BASE_URL}/gh/${owner}/${repo}${ref ? `@${encodeURIComponent(ref)}` : ""}/${encodedPath}`;
 };
 
+const fetchWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new Error(`request timed out after ${timeoutMs} ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 const isRecoverableGitHubError = (error: unknown): boolean => {
   if (!(error instanceof Error)) return false;
   return (
@@ -138,9 +163,13 @@ const fetchGitHubResponse = async (
   url: string,
   accessToken?: string
 ): Promise<{ response: Response; usedAnonymousFallback: boolean }> => {
-  const response = await fetch(url, {
-    headers: buildGitHubHeaders(accessToken),
-  });
+  const response = await fetchWithTimeout(
+    url,
+    {
+      headers: buildGitHubHeaders(accessToken),
+    },
+    GITHUB_FETCH_TIMEOUT_MS
+  );
 
   if (!accessToken || response.status !== 401) {
     return { response, usedAnonymousFallback: false };
@@ -151,9 +180,13 @@ const fetchGitHubResponse = async (
     return { response, usedAnonymousFallback: false };
   }
 
-  const retry = await fetch(url, {
-    headers: buildGitHubHeaders(undefined),
-  });
+  const retry = await fetchWithTimeout(
+    url,
+    {
+      headers: buildGitHubHeaders(undefined),
+    },
+    GITHUB_FETCH_TIMEOUT_MS
+  );
   return { response: retry, usedAnonymousFallback: true };
 };
 
@@ -227,7 +260,7 @@ const readPublicMirrorJson = async <T>(
   let response: Response;
 
   try {
-    response = await fetch(url);
+    response = await fetchWithTimeout(url, {}, PUBLIC_MIRROR_FETCH_TIMEOUT_MS);
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Public mirror request failed while ${contextLabel}: ${error.message}`);
@@ -267,7 +300,7 @@ const readPublicMirrorBytes = async (
   let response: Response;
 
   try {
-    response = await fetch(url);
+    response = await fetchWithTimeout(url, {}, PUBLIC_MIRROR_FETCH_TIMEOUT_MS);
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Public mirror request failed while reading ${filePath}: ${error.message}`);

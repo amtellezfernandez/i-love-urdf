@@ -68,7 +68,6 @@ export function prettyPrintURDF(urdfContent: string, indentSize: number = 2): st
   const parsed = parseURDF(urdfContent);
 
   if (!parsed.isValid) {
-    console.error("Cannot pretty-print an invalid URDF.");
     return urdfContent;
   }
 

@@ -26,8 +26,7 @@ function getJointLinks(urdfContent, jointName) {
             childLink: child?.getAttribute("link") || null,
         };
     }
-    catch (error) {
-        console.error("Error parsing URDF:", error);
+    catch {
         return { parentLink: null, childLink: null };
     }
 }

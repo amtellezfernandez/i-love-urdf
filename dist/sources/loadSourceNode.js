@@ -89,26 +89,29 @@ const loadSourceFromPath = async (options) => {
     }
     const files = await (0, localRepositoryInspection_1.collectLocalRepositoryFiles)(inspectedPath);
     const summary = summarizeRepositoryCandidates(files, options.candidateFilter);
-    const entryPath = resolveSelectedEntryPath(options.entryPath, summary);
-    const entryFormat = inferEntryFormat(entryPath);
+    const selectedEntryPath = resolveSelectedEntryPath(options.entryPath, summary);
+    const entryFormat = inferEntryFormat(selectedEntryPath);
     if (!entryFormat) {
         throw new Error("Repository entrypoint must end in .urdf or .xacro.");
     }
+    const { filePath: entryPath, absolutePath: absoluteEntryPath } = await (0, localRepositoryInspection_1.resolveLocalRepositoryFile)(inspectedPath, selectedEntryPath, {
+        outsideRoot: "Local repository entrypoint must stay inside the selected root path.",
+        notFile: (absolutePath) => `Local repository entrypoint is not a file: ${absolutePath}`,
+    });
     if (entryFormat === "urdf") {
-        const absoluteUrdfPath = path.resolve(inspectedPath, entryPath);
         return buildResult({
             source: "local-repo",
             inspectedPath,
             rootPath: inspectedPath,
             entryPath,
             entryFormat,
-            urdf: await fs.readFile(absoluteUrdfPath, "utf8"),
+            urdf: await fs.readFile(absoluteEntryPath, "utf8"),
             candidateCount: summary.candidateCount,
             primaryCandidatePath: summary.primaryCandidatePath,
         });
     }
     const expanded = await (0, xacroNode_1.expandLocalXacroToUrdf)({
-        xacroPath: path.resolve(inspectedPath, entryPath),
+        xacroPath: absoluteEntryPath,
         rootPath: inspectedPath,
         args: options.args,
         useInorder: options.useInorder,

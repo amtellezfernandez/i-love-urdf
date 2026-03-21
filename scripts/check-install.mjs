@@ -107,6 +107,14 @@ const getInstalledCliPath = (prefix) => {
   return path.join(prefix, "bin", "ilu");
 };
 
+const getLegacyAliasCliPath = (prefix) => {
+  if (process.platform === "win32") {
+    return path.join(prefix, "i-love-urdf.cmd");
+  }
+
+  return path.join(prefix, "bin", "i-love-urdf");
+};
+
 const assertInstalledPackage = (prefix, label) => {
   const installedRoot = getInstalledPackageRoot(prefix);
   expect(fs.existsSync(installedRoot), `${label}: missing installed package root`);
@@ -117,6 +125,13 @@ const assertInstalledPackage = (prefix, label) => {
   expect(
     installedPackageJson.version === packageVersion,
     `${label}: installed package version mismatch`
+  );
+  expect(
+    installedPackageJson.bin &&
+      typeof installedPackageJson.bin === "object" &&
+      Object.keys(installedPackageJson.bin).length === 1 &&
+      installedPackageJson.bin.ilu === "./dist/cli.js",
+    `${label}: installed package bin map mismatch`
   );
 
   for (const exportTarget of collectExportTargetPaths(installedPackageJson.exports)) {
@@ -135,6 +150,7 @@ const assertInstalledPackage = (prefix, label) => {
 
   const cliPath = getInstalledCliPath(prefix);
   expect(fs.existsSync(cliPath), `${label}: missing installed CLI binary`);
+  expect(!fs.existsSync(getLegacyAliasCliPath(prefix)), `${label}: unexpected legacy alias binary`);
 
   const helpText = run(cliPath, ["--help"], {
     capture: true,

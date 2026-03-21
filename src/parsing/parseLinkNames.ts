@@ -7,7 +7,6 @@ export function parseLinkNamesFromDocument(xmlDoc: Document): string[] {
   try {
     const validation = validateURDFDocument(xmlDoc);
     if (!validation.robot) {
-      console.error(validation.error);
       return [];
     }
 
@@ -22,8 +21,7 @@ export function parseLinkNamesFromDocument(xmlDoc: Document): string[] {
     });
 
     return linkNames;
-  } catch (error) {
-    console.error("Error parsing link names from URDF:", error);
+  } catch {
     return [];
   }
 }

@@ -4,7 +4,6 @@ Tools for loading, checking, editing, converting, and structurally analyzing URD
 
 `i-love-urdf` is the core package behind `urdf-studio`.
 The CLI command is `ilu`.
-Global installs also expose `i-love-urdf` as a compatibility alias.
 Website documentation lives in `i-love-urdf-web`.
 
 The package includes a reusable robot morphology layer for producing machine-readable,
@@ -47,7 +46,7 @@ ilu --help
 
 Use `--install-links=true` for GitHub installs so npm writes an actual global package instead of a temporary cache link.
 Current GitHub installs include the built `dist/` tree directly in the repository, so rerunning the same command upgrades the global CLI in place.
-Global installs expose both `ilu` and `i-love-urdf`, but the canonical command is `ilu`.
+If you are upgrading from an older install and still see an `i-love-urdf` command on your `PATH`, run `npm uninstall -g i-love-urdf` and then reinstall.
 If you are reinstalling an older checkout or release that still used npm git-dependency preparation, run `npm uninstall -g i-love-urdf` first and then rerun the install command.
 
 Install the CLI globally from a release tarball:
@@ -108,7 +107,6 @@ The repository is tested on Node `20.19.6`, and the package also supports curren
 
 From a repository checkout, run the CLI as `corepack pnpm ilu ...` (or `pnpm ilu ...` if `pnpm` is already on your `PATH`).
 Use plain `ilu ...` when the package is installed as a global CLI in your environment.
-`i-love-urdf ...` remains available as a compatibility alias.
 
 When working against GitHub repositories, pass the repository with `--github <owner/repo|url>`.
 For example, use `inspect-repo --github ANYbotics/anymal_b_simple_description` or `inspect-repo --github https://github.com/ANYbotics/anymal_b_simple_description`.
@@ -138,7 +136,6 @@ Git config identity such as `user.name` / `user.email` is not used for GitHub AP
 ## Common CLI Commands
 
 Examples below use installed-CLI syntax with `ilu`.
-`i-love-urdf` is a compatibility alias.
 From a repository checkout, prepend `corepack pnpm` and keep the repository-local `ilu` command.
 
 ```sh

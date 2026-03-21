@@ -9,6 +9,8 @@ const GITHUB_API_ACCEPT_HEADER = "application/vnd.github.v3+json";
 const GITHUB_BAD_CREDENTIALS_PATTERN = /bad credentials/i;
 const JSDELIVR_DATA_BASE_URL = "https://data.jsdelivr.com/v1";
 const JSDELIVR_CDN_BASE_URL = "https://cdn.jsdelivr.net";
+const GITHUB_FETCH_TIMEOUT_MS = 20000;
+const PUBLIC_MIRROR_FETCH_TIMEOUT_MS = 20000;
 const GITHUB_NETWORK_ERROR_PATTERN = /Failed to fetch|NetworkError|fetch failed|Load failed|ECONNREFUSED|ERR_CONNECTION_REFUSED|ERR_NETWORK/i;
 const sanitizeRepoSegment = (value) => value.replace(/\.git$/i, "").trim();
 const buildGitHubHeaders = (accessToken) => {
@@ -28,6 +30,25 @@ const buildJsDelivrFileUrl = (owner, repo, filePath, ref) => {
         .join("/");
     return `${JSDELIVR_CDN_BASE_URL}/gh/${owner}/${repo}${ref ? `@${encodeURIComponent(ref)}` : ""}/${encodedPath}`;
 };
+const fetchWithTimeout = async (url, init, timeoutMs) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, {
+            ...init,
+            signal: controller.signal,
+        });
+    }
+    catch (error) {
+        if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+            throw new Error(`request timed out after ${timeoutMs} ms`);
+        }
+        throw error;
+    }
+    finally {
+        clearTimeout(timeoutId);
+    }
+};
 const isRecoverableGitHubError = (error) => {
     if (!(error instanceof Error))
         return false;
@@ -40,9 +61,9 @@ const isRecoverableGitHubError = (error) => {
         GITHUB_NETWORK_ERROR_PATTERN.test(error.message));
 };
 const fetchGitHubResponse = async (url, accessToken) => {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         headers: buildGitHubHeaders(accessToken),
-    });
+    }, GITHUB_FETCH_TIMEOUT_MS);
     if (!accessToken || response.status !== 401) {
         return { response, usedAnonymousFallback: false };
     }
@@ -50,9 +71,9 @@ const fetchGitHubResponse = async (url, accessToken) => {
     if (!GITHUB_BAD_CREDENTIALS_PATTERN.test(body)) {
         return { response, usedAnonymousFallback: false };
     }
-    const retry = await fetch(url, {
+    const retry = await fetchWithTimeout(url, {
         headers: buildGitHubHeaders(undefined),
-    });
+    }, GITHUB_FETCH_TIMEOUT_MS);
     return { response: retry, usedAnonymousFallback: true };
 };
 const readGitHubJson = async (url, { accessToken, notFoundMessage, contextLabel, }) => {
@@ -94,7 +115,7 @@ const readGitHubJson = async (url, { accessToken, notFoundMessage, contextLabel,
 const readPublicMirrorJson = async (url, { notFoundMessage, contextLabel, }) => {
     let response;
     try {
-        response = await fetch(url);
+        response = await fetchWithTimeout(url, {}, PUBLIC_MIRROR_FETCH_TIMEOUT_MS);
     }
     catch (error) {
         if (error instanceof Error) {
@@ -118,7 +139,7 @@ const readPublicMirrorJson = async (url, { notFoundMessage, contextLabel, }) => 
 const readPublicMirrorBytes = async (url, filePath) => {
     let response;
     try {
-        response = await fetch(url);
+        response = await fetchWithTimeout(url, {}, PUBLIC_MIRROR_FETCH_TIMEOUT_MS);
     }
     catch (error) {
         if (error instanceof Error) {

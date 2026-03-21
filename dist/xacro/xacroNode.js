@@ -17,6 +17,10 @@ const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const LATIN1_DECODER = new TextDecoder("latin1");
 const MAX_GITHUB_DEPENDENCY_ITERATIONS = 3;
 const MAX_GITHUB_RUNTIME_RECOVERY_ITERATIONS = 8;
+const XACRO_HELPER_TIMEOUT_MS = 120000;
+const XACRO_SETUP_TIMEOUT_MS = 300000;
+const XACRO_HELPER_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
+const XACRO_PROCESS_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const XACRO_MISSING_PACKAGE_PATTERN = /Package '([^']+)' not found in uploaded files\./g;
 const MANAGED_XACRO_RUNTIME_SUBPATH = path.join(".i-love-urdf", "xacro-runtime");
 const PACKAGE_ROOT_PATH = path.resolve(__dirname, "..", "..");
@@ -123,34 +127,87 @@ const buildRuntimeEnv = (options) => {
     return env;
 };
 const getManagedVenvPath = (options) => path.resolve(options?.venvPath?.trim() || path.join(process.cwd(), MANAGED_XACRO_RUNTIME_SUBPATH));
-const runProcess = async (executable, args, options = {}) => new Promise((resolve, reject) => {
+const captureSpawnedProcess = async (executable, args, options) => new Promise((resolve, reject) => {
     const child = (0, node_child_process_1.spawn)(executable, args, {
         cwd: options.cwd,
         env: options.env,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
+    let combinedOutputBytes = 0;
+    let settled = false;
+    const finishReject = (message) => {
+        if (settled)
+            return;
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(new Error(message));
+    };
+    const finishResolve = (value) => {
+        if (settled)
+            return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(value);
+    };
+    const terminateChild = (message) => {
+        try {
+            child.kill("SIGKILL");
+        }
+        catch {
+            // Ignore termination races and report the original guard failure.
+        }
+        finishReject(message);
+    };
+    const appendChunk = (target, chunk) => {
+        const nextBytes = Buffer.byteLength(chunk, "utf8");
+        combinedOutputBytes += nextBytes;
+        if (combinedOutputBytes > options.maxOutputBytes) {
+            terminateChild(`${executable} ${args.join(" ")} exceeded the output limit of ${options.maxOutputBytes} bytes.`);
+            return;
+        }
+        if (target === "stdout") {
+            stdout += chunk;
+        }
+        else {
+            stderr += chunk;
+        }
+    };
+    const timeoutId = setTimeout(() => {
+        terminateChild(`${executable} ${args.join(" ")} timed out after ${options.timeoutMs} ms.`);
+    }, options.timeoutMs);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-        stdout += chunk;
+        appendChunk("stdout", chunk);
     });
     child.stderr.on("data", (chunk) => {
-        stderr += chunk;
+        appendChunk("stderr", chunk);
     });
     child.on("error", (error) => {
-        reject(new Error(`Failed to launch ${executable}: ${error.message}`));
+        finishReject(`Failed to launch ${executable}: ${error.message}`);
     });
     child.on("close", (code) => {
-        if (code === 0) {
-            resolve({ stdout, stderr });
+        if (settled) {
             return;
         }
-        reject(new Error(stderr.trim() ||
-            stdout.trim() ||
-            `${executable} ${args.join(" ")} failed${code !== null ? ` with exit ${code}` : ""}.`));
+        finishResolve({ stdout, stderr, code });
     });
+    child.stdin.end(options.stdinText ?? "");
+});
+const runProcess = async (executable, args, options = {}) => captureSpawnedProcess(executable, args, {
+    cwd: options.cwd,
+    env: options.env,
+    timeoutMs: XACRO_SETUP_TIMEOUT_MS,
+    maxOutputBytes: XACRO_PROCESS_MAX_OUTPUT_BYTES,
+}).then(({ stdout, stderr, code }) => {
+    if (code === 0) {
+        return { stdout, stderr };
+    }
+    throw new Error(stderr.trim() ||
+        stdout.trim() ||
+        `${executable} ${args.join(" ")} failed${code !== null ? ` with exit ${code}` : ""}.`);
 });
 const isMissingXacroRuntimeError = (message) => /no (python |vendored )?xacro runtime available/i.test(message) ||
     /install xacro or provide i_love_urdf_xacrodoc_wheel/i.test(message);
@@ -175,49 +232,33 @@ const withXacroRuntimeGuidance = (message) => {
     }
     return [message, "", ...guidance].join("\n");
 };
-const runPythonHelper = async (payload, options) => new Promise((resolve, reject) => {
+const runPythonHelper = async (payload, options) => (async () => {
     const pythonExecutable = getPythonExecutable(options);
     const helperScriptPath = getHelperScriptPath(options);
-    const child = (0, node_child_process_1.spawn)(pythonExecutable, [helperScriptPath], {
-        stdio: ["pipe", "pipe", "pipe"],
+    const { stdout, stderr, code } = await captureSpawnedProcess(pythonExecutable, [helperScriptPath], {
         env: buildRuntimeEnv(options),
+        stdinText: JSON.stringify(payload),
+        timeoutMs: XACRO_HELPER_TIMEOUT_MS,
+        maxOutputBytes: XACRO_HELPER_MAX_OUTPUT_BYTES,
     });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-        stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-        stderr += chunk;
-    });
-    child.on("error", (error) => {
-        reject(new Error(`Failed to launch Xacro runtime via ${pythonExecutable}: ${error.message}`));
-    });
-    child.on("close", (code) => {
-        let parsed = null;
-        try {
-            parsed = stdout.trim()
-                ? JSON.parse(stdout)
-                : null;
-        }
-        catch {
-            parsed = null;
-        }
-        if (parsed && parsed.ok === false) {
-            reject(new Error(withXacroRuntimeGuidance(parsed.error || stderr.trim() || "Xacro runtime failed.")));
-            return;
-        }
-        if (!parsed) {
-            reject(new Error(stderr.trim() ||
-                `Xacro runtime returned no structured response${code !== 0 ? ` (exit ${code})` : ""}.`));
-            return;
-        }
-        resolve(parsed);
-    });
-    child.stdin.end(JSON.stringify(payload));
-});
+    let parsed = null;
+    try {
+        parsed = stdout.trim()
+            ? JSON.parse(stdout)
+            : null;
+    }
+    catch {
+        parsed = null;
+    }
+    if (parsed && parsed.ok === false) {
+        throw new Error(withXacroRuntimeGuidance(parsed.error || stderr.trim() || "Xacro runtime failed."));
+    }
+    if (!parsed) {
+        throw new Error(stderr.trim() ||
+            `Xacro runtime returned no structured response${code !== 0 ? ` (exit ${code})` : ""}.`);
+    }
+    return parsed;
+})();
 const probeXacroRuntime = async (options = {}) => {
     try {
         const response = await runPythonHelper({ probe: true }, options);

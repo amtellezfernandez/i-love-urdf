@@ -10,7 +10,6 @@ function parseLinkNamesFromDocument(xmlDoc) {
     try {
         const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
         if (!validation.robot) {
-            console.error(validation.error);
             return [];
         }
         const links = (0, urdfParser_1.getDirectChildrenByTag)(validation.robot, "link");
@@ -23,8 +22,7 @@ function parseLinkNamesFromDocument(xmlDoc) {
         });
         return linkNames;
     }
-    catch (error) {
-        console.error("Error parsing link names from URDF:", error);
+    catch {
         return [];
     }
 }

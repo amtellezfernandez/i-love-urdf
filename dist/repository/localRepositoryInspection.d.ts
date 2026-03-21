@@ -25,6 +25,13 @@ export type LocalRepositoryMeshRepairResult = FixMissingMeshReferencesResult & {
     inspectedPath: string;
     urdfPath: string;
 };
+export declare const resolveLocalRepositoryFile: (rootPath: string, requestedPath: string, messages: {
+    outsideRoot: string;
+    notFile: (absolutePath: string) => string;
+}) => Promise<{
+    filePath: string;
+    absolutePath: string;
+}>;
 export declare const collectLocalRepositoryFiles: (absoluteRootPath: string) => Promise<LocalRepositoryFile[]>;
 export declare const inspectLocalRepositoryUrdfs: (reference: LocalRepositoryReference, options?: InspectLocalRepositoryOptions) => Promise<LocalRepositoryInspectionResult>;
 export declare const repairLocalRepositoryMeshReferences: (reference: LocalRepositoryReference, options?: RepairLocalRepositoryOptions) => Promise<LocalRepositoryMeshRepairResult>;
