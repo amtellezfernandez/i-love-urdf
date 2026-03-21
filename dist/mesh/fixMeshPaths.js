@@ -101,7 +101,7 @@ function detectMeshFolder(path) {
             return path.substring(index);
         }
     }
-    // If no common folder found, just return the filename
+    // If no common folder is found, return only the filename.
     return getFilename(path);
 }
 /**
@@ -236,7 +236,7 @@ function fixMeshPaths(urdfContent, packageName) {
     return result;
 }
 /**
- * Simple wrapper that just returns the corrected URDF string
+ * Convenience wrapper that returns only the corrected URDF string.
  *
  * @param urdfContent - URDF XML content as string
  * @param packageName - Optional package name to use

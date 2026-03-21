@@ -9,6 +9,12 @@ export interface ParsedURDF {
     isValid: boolean;
     error?: string;
 }
+export interface ValidatedURDFDocument {
+    robot: Element | null;
+    error?: string;
+}
+export declare const getDirectChildrenByTag: (parent: Element, tagName: string) => Element[];
+export declare function validateURDFDocument(document: Document): ValidatedURDFDocument;
 /**
  * Parses URDF XML content using DOMParser
  * @param urdfContent URDF XML content as string

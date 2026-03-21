@@ -31,7 +31,7 @@ interface PathCorrection {
 export declare function fixMeshPaths(urdfContent: string, packageName?: string): PathFixResult;
 export {};
 /**
- * Simple wrapper that just returns the corrected URDF string
+ * Convenience wrapper that returns only the corrected URDF string.
  *
  * @param urdfContent - URDF XML content as string
  * @param packageName - Optional package name to use

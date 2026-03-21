@@ -2,13 +2,13 @@
 /**
  * URDF Joint Limits Parser
  *
- * Parses joint types and limits from URDF XML
+ * Parses joint types and limits from URDF XML.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseJointLimitsFromDocument = parseJointLimitsFromDocument;
 exports.parseJointLimitsFromURDF = parseJointLimitsFromURDF;
 exports.getJointLimits = getJointLimits;
-const xmlDom_1 = require("../xmlDom");
+const urdfParser_1 = require("./urdfParser");
 const parseOptionalFloat = (value) => {
     if (value === null)
         return null;
@@ -31,17 +31,12 @@ const normalizeOrderedLimits = (lower, upper) => {
  */
 function parseJointLimitsFromDocument(xmlDoc) {
     const limits = {};
-    const parserError = xmlDoc.querySelector("parsererror");
-    if (parserError) {
-        console.error("URDF parsing error:", parserError.textContent || "Unknown XML parsing error");
+    const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
+    if (!validation.robot) {
+        console.error(validation.error);
         return limits;
     }
-    const robot = xmlDoc.querySelector("robot");
-    if (!robot) {
-        console.error("No <robot> element found in URDF");
-        return limits;
-    }
-    const joints = xmlDoc.querySelectorAll("joint");
+    const joints = (0, urdfParser_1.getDirectChildrenByTag)(validation.robot, "joint");
     joints.forEach((joint) => {
         const jointName = joint.getAttribute("name");
         if (!jointName)
@@ -128,8 +123,11 @@ function parseJointLimitsFromDocument(xmlDoc) {
  * @returns Map of joint names to their limit information
  */
 function parseJointLimitsFromURDF(urdfContent) {
-    const xmlDoc = (0, xmlDom_1.parseXml)(urdfContent);
-    return parseJointLimitsFromDocument(xmlDoc);
+    const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
+    if (!parsed.isValid) {
+        return {};
+    }
+    return parseJointLimitsFromDocument(parsed.document);
 }
 /**
  * Gets joint limits for a specific joint, with fallback values

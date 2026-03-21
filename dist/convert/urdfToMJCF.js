@@ -468,22 +468,23 @@ function convertURDFToMJCF(urdfContent) {
         result.warnings.push("Invalid URDF content");
         return result;
     }
-    const robot = parsed.document.querySelector("robot");
-    if (!robot) {
+    const validation = (0, urdfParser_1.validateURDFDocument)(parsed.document);
+    if (!validation.robot) {
         result.warnings.push("No robot element found");
         return result;
     }
+    const robot = validation.robot;
     const robotName = robot.getAttribute("name") || "robot";
     // Parse all links
     const links = new Map();
-    const linkElements = robot.querySelectorAll("link");
+    const linkElements = (0, urdfParser_1.getDirectChildrenByTag)(robot, "link");
     for (const linkEl of linkElements) {
         const linkData = parseLink(linkEl);
         links.set(linkData.name, linkData);
     }
     // Parse all joints
     const joints = [];
-    const jointElements = robot.querySelectorAll("joint");
+    const jointElements = (0, urdfParser_1.getDirectChildrenByTag)(robot, "joint");
     for (const jointEl of jointElements) {
         joints.push(parseJoint(jointEl));
     }

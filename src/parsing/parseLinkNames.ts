@@ -1,11 +1,17 @@
 /**
- * Parse link names from URDF content
+ * Parses link names from URDF content.
  */
-import { parseXml } from "../xmlDom";
+import { getDirectChildrenByTag, parseURDF, validateURDFDocument } from "./urdfParser";
 
 export function parseLinkNamesFromDocument(xmlDoc: Document): string[] {
   try {
-    const links = xmlDoc.querySelectorAll("link");
+    const validation = validateURDFDocument(xmlDoc);
+    if (!validation.robot) {
+      console.error(validation.error);
+      return [];
+    }
+
+    const links = getDirectChildrenByTag(validation.robot, "link");
     const linkNames: string[] = [];
 
     links.forEach((link) => {
@@ -23,6 +29,9 @@ export function parseLinkNamesFromDocument(xmlDoc: Document): string[] {
 }
 
 export function parseLinkNames(urdfContent: string): string[] {
-  const xmlDoc = parseXml(urdfContent);
-  return parseLinkNamesFromDocument(xmlDoc);
+  const parsed = parseURDF(urdfContent);
+  if (!parsed.isValid) {
+    return [];
+  }
+  return parseLinkNamesFromDocument(parsed.document);
 }

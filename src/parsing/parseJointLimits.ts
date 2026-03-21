@@ -1,10 +1,10 @@
 /**
  * URDF Joint Limits Parser
  *
- * Parses joint types and limits from URDF XML
+ * Parses joint types and limits from URDF XML.
  */
 
-import { parseXml } from "../xmlDom";
+import { getDirectChildrenByTag, parseURDF, validateURDFDocument } from "./urdfParser";
 
 export interface JointLimitInfo {
   type: string; // 'revolute', 'continuous', 'prismatic', 'fixed', etc.
@@ -44,19 +44,13 @@ const normalizeOrderedLimits = (
 export function parseJointLimitsFromDocument(xmlDoc: Document): JointLimits {
   const limits: JointLimits = {};
 
-  const parserError = xmlDoc.querySelector("parsererror");
-  if (parserError) {
-    console.error("URDF parsing error:", parserError.textContent || "Unknown XML parsing error");
+  const validation = validateURDFDocument(xmlDoc);
+  if (!validation.robot) {
+    console.error(validation.error);
     return limits;
   }
 
-  const robot = xmlDoc.querySelector("robot");
-  if (!robot) {
-    console.error("No <robot> element found in URDF");
-    return limits;
-  }
-
-  const joints = xmlDoc.querySelectorAll("joint");
+  const joints = getDirectChildrenByTag(validation.robot, "joint");
 
   joints.forEach((joint) => {
     const jointName = joint.getAttribute("name");
@@ -154,8 +148,11 @@ export function parseJointLimitsFromDocument(xmlDoc: Document): JointLimits {
  * @returns Map of joint names to their limit information
  */
 export function parseJointLimitsFromURDF(urdfContent: string): JointLimits {
-  const xmlDoc = parseXml(urdfContent);
-  return parseJointLimitsFromDocument(xmlDoc);
+  const parsed = parseURDF(urdfContent);
+  if (!parsed.isValid) {
+    return {};
+  }
+  return parseJointLimitsFromDocument(parsed.document);
 }
 
 /**

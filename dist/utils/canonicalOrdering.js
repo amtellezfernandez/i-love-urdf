@@ -101,7 +101,7 @@ function applyCanonicalOrdering(element) {
 function canonicalOrderURDF(urdfContent) {
     const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
     if (!parsed.isValid) {
-        console.error("Cannot apply canonical ordering: Invalid URDF");
+        console.error("Cannot apply canonical ordering because the URDF is invalid.");
         return urdfContent;
     }
     const robot = parsed.document.querySelector("robot");

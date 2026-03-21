@@ -13,6 +13,43 @@ export interface ParsedURDF {
   error?: string;
 }
 
+export interface ValidatedURDFDocument {
+  robot: Element | null;
+  error?: string;
+}
+
+export const getDirectChildrenByTag = (parent: Element, tagName: string): Element[] =>
+  Array.from(parent.children).filter((child) => child.tagName === tagName);
+
+export function validateURDFDocument(document: Document): ValidatedURDFDocument {
+  const parserError = document.querySelector("parsererror");
+  if (parserError) {
+    return {
+      robot: null,
+      error: parserError.textContent || "Unknown XML parsing error",
+    };
+  }
+
+  const robots = document.querySelectorAll("robot");
+  if (robots.length === 0) {
+    return {
+      robot: null,
+      error: "No <robot> element found in URDF",
+    };
+  }
+
+  if (robots.length > 1) {
+    return {
+      robot: null,
+      error: `Multiple <robot> elements found (${robots.length}). URDF must contain exactly one <robot>.`,
+    };
+  }
+
+  return {
+    robot: robots[0],
+  };
+}
+
 /**
  * Parses URDF XML content using DOMParser
  * @param urdfContent URDF XML content as string
@@ -21,40 +58,16 @@ export interface ParsedURDF {
 export function parseURDF(urdfContent: string): ParsedURDF {
   try {
     const xmlDoc = parseXml(urdfContent);
-    
-    // Check for parsing errors
-    const parserError = xmlDoc.querySelector("parsererror");
-    if (parserError) {
-      const errorText = parserError.textContent || "Unknown XML parsing error";
-      console.error("URDF parsing error:", errorText);
+    const validation = validateURDFDocument(xmlDoc);
+    if (!validation.robot) {
+      console.error(validation.error);
       return {
         document: xmlDoc,
         isValid: false,
-        error: errorText,
+        error: validation.error,
       };
     }
-    
-    // Validate that we have exactly one robot element
-    const robots = xmlDoc.querySelectorAll("robot");
-    if (robots.length === 0) {
-      const error = "No <robot> element found in URDF";
-      console.error(error);
-      return {
-        document: xmlDoc,
-        isValid: false,
-        error,
-      };
-    }
-    if (robots.length > 1) {
-      const error = `Multiple <robot> elements found (${robots.length}). URDF must contain exactly one <robot>.`;
-      console.error(error);
-      return {
-        document: xmlDoc,
-        isValid: false,
-        error,
-      };
-    }
-    
+
     return {
       document: xmlDoc,
       isValid: true,
@@ -88,4 +101,3 @@ export function serializeURDF(document: Document): string {
  * @param fallback Fallback value if parsing fails
  * @returns Result of callback or fallback
  */
-

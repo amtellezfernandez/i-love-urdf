@@ -1,8 +1,8 @@
 /**
- * Parses URDF to get hierarchical joint structure
+ * Parses URDF to get hierarchical joint structure.
  */
 
-import { parseXml } from "../xmlDom";
+import { getDirectChildrenByTag, parseURDF, validateURDFDocument } from "./urdfParser";
 
 export interface JointHierarchyNode {
   jointName: string;
@@ -18,20 +18,13 @@ export interface JointHierarchyNode {
 interface JointHierarchy {
   rootJoints: JointHierarchyNode[];
   allJoints: Map<string, JointHierarchyNode>;
-  orderedJoints: JointHierarchyNode[]; // All joints in URDF order
+  orderedJoints: JointHierarchyNode[]; // All joints in stable topological order
 }
 
 export function parseJointHierarchyFromDocument(xmlDoc: Document): JointHierarchy {
-  const parserError = xmlDoc.querySelector("parsererror");
-  if (parserError) {
-    const errorText = parserError.textContent || "Unknown XML parsing error";
-    console.error("URDF parsing error:", errorText);
-    return { rootJoints: [], allJoints: new Map(), orderedJoints: [] };
-  }
-
-  const robot = xmlDoc.querySelector("robot");
-  if (!robot) {
-    console.error("No <robot> element found in URDF");
+  const validation = validateURDFDocument(xmlDoc);
+  if (!validation.robot) {
+    console.error(validation.error);
     return { rootJoints: [], allJoints: new Map(), orderedJoints: [] };
   }
 
@@ -40,8 +33,8 @@ export function parseJointHierarchyFromDocument(xmlDoc: Document): JointHierarch
   const jointToParentJoint = new Map<string, string>(); // joint name -> parent joint name
   const orderedJoints: JointHierarchyNode[] = [];
 
-  // First pass: collect all joints in URDF order
-  const jointElements = xmlDoc.querySelectorAll("joint");
+  // First pass: collect all joints in URDF order.
+  const jointElements = getDirectChildrenByTag(validation.robot, "joint");
   let orderIndex = 0;
   jointElements.forEach((joint) => {
     const name = joint.getAttribute("name");
@@ -65,9 +58,9 @@ export function parseJointHierarchyFromDocument(xmlDoc: Document): JointHierarch
     }
   });
 
-  // Find root links (links that are not children of any joint)
+  // Find root links (links that are not children of any joint).
   const allLinks = new Set<string>();
-  xmlDoc.querySelectorAll("link").forEach((link) => {
+  getDirectChildrenByTag(validation.robot, "link").forEach((link) => {
     const name = link.getAttribute("name");
     if (name) allLinks.add(name);
   });
@@ -75,17 +68,23 @@ export function parseJointHierarchyFromDocument(xmlDoc: Document): JointHierarch
   const childLinks = new Set(linkToJoint.keys());
   const rootLinks = new Set(Array.from(allLinks).filter((link) => !childLinks.has(link)));
 
-  // Build parent joint relationships
+  // Build parent/child joint relationships.
   allJoints.forEach((joint) => {
-    const parentLink = joint.parentLink;
-    allJoints.forEach((otherJoint) => {
-      if (otherJoint.childLink === parentLink) {
-        jointToParentJoint.set(joint.jointName, otherJoint.jointName);
-      }
-    });
+    const parentJointName = linkToJoint.get(joint.parentLink);
+    if (!parentJointName) {
+      return;
+    }
+
+    const parentJoint = allJoints.get(parentJointName);
+    if (!parentJoint) {
+      return;
+    }
+
+    jointToParentJoint.set(joint.jointName, parentJointName);
+    parentJoint.children.push(joint);
   });
 
-  // Calculate depth for each joint
+  // Calculate depth for each joint.
   const calculateDepth = (jointName: string, visited: Set<string> = new Set()): number => {
     if (visited.has(jointName)) {
       const joint = allJoints.get(jointName);
@@ -111,19 +110,10 @@ export function parseJointHierarchyFromDocument(xmlDoc: Document): JointHierarch
     calculateDepth(jointName);
   });
 
-  // Build hierarchy and root joints
-  const rootJoints: JointHierarchyNode[] = [];
-  const processedLinks = new Set<string>();
-  rootLinks.forEach((rootLink) => {
-    const rootJointName = linkToJoint.get(rootLink);
-    if (!rootJointName) return;
-    const rootJoint = allJoints.get(rootJointName);
-    if (!rootJoint || processedLinks.has(rootLink)) return;
-    rootJoints.push(rootJoint);
-    processedLinks.add(rootLink);
-  });
+  // Build hierarchy and root joints.
+  const rootJoints = orderedJoints.filter((joint) => rootLinks.has(joint.parentLink));
 
-  // Sort joints by depth and original order
+  // Sort joints by depth and original URDF order.
   orderedJoints.sort((a, b) => {
     if (a.depth !== b.depth) return a.depth - b.depth;
     return a.order - b.order;
@@ -137,6 +127,9 @@ export function parseJointHierarchyFromDocument(xmlDoc: Document): JointHierarch
 }
 
 export function parseJointHierarchy(urdfContent: string): JointHierarchy {
-  const xmlDoc = parseXml(urdfContent);
-  return parseJointHierarchyFromDocument(xmlDoc);
+  const parsed = parseURDF(urdfContent);
+  if (!parsed.isValid) {
+    return { rootJoints: [], allJoints: new Map(), orderedJoints: [] };
+  }
+  return parseJointHierarchyFromDocument(parsed.document);
 }

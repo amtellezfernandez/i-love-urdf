@@ -5,7 +5,11 @@
  * Based on the structure used by urdf2mjcf (https://github.com/kscalelabs/urdf2mjcf)
  */
 
-import { parseURDF } from "../parsing/urdfParser";
+import {
+  getDirectChildrenByTag,
+  parseURDF,
+  validateURDFDocument,
+} from "../parsing/urdfParser";
 
 export interface MJCFConversionResult {
   mjcfContent: string;
@@ -611,17 +615,18 @@ export function convertURDFToMJCF(urdfContent: string): MJCFConversionResult {
     return result;
   }
 
-  const robot = parsed.document.querySelector("robot");
-  if (!robot) {
+  const validation = validateURDFDocument(parsed.document);
+  if (!validation.robot) {
     result.warnings.push("No robot element found");
     return result;
   }
+  const robot = validation.robot;
 
   const robotName = robot.getAttribute("name") || "robot";
 
   // Parse all links
   const links = new Map<string, LinkData>();
-  const linkElements = robot.querySelectorAll("link");
+  const linkElements = getDirectChildrenByTag(robot, "link");
   for (const linkEl of linkElements) {
     const linkData = parseLink(linkEl);
     links.set(linkData.name, linkData);
@@ -629,7 +634,7 @@ export function convertURDFToMJCF(urdfContent: string): MJCFConversionResult {
 
   // Parse all joints
   const joints: JointData[] = [];
-  const jointElements = robot.querySelectorAll("joint");
+  const jointElements = getDirectChildrenByTag(robot, "joint");
   for (const jointEl of jointElements) {
     joints.push(parseJoint(jointEl));
   }

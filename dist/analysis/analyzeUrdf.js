@@ -9,94 +9,96 @@ const parseLinkNames_1 = require("../parsing/parseLinkNames");
 const parseLinkData_1 = require("../parsing/parseLinkData");
 const parseSensors_1 = require("../parsing/parseSensors");
 const urdfParser_1 = require("../parsing/urdfParser");
-const parseVector3 = (raw) => {
+const parseVector3 = (raw, fallback = [0, 0, 0]) => {
     if (!raw)
-        return [0, 0, 0];
+        return fallback;
     const parts = raw.trim().split(/\s+/).map(Number);
-    return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+    return [
+        Number.isFinite(parts[0]) ? parts[0] : fallback[0],
+        Number.isFinite(parts[1]) ? parts[1] : fallback[1],
+        Number.isFinite(parts[2]) ? parts[2] : fallback[2],
+    ];
 };
-const extractMeshReferencesFromDocument = (xmlDoc) => {
+const extractMeshReferencesFromLinkData = (linkDataByName) => {
     const meshReferences = new Set();
-    xmlDoc.querySelectorAll("mesh").forEach((mesh) => {
-        const filename = mesh.getAttribute("filename");
-        if (!filename)
-            return;
-        const normalized = filename.trim();
-        if (normalized) {
-            meshReferences.add(normalized);
-        }
+    Object.values(linkDataByName).forEach((linkData) => {
+        [...linkData.visuals, ...linkData.collisions].forEach((entry) => {
+            if (entry.geometry.type !== "mesh") {
+                return;
+            }
+            const filename = entry.geometry.params.filename?.trim();
+            if (filename) {
+                meshReferences.add(filename);
+            }
+        });
     });
     return Array.from(meshReferences);
 };
+const extractMeshReferencesFromDocument = (xmlDoc) => {
+    const linkNames = (0, parseLinkNames_1.parseLinkNamesFromDocument)(xmlDoc);
+    const linkDataByName = parseLinkDataByNameFromDocument(xmlDoc, linkNames);
+    return extractMeshReferencesFromLinkData(linkDataByName);
+};
 exports.extractMeshReferencesFromDocument = extractMeshReferencesFromDocument;
+const extractInertialsFromLinkData = (linkDataByName) => Object.entries(linkDataByName).flatMap(([linkName, linkData]) => {
+    if (!linkData.inertial) {
+        return [];
+    }
+    const { mass, origin } = linkData.inertial;
+    if (!Number.isFinite(mass) || mass <= 0) {
+        return [];
+    }
+    return [{ linkName, mass, origin: origin.xyz }];
+});
 const extractInertialsFromDocument = (xmlDoc) => {
-    const entries = [];
-    xmlDoc.querySelectorAll("link").forEach((linkEl) => {
-        const linkName = linkEl.getAttribute("name");
-        if (!linkName)
-            return;
-        const inertialEl = linkEl.querySelector("inertial");
-        if (!inertialEl)
-            return;
-        const massValue = inertialEl.querySelector("mass")?.getAttribute("value");
-        const mass = massValue ? Number(massValue) : 0;
-        if (!Number.isFinite(mass) || mass <= 0)
-            return;
-        const originEl = inertialEl.querySelector("origin");
-        const origin = parseVector3(originEl?.getAttribute("xyz") ?? null);
-        entries.push({ linkName, mass, origin });
-    });
-    return entries;
+    const linkNames = (0, parseLinkNames_1.parseLinkNamesFromDocument)(xmlDoc);
+    const linkDataByName = parseLinkDataByNameFromDocument(xmlDoc, linkNames);
+    return extractInertialsFromLinkData(linkDataByName);
 };
 exports.extractInertialsFromDocument = extractInertialsFromDocument;
-const parseCollisionGeometriesFromDocument = (xmlDoc) => {
+const summarizeCollisionsFromLinkData = (linkDataByName) => {
     const entries = [];
     const byLink = {};
-    xmlDoc.querySelectorAll("link").forEach((linkEl) => {
-        const linkName = linkEl.getAttribute("name");
-        if (!linkName)
-            return;
-        const collisions = Array.from(linkEl.querySelectorAll("collision"));
-        collisions.forEach((collisionEl, index) => {
-            const originEl = collisionEl.querySelector("origin");
+    Object.entries(linkDataByName).forEach(([linkName, linkData]) => {
+        linkData.collisions.forEach((collision, index) => {
             const origin = {
-                xyz: parseVector3(originEl?.getAttribute("xyz") ?? null),
-                rpy: parseVector3(originEl?.getAttribute("rpy") ?? null),
+                xyz: collision.origin.xyz,
+                rpy: collision.origin.rpy,
             };
-            const geometryEl = collisionEl.querySelector("geometry");
-            if (!geometryEl)
-                return;
-            const boxEl = geometryEl.querySelector("box");
-            const sphereEl = geometryEl.querySelector("sphere");
-            const cylinderEl = geometryEl.querySelector("cylinder");
-            const meshEl = geometryEl.querySelector("mesh");
             let geometry = null;
-            if (boxEl) {
-                const size = parseVector3(boxEl.getAttribute("size"));
-                geometry = { type: "box", size };
+            if (collision.geometry.type === "box") {
+                geometry = {
+                    type: "box",
+                    size: parseVector3(collision.geometry.params.size ?? null),
+                };
             }
-            else if (sphereEl) {
-                const radius = Number(sphereEl.getAttribute("radius"));
+            else if (collision.geometry.type === "sphere") {
+                const radius = Number(collision.geometry.params.radius);
                 geometry = { type: "sphere", radius: Number.isFinite(radius) ? radius : 1 };
             }
-            else if (cylinderEl) {
-                const radius = Number(cylinderEl.getAttribute("radius"));
-                const length = Number(cylinderEl.getAttribute("length"));
+            else if (collision.geometry.type === "cylinder") {
+                const radius = Number(collision.geometry.params.radius);
+                const length = Number(collision.geometry.params.length);
                 geometry = {
                     type: "cylinder",
                     radius: Number.isFinite(radius) ? radius : 1,
                     length: Number.isFinite(length) ? length : 1,
                 };
             }
-            else if (meshEl) {
-                const filename = meshEl.getAttribute("filename");
-                if (!filename)
+            else if (collision.geometry.type === "mesh") {
+                const filename = collision.geometry.params.filename;
+                if (!filename) {
                     return;
-                const scale = parseVector3(meshEl.getAttribute("scale"));
-                geometry = { type: "mesh", filename, scale };
+                }
+                geometry = {
+                    type: "mesh",
+                    filename,
+                    scale: parseVector3(collision.geometry.params.scale ?? null, [1, 1, 1]),
+                };
             }
-            if (!geometry)
+            if (!geometry) {
                 return;
+            }
             const entry = {
                 linkName,
                 index,
@@ -109,6 +111,11 @@ const parseCollisionGeometriesFromDocument = (xmlDoc) => {
     });
     return { entries, byLink };
 };
+const parseCollisionGeometriesFromDocument = (xmlDoc) => {
+    const linkNames = (0, parseLinkNames_1.parseLinkNamesFromDocument)(xmlDoc);
+    const linkDataByName = parseLinkDataByNameFromDocument(xmlDoc, linkNames);
+    return summarizeCollisionsFromLinkData(linkDataByName);
+};
 const parseLinkDataByNameFromDocument = (xmlDoc, linkNames) => {
     const byName = {};
     linkNames.forEach((linkName) => {
@@ -120,13 +127,13 @@ const parseLinkDataByNameFromDocument = (xmlDoc, linkNames) => {
     return byName;
 };
 const analyzeUrdfDocument = (xmlDoc) => {
-    const parserError = xmlDoc.querySelector("parsererror");
-    const robot = xmlDoc.querySelector("robot");
+    const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
+    const robot = validation.robot;
     const robotName = robot?.getAttribute("name") ?? null;
-    if (parserError || !robot) {
+    if (!robot) {
         return {
             isValid: false,
-            error: parserError?.textContent || "Invalid URDF",
+            error: validation.error || "Invalid URDF",
             robotName,
             linkNames: [],
             rootLinks: [],
@@ -144,13 +151,14 @@ const analyzeUrdfDocument = (xmlDoc) => {
             linkDataByName: {},
         };
     }
-    const meshReferences = (0, exports.extractMeshReferencesFromDocument)(xmlDoc);
-    const absoluteFileMeshRefs = meshReferences.filter((ref) => (0, meshPaths_1.parseMeshReference)(ref).isAbsoluteFile);
     const linkNames = (0, parseLinkNames_1.parseLinkNamesFromDocument)(xmlDoc);
     const linkNameSet = new Set(linkNames);
+    const linkDataByName = parseLinkDataByNameFromDocument(xmlDoc, linkNames);
+    const meshReferences = extractMeshReferencesFromLinkData(linkDataByName);
+    const absoluteFileMeshRefs = meshReferences.filter((ref) => (0, meshPaths_1.parseMeshReference)(ref).isAbsoluteFile);
     const jointByChildLink = {};
     const childLinksSet = new Set();
-    robot.querySelectorAll("joint").forEach((joint) => {
+    (0, urdfParser_1.getDirectChildrenByTag)(robot, "joint").forEach((joint) => {
         const child = joint.querySelector("child")?.getAttribute("link");
         const parent = joint.querySelector("parent")?.getAttribute("link");
         if (!child || !parent)
@@ -173,8 +181,7 @@ const analyzeUrdfDocument = (xmlDoc) => {
     });
     const childLinks = Array.from(childLinksSet);
     const rootLinks = linkNames.filter((name) => !childLinksSet.has(name) && linkNameSet.has(name));
-    const collisions = parseCollisionGeometriesFromDocument(xmlDoc);
-    const linkDataByName = parseLinkDataByNameFromDocument(xmlDoc, linkNames);
+    const collisions = summarizeCollisionsFromLinkData(linkDataByName);
     return {
         isValid: true,
         robotName,
@@ -188,7 +195,7 @@ const analyzeUrdfDocument = (xmlDoc) => {
         sensors: (0, parseSensors_1.parseSensorsFromDocument)(xmlDoc),
         meshReferences,
         absoluteFileMeshRefs,
-        inertials: (0, exports.extractInertialsFromDocument)(xmlDoc),
+        inertials: extractInertialsFromLinkData(linkDataByName),
         collisionEntries: collisions.entries,
         collisionsByLink: collisions.byLink,
         linkDataByName,

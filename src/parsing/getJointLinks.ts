@@ -1,34 +1,34 @@
 /**
- * Gets the parent and child link names for a given joint name from URDF content
+ * Gets the parent and child link names for a given joint name from URDF content.
  */
-import { parseXml } from "../xmlDom";
+import { getDirectChildrenByTag, parseURDF } from "./urdfParser";
 
-export function getJointLinks(urdfContent: string, jointName: string): { parentLink: string | null; childLink: string | null } {
+export function getJointLinks(
+  urdfContent: string,
+  jointName: string
+): { parentLink: string | null; childLink: string | null } {
+  const parsed = parseURDF(urdfContent);
+  if (!parsed.isValid) {
+    return { parentLink: null, childLink: null };
+  }
+
   try {
-    const xmlDoc = parseXml(urdfContent);
-    
-    const parserError = xmlDoc.querySelector("parsererror");
-    if (parserError) {
-      const errorText = parserError.textContent || "Unknown XML parsing error";
-      console.error("URDF parsing error:", errorText);
-      return { parentLink: null, childLink: null };
-    }
-    
-    // Validate robot element exists
-    const robot = xmlDoc.querySelector("robot");
+    const robot = parsed.document.querySelector("robot");
     if (!robot) {
-      console.error("No <robot> element found in URDF");
       return { parentLink: null, childLink: null };
     }
-    
-    const joint = xmlDoc.querySelector(`joint[name="${jointName}"]`);
+
+    const joint =
+      getDirectChildrenByTag(robot, "joint").find(
+        (jointElement) => jointElement.getAttribute("name") === jointName
+      ) ?? null;
     if (!joint) {
       return { parentLink: null, childLink: null };
     }
-    
+
     const parent = joint.querySelector("parent");
     const child = joint.querySelector("child");
-    
+
     return {
       parentLink: parent?.getAttribute("link") || null,
       childLink: child?.getAttribute("link") || null,
@@ -38,4 +38,3 @@ export function getJointLinks(urdfContent: string, jointName: string): { parentL
     return { parentLink: null, childLink: null };
   }
 }
-

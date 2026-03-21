@@ -1,11 +1,11 @@
 /**
- * Pretty Print Utility for URDF
+ * URDF pretty-printing utility.
  *
- * Formats URDF XML with consistent indentation and clean structure.
- * Converts messy or minified XML into human-readable format.
+ * Formats URDF XML with consistent indentation and structure.
+ * Converts unformatted or minified XML into a readable representation.
  */
 /**
- * Pretty prints URDF content with consistent indentation
+ * Pretty-prints URDF content with consistent indentation.
  *
  * @param urdfContent - URDF XML content as string
  * @param indentSize - Number of spaces for each indent level (default: 2)

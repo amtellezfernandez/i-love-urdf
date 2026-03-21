@@ -15,15 +15,15 @@ const TASK_FAMILY_ORDER = [
 const TASK_FAMILY_METADATA = {
     load: {
         title: "Load Sources",
-        summary: "Normalize files, local repos, or GitHub repos into one prepared URDF.",
+        summary: "Prepare files, local repositories, or GitHub repositories as a single URDF.",
     },
     health: {
         title: "Health",
-        summary: "Audit structural, inertial, axis, and orientation risks before rewriting URDFs.",
+        summary: "Audit structural, inertial, axis, and orientation risks before modifying URDFs.",
     },
     validate: {
         title: "Validate",
-        summary: "Check whether a prepared URDF is structurally usable.",
+        summary: "Check whether a prepared URDF is structurally valid.",
     },
     analyze: {
         title: "Analyze",
@@ -31,7 +31,7 @@ const TASK_FAMILY_METADATA = {
     },
     format: {
         title: "Format",
-        summary: "Apply stable formatting and cleanup transforms to URDF text.",
+        summary: "Apply stable formatting and normalization transforms to URDF text.",
     },
     edit: {
         title: "Edit",
@@ -39,7 +39,7 @@ const TASK_FAMILY_METADATA = {
     },
     normalize: {
         title: "Normalize",
-        summary: "Apply runtime-neutral orientation and joint-frame cleanup workflows.",
+        summary: "Apply runtime-neutral orientation and joint-frame normalization workflows.",
     },
     optimize: {
         title: "Optimize",
@@ -47,7 +47,7 @@ const TASK_FAMILY_METADATA = {
     },
     convert: {
         title: "Convert",
-        summary: "Move between URDF, XACRO, MJCF, and first-pass USD with task-specific helpers.",
+        summary: "Convert between URDF, XACRO, MJCF, and initial USD outputs with task-specific helpers.",
     },
 };
 const AUXILIARY_HELP_SECTION_ORDER = ["xacro-runtime"];

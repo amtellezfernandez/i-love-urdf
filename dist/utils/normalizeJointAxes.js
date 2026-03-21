@@ -158,7 +158,7 @@ function normalizeJointAxes(urdfContent, options = {}) {
                 jointType,
                 original: currentAxisAttr,
                 corrected: defaultAxisString,
-                reason: "Invalid format - using default axis",
+                reason: "Axis format was invalid; applied the default axis.",
             });
             continue;
         }
@@ -179,7 +179,7 @@ function normalizeJointAxes(urdfContent, options = {}) {
                 jointType,
                 original: currentAxisAttr,
                 corrected: defaultAxisString,
-                reason: "Zero vector - using default axis",
+                reason: "Axis magnitude was zero or near zero; applied the default axis.",
             });
             continue;
         }
@@ -190,12 +190,12 @@ function normalizeJointAxes(urdfContent, options = {}) {
             snapToCanonical,
         });
         let correctionReason = Math.abs(mag - 1.0) > epsilon
-            ? `Non-unit vector (magnitude: ${mag.toFixed(4)})`
-            : "Cleaned up floating point precision";
+            ? `Normalized a non-unit axis vector (magnitude ${mag.toFixed(4)}).`
+            : "Normalized floating-point precision.";
         if (snapToCanonical) {
             const snapTarget = findCanonicalSnapTarget(correctedAxis, snapTolerance);
             if (snapTarget) {
-                correctionReason = `Snapped near-canonical axis within tolerance ${snapTolerance}`;
+                correctionReason = `Snapped a near-canonical axis within tolerance ${snapTolerance}.`;
             }
         }
         const correctedStr = formatAxis(correctedAxis);
@@ -217,7 +217,7 @@ function normalizeJointAxes(urdfContent, options = {}) {
             reason: correctionReason,
         };
         result.corrections.push(correction);
-        if (correctionReason.startsWith("Snapped near-canonical axis")) {
+        if (correctionReason.startsWith("Snapped a near-canonical axis")) {
             result.snapped.push(correction);
         }
     }

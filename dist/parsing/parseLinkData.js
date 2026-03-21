@@ -177,15 +177,11 @@ function parseLinkData(urdfContent, linkName) {
 }
 function parseLinkDataFromDocument(xmlDoc, linkName) {
     try {
-        const parserError = xmlDoc.querySelector("parsererror");
-        if (parserError) {
+        const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
+        if (!validation.robot) {
             return null;
         }
-        const robot = xmlDoc.querySelector("robot");
-        if (!robot) {
-            return null;
-        }
-        const link = xmlDoc.querySelector(`link[name="${linkName}"]`);
+        const link = (0, urdfParser_1.getDirectChildrenByTag)(validation.robot, "link").find((linkElement) => linkElement.getAttribute("name") === linkName) ?? null;
         if (!link) {
             return null;
         }

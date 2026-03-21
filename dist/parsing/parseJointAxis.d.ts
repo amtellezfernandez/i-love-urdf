@@ -1,5 +1,5 @@
 /**
- * Parses axis information from URDF joints
+ * Parses axis information from URDF joints.
  */
 export interface JointAxisInfo {
     xyz: [number, number, number];

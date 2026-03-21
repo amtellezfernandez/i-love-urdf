@@ -63,7 +63,7 @@ function createUsdStage(outputPath = null, options = {}) {
     };
     return stage;
 }
-const parseJointElements = (xmlDoc) => Array.from(xmlDoc.querySelectorAll("joint")).flatMap((jointElement) => {
+const parseJointElements = (robot) => (0, urdfParser_1.getDirectChildrenByTag)(robot, "joint").flatMap((jointElement) => {
     const name = jointElement.getAttribute("name") || "";
     const type = jointElement.getAttribute("type") || "fixed";
     const parent = jointElement.querySelector("parent")?.getAttribute("link") || "";
@@ -88,9 +88,9 @@ const parseJointElements = (xmlDoc) => Array.from(xmlDoc.querySelectorAll("joint
             limitUpper: Number.isFinite(upper) ? upper : undefined,
         }];
 });
-const buildLinkDataMap = (xmlDoc) => {
+const buildLinkDataMap = (xmlDoc, robot) => {
     const map = {};
-    Array.from(xmlDoc.querySelectorAll("link")).forEach((linkElement) => {
+    (0, urdfParser_1.getDirectChildrenByTag)(robot, "link").forEach((linkElement) => {
         const name = linkElement.getAttribute("name");
         if (!name)
             return;
@@ -566,7 +566,7 @@ function mapUrdfToUsdPrim(link, options = {}) {
         stats,
     };
 }
-const collectLinkNames = (xmlDoc) => Array.from(xmlDoc.querySelectorAll("link"))
+const collectLinkNames = (robot) => (0, urdfParser_1.getDirectChildrenByTag)(robot, "link")
     .map((link) => link.getAttribute("name") || "")
     .filter((name) => name.length > 0);
 const buildLinkTree = (linkNames, joints) => {
@@ -627,7 +627,7 @@ const buildJointPrims = (joints, robotPrimPath, linkPathByName, rootLinks, joint
             typeName = "PhysicsPrismaticJoint";
         }
         else if (joint.type !== "fixed") {
-            warnings.push(`USD export currently downgrades joint ${joint.name} of type ${joint.type} to PhysicsFixedJoint.`);
+            warnings.push(`USD export converts joint ${joint.name} of type ${joint.type} to PhysicsFixedJoint because that joint type is not yet supported.`);
         }
         const axisChoice = dominantAxisToken(joint.axis);
         const axisAlignment = (0, rotationMath_1.buildRotationBetweenVectors)(axisChoice.vector, joint.axis);
@@ -675,10 +675,11 @@ function convertURDFToUSD(urdfContent, options = {}) {
         throw new Error(parsed.error || "Invalid URDF.");
     }
     const xmlDoc = parsed.document;
-    const robot = xmlDoc.querySelector("robot");
-    if (!robot) {
+    const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
+    if (!validation.robot) {
         throw new Error("No <robot> element found in URDF.");
     }
+    const robot = validation.robot;
     const warnings = [];
     const stats = {
         linksConverted: 0,
@@ -688,9 +689,9 @@ function convertURDFToUSD(urdfContent, options = {}) {
         inlineMeshesConverted: 0,
         unsupportedMeshes: 0,
     };
-    const linkNames = collectLinkNames(xmlDoc);
-    const joints = parseJointElements(xmlDoc);
-    const linkDataByName = buildLinkDataMap(xmlDoc);
+    const linkNames = collectLinkNames(robot);
+    const joints = parseJointElements(robot);
+    const linkDataByName = buildLinkDataMap(xmlDoc, robot);
     const linkNameMap = makeUniqueNameMap(linkNames);
     const jointNameMap = makeUniqueNameMap(joints.map((joint) => joint.name));
     const rootTree = buildLinkTree(linkNames, joints);

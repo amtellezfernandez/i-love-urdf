@@ -6,9 +6,38 @@
  * environments behave consistently.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getDirectChildrenByTag = void 0;
+exports.validateURDFDocument = validateURDFDocument;
 exports.parseURDF = parseURDF;
 exports.serializeURDF = serializeURDF;
 const xmlDom_1 = require("../xmlDom");
+const getDirectChildrenByTag = (parent, tagName) => Array.from(parent.children).filter((child) => child.tagName === tagName);
+exports.getDirectChildrenByTag = getDirectChildrenByTag;
+function validateURDFDocument(document) {
+    const parserError = document.querySelector("parsererror");
+    if (parserError) {
+        return {
+            robot: null,
+            error: parserError.textContent || "Unknown XML parsing error",
+        };
+    }
+    const robots = document.querySelectorAll("robot");
+    if (robots.length === 0) {
+        return {
+            robot: null,
+            error: "No <robot> element found in URDF",
+        };
+    }
+    if (robots.length > 1) {
+        return {
+            robot: null,
+            error: `Multiple <robot> elements found (${robots.length}). URDF must contain exactly one <robot>.`,
+        };
+    }
+    return {
+        robot: robots[0],
+    };
+}
 /**
  * Parses URDF XML content using DOMParser
  * @param urdfContent URDF XML content as string
@@ -17,35 +46,13 @@ const xmlDom_1 = require("../xmlDom");
 function parseURDF(urdfContent) {
     try {
         const xmlDoc = (0, xmlDom_1.parseXml)(urdfContent);
-        // Check for parsing errors
-        const parserError = xmlDoc.querySelector("parsererror");
-        if (parserError) {
-            const errorText = parserError.textContent || "Unknown XML parsing error";
-            console.error("URDF parsing error:", errorText);
+        const validation = validateURDFDocument(xmlDoc);
+        if (!validation.robot) {
+            console.error(validation.error);
             return {
                 document: xmlDoc,
                 isValid: false,
-                error: errorText,
-            };
-        }
-        // Validate that we have exactly one robot element
-        const robots = xmlDoc.querySelectorAll("robot");
-        if (robots.length === 0) {
-            const error = "No <robot> element found in URDF";
-            console.error(error);
-            return {
-                document: xmlDoc,
-                isValid: false,
-                error,
-            };
-        }
-        if (robots.length > 1) {
-            const error = `Multiple <robot> elements found (${robots.length}). URDF must contain exactly one <robot>.`;
-            console.error(error);
-            return {
-                document: xmlDoc,
-                isValid: false,
-                error,
+                error: validation.error,
             };
         }
         return {

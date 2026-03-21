@@ -72,7 +72,7 @@ const buildLocalMeshResolver = (files, entryPath, rootPath, outputPath) => {
         return {
             kind: "unsupported",
             sourcePath: request.meshRef,
-            reason: `only STL and existing USD assets are supported right now (got ${extension || "unknown"})`,
+            reason: `Only STL input and existing USD assets are supported for local mesh resolution. Received ${extension || "unknown"}.`,
         };
     };
 };
@@ -93,7 +93,7 @@ function convertMeshToUsd(meshPath, options = {}) {
         };
     }
     if (extension !== ".stl") {
-        throw new Error(`convertMeshToUsd currently supports STL input only. Received ${extension || "unknown"}.`);
+        throw new Error(`convertMeshToUsd accepts STL input only. Received ${extension || "unknown"}.`);
     }
     const targetPath = options.outPath ||
         path.join(path.dirname(absoluteMeshPath), `${path.basename(absoluteMeshPath, extension)}.usda`);

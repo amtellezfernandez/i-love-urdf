@@ -1,5 +1,5 @@
 /**
- * Parses URDF to get hierarchical joint structure
+ * Parses URDF to get hierarchical joint structure.
  */
 export interface JointHierarchyNode {
     jointName: string;

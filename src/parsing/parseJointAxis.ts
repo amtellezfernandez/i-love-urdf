@@ -1,8 +1,8 @@
 /**
- * Parses axis information from URDF joints
+ * Parses axis information from URDF joints.
  */
 
-import { parseXml } from "../xmlDom";
+import { getDirectChildrenByTag, parseURDF, validateURDFDocument } from "./urdfParser";
 
 export interface JointAxisInfo {
   xyz: [number, number, number];
@@ -16,20 +16,13 @@ export interface JointAxisMap {
  * Parse axis information from an already-parsed URDF document
  */
 export function parseJointAxesFromDocument(xmlDoc: Document): JointAxisMap {
-  const parserError = xmlDoc.querySelector("parsererror");
-  if (parserError) {
-    const errorText = parserError.textContent || "Unknown XML parsing error";
-    console.error("URDF parsing error:", errorText);
+  const validation = validateURDFDocument(xmlDoc);
+  if (!validation.robot) {
+    console.error(validation.error);
     return {};
   }
 
-  const robot = xmlDoc.querySelector("robot");
-  if (!robot) {
-    console.error("No <robot> element found in URDF");
-    return {};
-  }
-
-  const joints = xmlDoc.querySelectorAll("joint");
+  const joints = getDirectChildrenByTag(validation.robot, "joint");
   const axes: JointAxisMap = {};
 
   joints.forEach((jointElement) => {
@@ -59,6 +52,9 @@ export function parseJointAxesFromDocument(xmlDoc: Document): JointAxisMap {
  * Parse axis information from URDF content
  */
 export function parseJointAxesFromURDF(urdfContent: string): JointAxisMap {
-  const xmlDoc = parseXml(urdfContent);
-  return parseJointAxesFromDocument(xmlDoc);
+  const parsed = parseURDF(urdfContent);
+  if (!parsed.isValid) {
+    return {};
+  }
+  return parseJointAxesFromDocument(parsed.document);
 }

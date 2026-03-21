@@ -5,7 +5,7 @@ exports.guessUrdfOrientation = guessUrdfOrientation;
 const analyzeUrdf_1 = require("./analyzeUrdf");
 const orientationCues_1 = require("./orientationCues");
 const outputContracts_1 = require("../contracts/outputContracts");
-const xmlDom_1 = require("../xmlDom");
+const urdfParser_1 = require("../parsing/urdfParser");
 const buildOrientationGuess = (payload) => (0, outputContracts_1.withOutputContract)(outputContracts_1.ORIENTATION_GUESS_CONTRACT, payload);
 const AXES = ["x", "y", "z"];
 const IDENTITY_ROTATION = [
@@ -189,7 +189,7 @@ const isWheelLikeLinkData = (linkData) => {
         return nameLooksWheelLike(entry.geometry.params.filename || "");
     });
 };
-const collectJointRecords = (xmlDoc) => Array.from(xmlDoc.querySelectorAll("joint")).flatMap((joint) => {
+const collectJointRecords = (robot) => (0, urdfParser_1.getDirectChildrenByTag)(robot, "joint").flatMap((joint) => {
     const name = joint.getAttribute("name");
     const parentLink = joint.querySelector("parent")?.getAttribute("link");
     const childLink = joint.querySelector("child")?.getAttribute("link");
@@ -213,8 +213,8 @@ const collectJointRecords = (xmlDoc) => Array.from(xmlDoc.querySelectorAll("join
         },
     ];
 });
-const computeLinkWorldTransforms = (xmlDoc, joints) => {
-    const linkNames = Array.from(xmlDoc.querySelectorAll("link"))
+const computeLinkWorldTransforms = (robot, joints) => {
+    const linkNames = (0, urdfParser_1.getDirectChildrenByTag)(robot, "link")
         .map((link) => link.getAttribute("name"))
         .filter((value) => Boolean(value));
     const childLinks = new Set(joints.map((joint) => joint.childLink));
@@ -395,11 +395,12 @@ const describePrincipalAxis = (axis) => {
 function guessUrdfOrientation(urdfContent, options = {}) {
     const targetUpAxis = options.targetUpAxis ?? "z";
     const targetForwardAxis = options.targetForwardAxis ?? "x";
-    const analysis = (0, analyzeUrdf_1.analyzeUrdf)(urdfContent);
-    if (!analysis.isValid) {
+    const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
+    const analysis = (0, analyzeUrdf_1.analyzeUrdfDocument)(parsed.document);
+    if (!parsed.isValid || !analysis.isValid) {
         return buildOrientationGuess({
             isValid: false,
-            error: analysis.error ?? "Invalid URDF",
+            error: parsed.error ?? analysis.error ?? "Invalid URDF",
             robotName: analysis.robotName,
             likelyUpAxis: null,
             likelyUpDirection: null,
@@ -421,9 +422,34 @@ function guessUrdfOrientation(urdfContent, options = {}) {
             assumptions: [],
         });
     }
-    const xmlDoc = (0, xmlDom_1.parseXml)(urdfContent);
-    const joints = collectJointRecords(xmlDoc);
-    const { linkTransforms, jointWorldTransforms, unresolvedJoints } = computeLinkWorldTransforms(xmlDoc, joints);
+    const validation = (0, urdfParser_1.validateURDFDocument)(parsed.document);
+    if (!validation.robot) {
+        return buildOrientationGuess({
+            isValid: false,
+            error: validation.error ?? "Invalid URDF",
+            robotName: analysis.robotName,
+            likelyUpAxis: null,
+            likelyUpDirection: null,
+            likelyForwardAxis: null,
+            likelyForwardDirection: null,
+            likelyLateralAxis: null,
+            likelyLateralDirection: null,
+            confidence: 0,
+            targetUpAxis,
+            targetForwardAxis,
+            suggestedRotate90: null,
+            suggestedApplyOrientation: null,
+            spans: zeroVotes(),
+            revoluteAxisVotes: zeroVotes(),
+            wheelAxisVotes: zeroVotes(),
+            wheelJointNames: [],
+            signals: [],
+            report: { evidence: [], conflicts: [] },
+            assumptions: [],
+        });
+    }
+    const joints = collectJointRecords(validation.robot);
+    const { linkTransforms, jointWorldTransforms, unresolvedJoints } = computeLinkWorldTransforms(validation.robot, joints);
     const { bounds: geometryBounds, rawPoints } = collectGeometrySamplePoints(analysis, linkTransforms, jointWorldTransforms);
     (options.additionalSamplePoints ?? []).forEach((point) => {
         pushSamplePoint(geometryBounds, rawPoints, point);

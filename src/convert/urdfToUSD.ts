@@ -1,5 +1,9 @@
 import { parseLinkDataFromDocument, type LinkData, type OriginData } from "../parsing/parseLinkData";
-import { parseURDF } from "../parsing/urdfParser";
+import {
+  getDirectChildrenByTag,
+  parseURDF,
+  validateURDFDocument,
+} from "../parsing/urdfParser";
 import { normalizeJointAxis } from "../utils/normalizeJointAxes";
 import {
   buildRotationBetweenVectors,
@@ -194,8 +198,8 @@ export function createUsdStage(
   return stage;
 }
 
-const parseJointElements = (xmlDoc: Document): ParsedJoint[] =>
-  Array.from(xmlDoc.querySelectorAll("joint")).flatMap((jointElement) => {
+const parseJointElements = (robot: Element): ParsedJoint[] =>
+  getDirectChildrenByTag(robot, "joint").flatMap((jointElement) => {
     const name = jointElement.getAttribute("name") || "";
     const type = jointElement.getAttribute("type") || "fixed";
     const parent = jointElement.querySelector("parent")?.getAttribute("link") || "";
@@ -221,9 +225,9 @@ const parseJointElements = (xmlDoc: Document): ParsedJoint[] =>
     }];
   });
 
-const buildLinkDataMap = (xmlDoc: Document): Record<string, LinkData> => {
+const buildLinkDataMap = (xmlDoc: Document, robot: Element): Record<string, LinkData> => {
   const map: Record<string, LinkData> = {};
-  Array.from(xmlDoc.querySelectorAll("link")).forEach((linkElement) => {
+  getDirectChildrenByTag(robot, "link").forEach((linkElement) => {
     const name = linkElement.getAttribute("name");
     if (!name) return;
     const data = parseLinkDataFromDocument(xmlDoc, name);
@@ -751,8 +755,8 @@ export function mapUrdfToUsdPrim(
   };
 }
 
-const collectLinkNames = (xmlDoc: Document): string[] =>
-  Array.from(xmlDoc.querySelectorAll("link"))
+const collectLinkNames = (robot: Element): string[] =>
+  getDirectChildrenByTag(robot, "link")
     .map((link) => link.getAttribute("name") || "")
     .filter((name) => name.length > 0);
 
@@ -823,7 +827,9 @@ const buildJointPrims = (
     } else if (joint.type === "prismatic") {
       typeName = "PhysicsPrismaticJoint";
     } else if (joint.type !== "fixed") {
-      warnings.push(`USD export currently downgrades joint ${joint.name} of type ${joint.type} to PhysicsFixedJoint.`);
+      warnings.push(
+        `USD export converts joint ${joint.name} of type ${joint.type} to PhysicsFixedJoint because that joint type is not yet supported.`
+      );
     }
 
     const axisChoice = dominantAxisToken(joint.axis);
@@ -881,10 +887,11 @@ export function convertURDFToUSD(
   }
 
   const xmlDoc = parsed.document;
-  const robot = xmlDoc.querySelector("robot");
-  if (!robot) {
+  const validation = validateURDFDocument(xmlDoc);
+  if (!validation.robot) {
     throw new Error("No <robot> element found in URDF.");
   }
+  const robot = validation.robot;
 
   const warnings: string[] = [];
   const stats: UrdfToUsdStats = {
@@ -895,9 +902,9 @@ export function convertURDFToUSD(
     inlineMeshesConverted: 0,
     unsupportedMeshes: 0,
   };
-  const linkNames = collectLinkNames(xmlDoc);
-  const joints = parseJointElements(xmlDoc);
-  const linkDataByName = buildLinkDataMap(xmlDoc);
+  const linkNames = collectLinkNames(robot);
+  const joints = parseJointElements(robot);
+  const linkDataByName = buildLinkDataMap(xmlDoc, robot);
   const linkNameMap = makeUniqueNameMap(linkNames);
   const jointNameMap = makeUniqueNameMap(joints.map((joint) => joint.name));
   const rootTree = buildLinkTree(linkNames, joints);

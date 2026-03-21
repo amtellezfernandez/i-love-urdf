@@ -109,7 +109,7 @@ export function canonicalOrderURDF(urdfContent: string): string {
   const parsed = parseURDF(urdfContent);
 
   if (!parsed.isValid) {
-    console.error("Cannot apply canonical ordering: Invalid URDF");
+    console.error("Cannot apply canonical ordering because the URDF is invalid.");
     return urdfContent;
   }
 

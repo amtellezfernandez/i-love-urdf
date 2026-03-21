@@ -1,15 +1,15 @@
 "use strict";
 /**
- * Pretty Print Utility for URDF
+ * URDF pretty-printing utility.
  *
- * Formats URDF XML with consistent indentation and clean structure.
- * Converts messy or minified XML into human-readable format.
+ * Formats URDF XML with consistent indentation and structure.
+ * Converts unformatted or minified XML into a readable representation.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.prettyPrintURDF = prettyPrintURDF;
 const urdfParser_1 = require("../parsing/urdfParser");
 /**
- * Formats an XML string with proper indentation
+ * Formats an XML string with consistent indentation.
  *
  * @param xmlString - XML string to format
  * @param indentSize - Number of spaces for each indent level (default: 2)
@@ -51,7 +51,7 @@ function formatXML(xmlString, indentSize = 2) {
     return result.join("\n");
 }
 /**
- * Pretty prints URDF content with consistent indentation
+ * Pretty-prints URDF content with consistent indentation.
  *
  * @param urdfContent - URDF XML content as string
  * @param indentSize - Number of spaces for each indent level (default: 2)
@@ -60,7 +60,7 @@ function formatXML(xmlString, indentSize = 2) {
 function prettyPrintURDF(urdfContent, indentSize = 2) {
     const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
     if (!parsed.isValid) {
-        console.error("Cannot pretty print: Invalid URDF");
+        console.error("Cannot pretty-print an invalid URDF.");
         return urdfContent;
     }
     // Serialize the document first

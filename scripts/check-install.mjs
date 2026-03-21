@@ -288,7 +288,7 @@ const main = () => {
     console.log("ilu install checks passed.");
   } finally {
     if (keepTemp) {
-      console.error(`Kept install-check temp dir: ${tempRoot}`);
+      console.error(`Retained install-check temporary directory: ${tempRoot}`);
     } else {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }

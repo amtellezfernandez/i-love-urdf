@@ -35,6 +35,65 @@ const assertCloseVector = (actual, expected, epsilon = 1e-6) => {
   });
 };
 
+const hierarchyFixtureUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="two_link_arm">
+  <link name="base_link"/>
+  <link name="shoulder_link"/>
+  <link name="tool_link"/>
+  <joint name="shoulder_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.57" upper="1.57" velocity="1.0"/>
+  </joint>
+  <joint name="tool_joint" type="revolute">
+    <parent link="shoulder_link"/>
+    <child link="tool_link"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.0" upper="1.0" velocity="1.0"/>
+  </joint>
+  <transmission name="ignored_transmission">
+    <joint name="shoulder_joint"/>
+  </transmission>
+</robot>`;
+
+const extensionNoiseUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="extension_noise">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="1 1 0.2"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="wheel_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.2" length="0.1"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_link"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+  <gazebo>
+    <link name="plugin_wheel_link">
+      <visual>
+        <geometry>
+          <mesh filename="ignored_plugin_wheel.stl"/>
+        </geometry>
+      </visual>
+    </link>
+    <joint name="plugin_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="plugin_wheel_link"/>
+      <axis xyz="1 0 0"/>
+    </joint>
+  </gazebo>
+</robot>`;
+
 test("canonical ordering is idempotent", () => {
   const first = lib.canonicalOrderURDF(canonicalOrderingUrdf);
   const second = lib.canonicalOrderURDF(first);
@@ -93,4 +152,61 @@ test("orientation application and normalize-robot agree on the repaired up-axis"
   assert.equal(applied.apply, true);
   assert.ok(applied.outputUrdf);
   assert.ok(applied.healthAfter);
+});
+
+test("joint hierarchy and joint parsers only consider top-level URDF joints", () => {
+  const hierarchy = lib.parseJointHierarchy(hierarchyFixtureUrdf);
+  assert.deepEqual(
+    hierarchy.rootJoints.map((joint) => joint.jointName),
+    ["shoulder_joint"]
+  );
+  assert.deepEqual(
+    hierarchy.rootJoints[0]?.children.map((joint) => joint.jointName),
+    ["tool_joint"]
+  );
+  assert.deepEqual(
+    hierarchy.orderedJoints.map((joint) => joint.jointName),
+    ["shoulder_joint", "tool_joint"]
+  );
+
+  assert.deepEqual(lib.parseLinkNames(hierarchyFixtureUrdf), [
+    "base_link",
+    "shoulder_link",
+    "tool_link",
+  ]);
+  assert.deepEqual(Object.keys(lib.parseJointAxesFromURDF(hierarchyFixtureUrdf)).sort(), [
+    "shoulder_joint",
+    "tool_joint",
+  ]);
+  assert.deepEqual(Object.keys(lib.parseJointLimitsFromURDF(hierarchyFixtureUrdf)).sort(), [
+    "shoulder_joint",
+    "tool_joint",
+  ]);
+});
+
+test("analysis, orientation, and USD conversion ignore extension-only link and joint tags", () => {
+  const analysis = lib.analyzeUrdf(extensionNoiseUrdf);
+  assert.equal(analysis.isValid, true);
+  assert.deepEqual(analysis.linkNames, ["base_link", "wheel_link"]);
+  assert.deepEqual(analysis.rootLinks, ["base_link"]);
+  assert.deepEqual(analysis.childLinks, ["wheel_link"]);
+  assert.deepEqual(analysis.meshReferences, []);
+  assert.deepEqual(analysis.jointHierarchy.orderedJoints.map((joint) => joint.jointName), [
+    "wheel_joint",
+  ]);
+
+  const orientation = lib.guessUrdfOrientation(extensionNoiseUrdf);
+  assert.deepEqual(orientation.wheelJointNames, ["wheel_joint"]);
+
+  const usd = lib.convertURDFToUSD(extensionNoiseUrdf);
+  assert.equal(usd.stats.linksConverted, 2);
+  assert.equal(usd.stats.jointsConverted, 1);
+  assert.equal(usd.usdContent.includes("plugin_wheel_link"), false);
+  assert.equal(usd.usdContent.includes("plugin_wheel_joint"), false);
+
+  const mjcf = lib.convertURDFToMJCF(extensionNoiseUrdf);
+  assert.equal(mjcf.stats.bodiesCreated, 2);
+  assert.equal(mjcf.stats.jointsConverted, 1);
+  assert.equal(mjcf.mjcfContent.includes("plugin_wheel_link"), false);
+  assert.equal(mjcf.mjcfContent.includes("plugin_wheel_joint"), false);
 });

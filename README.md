@@ -4,9 +4,10 @@ Tools for loading, checking, editing, converting, and structurally analyzing URD
 
 `i-love-urdf` is the core package behind `urdf-studio`.
 The CLI command is `ilu`.
-The website docs live in `i-love-urdf-web`.
+Global installs also expose `i-love-urdf` as a compatibility alias.
+Website documentation lives in `i-love-urdf-web`.
 
-It now includes a reusable robot morphology layer for producing machine-readable,
+The package includes a reusable robot morphology layer for producing machine-readable,
 explainable summaries such as:
 
 - branch counts: arms, legs, wheels
@@ -15,7 +16,7 @@ explainable summaries such as:
 - canonical tags: `humanoid`, `quadruped`, `mobile-manipulator`, `end-effector`, `aerial`
 - display tags: `Humanoid`, `Quadruped`, `Mobile Manipulator`, `End Effector`, `Drone`
 
-It also includes an orientation inference layer for producing explainable
+The package also includes an orientation inference layer for producing explainable
 Y-up / Z-up reports such as:
 
 - likely up / forward / lateral basis directions
@@ -30,7 +31,7 @@ orientation and health checks with real STL/OBJ/DAE bounds resolved from disk.
 ## Install
 
 The package is not currently published on the npm registry under `i-love-urdf`.
-If you just want the CLI on your machine, install it globally from GitHub, a release tarball, or a local checkout.
+If you only need the CLI on a workstation, install it globally from GitHub, a release tarball, or a local checkout.
 
 Requirements:
 
@@ -44,8 +45,9 @@ npm install -g --install-links=true git+https://github.com/amtellezfernandez/i-l
 ilu --help
 ```
 
-Use `--install-links=true` for GitHub installs so npm writes a real global package instead of a temp cache link.
-Current GitHub installs ship the built `dist/` tree directly from the repo, so rerunning the same command upgrades the global CLI in place.
+Use `--install-links=true` for GitHub installs so npm writes an actual global package instead of a temporary cache link.
+Current GitHub installs include the built `dist/` tree directly in the repository, so rerunning the same command upgrades the global CLI in place.
+Global installs expose both `ilu` and `i-love-urdf`, but the canonical command is `ilu`.
 If you are reinstalling an older checkout or release that still used npm git-dependency preparation, run `npm uninstall -g i-love-urdf` first and then rerun the install command.
 
 Install the CLI globally from a release tarball:
@@ -64,7 +66,7 @@ npm install -g .
 ilu --help
 ```
 
-When you change a local checkout and want the global `ilu` binary to pick up the latest code again, run:
+After modifying a local checkout, refresh the global CLI binaries with:
 
 ```sh
 corepack pnpm refresh:global
@@ -76,9 +78,9 @@ When you are preparing a GitHub-installable commit or a release tarball from thi
 corepack pnpm build:package
 ```
 
-If you are developing from a repo checkout instead of installing the CLI globally, use the repo-local workflow below.
+If you are developing from a repository checkout instead of installing the CLI globally, use the repository-local workflow below.
 
-Repo-development requirements:
+Repository development requirements:
 
 - Node.js 20, 22, or 24
 - Corepack
@@ -88,7 +90,7 @@ Repo-development requirements:
 corepack enable
 corepack pnpm install
 
-# run the CLI from this repo checkout
+# run the CLI from this repository checkout
 corepack pnpm ilu --help
 
 # run the targeted contract/invariant tests
@@ -102,23 +104,24 @@ corepack pnpm setup:xacro
 corepack pnpm ilu probe-xacro-runtime
 ```
 
-The repo is tested on Node `20.19.6`, but the package also supports current Node `22.x` and `24.x`.
+The repository is tested on Node `20.19.6`, and the package also supports current Node `22.x` and `24.x`.
 
-From a repo checkout, run the CLI as `corepack pnpm ilu ...` (or `pnpm ilu ...` if `pnpm` is already on your `PATH`).
-Use plain `ilu ...` only when the package is installed as a real CLI in your environment.
+From a repository checkout, run the CLI as `corepack pnpm ilu ...` (or `pnpm ilu ...` if `pnpm` is already on your `PATH`).
+Use plain `ilu ...` when the package is installed as a global CLI in your environment.
+`i-love-urdf ...` remains available as a compatibility alias.
 
-When working against GitHub repos, pass the repository with `--github <owner/repo|url>`.
+When working against GitHub repositories, pass the repository with `--github <owner/repo|url>`.
 For example, use `inspect-repo --github ANYbotics/anymal_b_simple_description` or `inspect-repo --github https://github.com/ANYbotics/anymal_b_simple_description`.
 Do not write a `--https=...` flag; the URL belongs to the value of `--github`.
 
-Before you use a `--github` command on a new machine, do this once first:
+Before using a `--github` command on a new machine, complete this one-time setup:
 
 ```sh
 gh auth login
 gh auth status
 ```
 
-If `gh` is already logged in, `ilu` can reuse that session for GitHub repo commands.
+If `gh` is already logged in, the CLI can use that authenticated session for GitHub repository commands.
 
 GitHub auth for `--github` commands follows this order:
 
@@ -134,11 +137,12 @@ Git config identity such as `user.name` / `user.email` is not used for GitHub AP
 
 ## Common CLI Commands
 
-Examples below use installed-CLI syntax.
-From a repo checkout, prepend `corepack pnpm`.
+Examples below use installed-CLI syntax with `ilu`.
+`i-love-urdf` is a compatibility alias.
+From a repository checkout, prepend `corepack pnpm` and keep the repository-local `ilu` command.
 
 ```sh
-# load a file or repo
+# load a file or repository
 ilu load-source --path ./robot.urdf
 ilu inspect-repo --local ./my-robot-repo
 ilu inspect-repo --github ANYbotics/anymal_b_simple_description
@@ -152,7 +156,7 @@ ilu robot-type --urdf robot.urdf
 ilu morphology-card --urdf robot.urdf --name-hints unitree_go2,gripper
 ilu guess-orientation --urdf robot.urdf
 
-# edit / clean up
+# edit / normalize
 ilu pretty-print --urdf robot.urdf --out robot.pretty.urdf
 ilu snap-axes --urdf robot.urdf --out robot.snapped.urdf
 ilu rename-link --urdf robot.urdf --link tool --name tool0 --out robot.edited.urdf
@@ -168,14 +172,14 @@ ilu urdf-to-xacro --urdf robot.urdf --out robot.urdf.xacro
 ilu xacro-to-urdf --xacro robot.urdf.xacro --out robot.urdf
 ```
 
-If you are starting from a repo or a XACRO entrypoint, begin with `inspect-repo` or `load-source`.
+If you are starting from a repository or a XACRO entrypoint, begin with `inspect-repo` or `load-source`.
 
 ## Robot Morphology Cards
 
 Use `morphology-card` when you want a compact research-facing summary of a robot's
 structure and inferred category tags.
 
-Repo examples:
+Repository examples:
 [research_mobile_manipulator_gripper.urdf](/home/am/dev/i-love-urdf/examples/morphology-card/research_mobile_manipulator_gripper.urdf)
 with
 [research_mobile_manipulator_gripper.card.json](/home/am/dev/i-love-urdf/examples/morphology-card/research_mobile_manipulator_gripper.card.json),
@@ -215,7 +219,7 @@ Example output:
 }
 ```
 
-This is meant to be:
+This output is designed to be:
 
 - deterministic where possible
 - explainable through explicit reasons
@@ -232,7 +236,7 @@ For pure/core usage, the guess is built from URDF geometry, link/joint structure
 wheel-axis votes, and PCA over sampled points. For local loaded sources in Node,
 `i-love-urdf/urdf-node` can augment that with real STL/OBJ/DAE AABB corners resolved from disk.
 
-Repo examples:
+Repository examples:
 [research_wheeled_z_up.urdf](/home/am/dev/i-love-urdf/examples/orientation-card/research_wheeled_z_up.urdf)
 with
 [research_wheeled_z_up.card.json](/home/am/dev/i-love-urdf/examples/orientation-card/research_wheeled_z_up.card.json),
@@ -272,11 +276,11 @@ Example output:
 }
 ```
 
-This layer is meant to be:
+This output is designed to be:
 
 - deterministic at the basis-selection level
 - explainable through spans, wheel/joint votes, and PCA cues
-- machine-readable for repair and downstream-prep pipelines
+- machine-readable for repair and downstream processing pipelines
 - versioned through stable `schema` and `schemaVersion` fields
 - explicit about evidence conflicts instead of hiding them
 
@@ -333,9 +337,9 @@ console.log(
 );
 ```
 
-## Core Today
+## Current Core Capabilities
 
-The industrial runtime-prep core that already exists in `i-love-urdf` is:
+Current core capabilities in `i-love-urdf` include:
 
 - `guessOrientation(...)` / `guessUrdfOrientation(...)`
 - `identifyRobotType(...)`
@@ -374,22 +378,22 @@ const axis = normalizeJointAxis("0.01 0.98 0", { snapToCanonical: true });
 const safeName = sanitizeNames("Left Arm.Link-1");
 ```
 
-`URDF -> USD` now exists as a first-pass USDA exporter:
+`URDF -> USD` is available as an initial USDA exporter with support for:
 
 - stage metadata: `upAxis`, `metersPerUnit`, `kilogramsPerUnit`, `PhysicsScene`
 - articulated link hierarchy with `PhysicsRigidBodyAPI`
 - revolute / prismatic / fixed joints
 - primitive visuals and collisions
 - inline STL mesh export
-- local-repo mesh resolution for `package://` and relative paths via `convertURDFPathToUSD(...)` / `convertLoadedSourceToUSD(...)`
+- local repository mesh resolution for `package://` and relative paths via `convertURDFPathToUSD(...)` / `convertLoadedSourceToUSD(...)`
 
-Current limits are explicit:
+Current limitations are explicit:
 
 - output is ASCII USDA, not binary USD
-- local mesh conversion is STL-first today
+- local mesh conversion currently prioritizes STL input
 - existing USD mesh assets can be referenced directly
 - OBJ / DAE / GLB are not converted to USD yet
-- the exporter is a strong first pass for USD-based prep, not a full scene-authoring pipeline
+- the exporter is suitable for USD-based preprocessing, not full scene authoring
 
 For browser bundlers, use the browser-safe entrypoint:
 
@@ -414,7 +418,7 @@ ilu setup-xacro-runtime
 ilu probe-xacro-runtime
 ```
 
-From a repo checkout, the equivalent setup is:
+From a repository checkout, the equivalent setup is:
 
 ```sh
 corepack pnpm setup:xacro
@@ -423,7 +427,7 @@ corepack pnpm ilu probe-xacro-runtime
 
 ## License
 
-Source-available, not open-source.
+Source-available; not open source.
 See [LICENSE](/home/am/dev/i-love-urdf/LICENSE).
 
 ## Attribution

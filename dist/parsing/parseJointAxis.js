@@ -1,27 +1,21 @@
 "use strict";
 /**
- * Parses axis information from URDF joints
+ * Parses axis information from URDF joints.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseJointAxesFromDocument = parseJointAxesFromDocument;
 exports.parseJointAxesFromURDF = parseJointAxesFromURDF;
-const xmlDom_1 = require("../xmlDom");
+const urdfParser_1 = require("./urdfParser");
 /**
  * Parse axis information from an already-parsed URDF document
  */
 function parseJointAxesFromDocument(xmlDoc) {
-    const parserError = xmlDoc.querySelector("parsererror");
-    if (parserError) {
-        const errorText = parserError.textContent || "Unknown XML parsing error";
-        console.error("URDF parsing error:", errorText);
+    const validation = (0, urdfParser_1.validateURDFDocument)(xmlDoc);
+    if (!validation.robot) {
+        console.error(validation.error);
         return {};
     }
-    const robot = xmlDoc.querySelector("robot");
-    if (!robot) {
-        console.error("No <robot> element found in URDF");
-        return {};
-    }
-    const joints = xmlDoc.querySelectorAll("joint");
+    const joints = (0, urdfParser_1.getDirectChildrenByTag)(validation.robot, "joint");
     const axes = {};
     joints.forEach((jointElement) => {
         const jointName = jointElement.getAttribute("name");
@@ -48,6 +42,9 @@ function parseJointAxesFromDocument(xmlDoc) {
  * Parse axis information from URDF content
  */
 function parseJointAxesFromURDF(urdfContent) {
-    const xmlDoc = (0, xmlDom_1.parseXml)(urdfContent);
-    return parseJointAxesFromDocument(xmlDoc);
+    const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
+    if (!parsed.isValid) {
+        return {};
+    }
+    return parseJointAxesFromDocument(parsed.document);
 }

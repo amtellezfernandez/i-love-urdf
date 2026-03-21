@@ -1,4 +1,4 @@
-import { analyzeUrdf } from "./analyzeUrdf";
+import { analyzeUrdfDocument, type UrdfAnalysis } from "./analyzeUrdf";
 import {
   resolveDirectionCueFromDirectionSamples,
   resolvePrincipalAxesFromDirectionSamples,
@@ -11,7 +11,11 @@ import {
   withOutputContract,
 } from "../contracts/outputContracts";
 import type { AxisSpec } from "../utils/rotateRobot";
-import { parseXml } from "../xmlDom";
+import {
+  getDirectChildrenByTag,
+  parseURDF,
+  validateURDFDocument,
+} from "../parsing/urdfParser";
 
 export type OrientationAxis = "x" | "y" | "z";
 
@@ -342,8 +346,8 @@ const isWheelLikeLinkData = (linkData: {
   });
 };
 
-const collectJointRecords = (xmlDoc: Document): JointRecord[] =>
-  Array.from(xmlDoc.querySelectorAll("joint")).flatMap((joint) => {
+const collectJointRecords = (robot: Element): JointRecord[] =>
+  getDirectChildrenByTag(robot, "joint").flatMap((joint) => {
     const name = joint.getAttribute("name");
     const parentLink = joint.querySelector("parent")?.getAttribute("link");
     const childLink = joint.querySelector("child")?.getAttribute("link");
@@ -373,14 +377,14 @@ const collectJointRecords = (xmlDoc: Document): JointRecord[] =>
   });
 
 const computeLinkWorldTransforms = (
-  xmlDoc: Document,
+  robot: Element,
   joints: JointRecord[]
 ): {
   linkTransforms: Map<string, Transform3>;
   jointWorldTransforms: Map<string, Transform3>;
   unresolvedJoints: string[];
 } => {
-  const linkNames = Array.from(xmlDoc.querySelectorAll("link"))
+  const linkNames = getDirectChildrenByTag(robot, "link")
     .map((link) => link.getAttribute("name"))
     .filter((value): value is string => Boolean(value));
 
@@ -449,7 +453,7 @@ const pushSamplePoint = (
 };
 
 const collectGeometrySamplePoints = (
-  analysis: ReturnType<typeof analyzeUrdf>,
+  analysis: UrdfAnalysis,
   linkTransforms: Map<string, Transform3>,
   jointWorldTransforms: Map<string, Transform3>
 ): { bounds: { min: Vec3; max: Vec3 }; rawPoints: Vec3[] } => {
@@ -615,11 +619,12 @@ export function guessUrdfOrientation(
 ): OrientationGuess {
   const targetUpAxis = options.targetUpAxis ?? "z";
   const targetForwardAxis = options.targetForwardAxis ?? "x";
-  const analysis = analyzeUrdf(urdfContent);
-  if (!analysis.isValid) {
+  const parsed = parseURDF(urdfContent);
+  const analysis = analyzeUrdfDocument(parsed.document);
+  if (!parsed.isValid || !analysis.isValid) {
     return buildOrientationGuess({
       isValid: false,
-      error: analysis.error ?? "Invalid URDF",
+      error: parsed.error ?? analysis.error ?? "Invalid URDF",
       robotName: analysis.robotName,
       likelyUpAxis: null,
       likelyUpDirection: null,
@@ -642,10 +647,36 @@ export function guessUrdfOrientation(
     });
   }
 
-  const xmlDoc = parseXml(urdfContent);
-  const joints = collectJointRecords(xmlDoc);
+  const validation = validateURDFDocument(parsed.document);
+  if (!validation.robot) {
+    return buildOrientationGuess({
+      isValid: false,
+      error: validation.error ?? "Invalid URDF",
+      robotName: analysis.robotName,
+      likelyUpAxis: null,
+      likelyUpDirection: null,
+      likelyForwardAxis: null,
+      likelyForwardDirection: null,
+      likelyLateralAxis: null,
+      likelyLateralDirection: null,
+      confidence: 0,
+      targetUpAxis,
+      targetForwardAxis,
+      suggestedRotate90: null,
+      suggestedApplyOrientation: null,
+      spans: zeroVotes(),
+      revoluteAxisVotes: zeroVotes(),
+      wheelAxisVotes: zeroVotes(),
+      wheelJointNames: [],
+      signals: [],
+      report: { evidence: [], conflicts: [] },
+      assumptions: [],
+    });
+  }
+
+  const joints = collectJointRecords(validation.robot);
   const { linkTransforms, jointWorldTransforms, unresolvedJoints } =
-    computeLinkWorldTransforms(xmlDoc, joints);
+    computeLinkWorldTransforms(validation.robot, joints);
   const { bounds: geometryBounds, rawPoints } = collectGeometrySamplePoints(
     analysis,
     linkTransforms,

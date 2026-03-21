@@ -78,7 +78,7 @@ if (!fs.existsSync(typescriptCliPath)) {
   process.exit(1);
 }
 
-// Keep repo-local CLI usage honest: rebuild whenever sources are newer than dist.
+// Rebuild for repository-local CLI usage whenever source files are newer than dist.
 if (needsBuild()) {
   execFileSync(process.execPath, [buildScriptPath], {
     cwd: root,

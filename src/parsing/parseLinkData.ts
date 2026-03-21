@@ -2,7 +2,7 @@
  * Parses all visual, collision, and inertial elements from a link
  */
 
-import { parseURDF } from "./urdfParser";
+import { getDirectChildrenByTag, parseURDF, validateURDFDocument } from "./urdfParser";
 
 interface GeometryData {
   type: "box" | "sphere" | "cylinder" | "mesh" | null;
@@ -246,17 +246,15 @@ export function parseLinkData(urdfContent: string, linkName: string): LinkData |
 
 export function parseLinkDataFromDocument(xmlDoc: Document, linkName: string): LinkData | null {
   try {
-    const parserError = xmlDoc.querySelector("parsererror");
-    if (parserError) {
+    const validation = validateURDFDocument(xmlDoc);
+    if (!validation.robot) {
       return null;
     }
 
-    const robot = xmlDoc.querySelector("robot");
-    if (!robot) {
-      return null;
-    }
-
-    const link = xmlDoc.querySelector(`link[name="${linkName}"]`);
+    const link =
+      getDirectChildrenByTag(validation.robot, "link").find(
+        (linkElement) => linkElement.getAttribute("name") === linkName
+      ) ?? null;
     if (!link) {
       return null;
     }
@@ -274,4 +272,3 @@ export function parseLinkDataFromDocument(xmlDoc: Document, linkName: string): L
     return null;
   }
 }
-

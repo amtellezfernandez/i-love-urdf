@@ -1,7 +1,7 @@
 /**
  * URDF Joint Limits Parser
  *
- * Parses joint types and limits from URDF XML
+ * Parses joint types and limits from URDF XML.
  */
 export interface JointLimitInfo {
     type: string;

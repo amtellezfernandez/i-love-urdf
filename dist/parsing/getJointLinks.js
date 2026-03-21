@@ -2,25 +2,20 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getJointLinks = getJointLinks;
 /**
- * Gets the parent and child link names for a given joint name from URDF content
+ * Gets the parent and child link names for a given joint name from URDF content.
  */
-const xmlDom_1 = require("../xmlDom");
+const urdfParser_1 = require("./urdfParser");
 function getJointLinks(urdfContent, jointName) {
+    const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
+    if (!parsed.isValid) {
+        return { parentLink: null, childLink: null };
+    }
     try {
-        const xmlDoc = (0, xmlDom_1.parseXml)(urdfContent);
-        const parserError = xmlDoc.querySelector("parsererror");
-        if (parserError) {
-            const errorText = parserError.textContent || "Unknown XML parsing error";
-            console.error("URDF parsing error:", errorText);
-            return { parentLink: null, childLink: null };
-        }
-        // Validate robot element exists
-        const robot = xmlDoc.querySelector("robot");
+        const robot = parsed.document.querySelector("robot");
         if (!robot) {
-            console.error("No <robot> element found in URDF");
             return { parentLink: null, childLink: null };
         }
-        const joint = xmlDoc.querySelector(`joint[name="${jointName}"]`);
+        const joint = (0, urdfParser_1.getDirectChildrenByTag)(robot, "joint").find((jointElement) => jointElement.getAttribute("name") === jointName) ?? null;
         if (!joint) {
             return { parentLink: null, childLink: null };
         }
