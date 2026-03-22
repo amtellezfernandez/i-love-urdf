@@ -1848,6 +1848,88 @@ const summarizeAnalysisPreview = (
   };
 };
 
+const summarizeValidationResult = (
+  payload: {
+    isValid: boolean;
+    issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
+  },
+  urdfPath: string
+): AutoPreviewPanel => {
+  const lines = [`source ${quoteForPreview(urdfPath)}`];
+  const errorCount = payload.issues.filter((issue) => issue.level === "error").length;
+  const warningCount = payload.issues.filter((issue) => issue.level === "warning").length;
+
+  if (payload.isValid && payload.issues.length === 0) {
+    lines.push("validation passed");
+  } else if (payload.isValid) {
+    lines.push(`validation passed with ${formatCount(warningCount, "warning")}`);
+  } else {
+    lines.push(`validation found ${formatCount(errorCount, "error")} and ${formatCount(warningCount, "warning")}`);
+  }
+
+  for (const issue of payload.issues.slice(0, 2)) {
+    const prefix = issue.context ? `${issue.context}: ` : "";
+    lines.push(`${issue.level} ${prefix}${issue.message}`);
+  }
+  if (payload.issues.length > 2) {
+    lines.push(`+${payload.issues.length - 2} more issues`);
+  }
+
+  lines.push(payload.isValid ? "next /analyze or /convert if you want more" : "next /fix if you want changes");
+
+  return {
+    title: "validation",
+    kind: payload.isValid && payload.issues.length === 0 ? "success" : "info",
+    lines,
+  };
+};
+
+const summarizeOrientationResult = (
+  payload: {
+    isValid: boolean;
+    likelyUpAxis?: string | null;
+    likelyForwardAxis?: string | null;
+    confidence?: number;
+    signals?: Array<{ message?: string }>;
+    report?: { conflicts?: string[] };
+  },
+  urdfPath: string
+): AutoPreviewPanel => {
+  const lines = [`source ${quoteForPreview(urdfPath)}`];
+
+  if (!payload.isValid || !payload.likelyUpAxis || !payload.likelyForwardAxis) {
+    lines.push("could not infer orientation confidently");
+    return {
+      title: "orientation",
+      kind: "info",
+      lines,
+    };
+  }
+
+  lines.push(`orientation likely ${payload.likelyUpAxis}-up / ${payload.likelyForwardAxis}-forward`);
+  if (typeof payload.confidence === "number" && Number.isFinite(payload.confidence)) {
+    lines.push(`confidence ${Math.round(payload.confidence * 100)}%`);
+  }
+
+  const topSignal = payload.signals?.find((signal) => typeof signal.message === "string" && signal.message.trim().length > 0);
+  if (topSignal?.message) {
+    lines.push(topSignal.message.trim());
+  }
+
+  const topConflict = payload.report?.conflicts?.[0];
+  if (topConflict) {
+    lines.push(`note ${topConflict}`);
+  }
+
+  lines.push("next /fix if it looks wrong");
+
+  return {
+    title: "orientation",
+    kind: (payload.confidence ?? 0) >= 0.8 ? "success" : "info",
+    lines,
+  };
+};
+
 const resolveShellGitHubAccessToken = (session?: ShellSession): string | undefined => {
   const sessionToken = session?.args.get("token");
   if (typeof sessionToken === "string" && sessionToken.trim().length > 0) {
@@ -2526,6 +2608,71 @@ const executeSessionCommand = (
   };
 };
 
+const getShellExecutionSuccessPanel = (
+  session: ShellSession,
+  execution: ReturnType<typeof executeSessionCommand>
+): AutoPreviewPanel => {
+  if (execution.status !== 0) {
+    return null;
+  }
+
+  switch (session.command) {
+    case "inspect-repo": {
+      const payload = parseExecutionJson<RepositoryPreviewPayload>(execution);
+      return payload ? summarizeRepositoryPreview(session, payload) : null;
+    }
+    case "health-check": {
+      const payload = parseExecutionJson<{
+        ok: boolean;
+        summary: { errors: number; warnings: number; infos: number };
+        findings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }>;
+        orientationGuess?: {
+          likelyUpAxis?: string | null;
+          likelyForwardAxis?: string | null;
+        };
+      }>(execution);
+      const urdfPath = session.args.get("urdf");
+      return payload && typeof urdfPath === "string" ? summarizeHealthPreview(payload, urdfPath) : null;
+    }
+    case "analyze": {
+      const payload = parseExecutionJson<{
+        isValid: boolean;
+        error?: string;
+        robotName: string | null;
+        linkNames: string[];
+        rootLinks: string[];
+        meshReferences: string[];
+        sensors?: unknown[];
+        jointHierarchy?: { orderedJoints?: unknown[] };
+      }>(execution);
+      const urdfPath = session.args.get("urdf");
+      return payload && typeof urdfPath === "string" ? summarizeAnalysisPreview(payload, urdfPath) : null;
+    }
+    case "validate": {
+      const payload = parseExecutionJson<{
+        isValid: boolean;
+        issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
+      }>(execution);
+      const urdfPath = session.args.get("urdf");
+      return payload && typeof urdfPath === "string" ? summarizeValidationResult(payload, urdfPath) : null;
+    }
+    case "guess-orientation": {
+      const payload = parseExecutionJson<{
+        isValid: boolean;
+        likelyUpAxis?: string | null;
+        likelyForwardAxis?: string | null;
+        confidence?: number;
+        signals?: Array<{ message?: string }>;
+        report?: { conflicts?: string[] };
+      }>(execution);
+      const urdfPath = session.args.get("urdf");
+      return payload && typeof urdfPath === "string" ? summarizeOrientationResult(payload, urdfPath) : null;
+    }
+    default:
+      return null;
+  }
+};
+
 const tryCreateLoadedRootQuickSession = (
   state: ShellState,
   command: SupportedCommandName
@@ -2568,12 +2715,27 @@ const getShellExecutionFailurePanel = (
 
 const printSessionCommandExecution = (
   execution: ReturnType<typeof executeSessionCommand>,
-  command: SupportedCommandName
+  session: ShellSession
 ) => {
-  const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, command) : null;
+  const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
   if (compactFailurePanel) {
-    writeFeedback(buildShellFailureNotice(compactFailurePanel, `[${command}] exited with status ${execution.status}`));
+    writeFeedback(buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`));
     printOutputPanel(compactFailurePanel);
+    return;
+  }
+
+  const successPanel = getShellExecutionSuccessPanel(session, execution);
+  if (successPanel) {
+    printOutputPanel(successPanel);
+    if (execution.followUp) {
+      for (const line of execution.followUp.split("\n")) {
+        if (line.startsWith("[next]")) {
+          process.stdout.write(`${SHELL_THEME.accent(line)}\n`);
+        } else {
+          process.stdout.write(`${SHELL_THEME.muted(line)}\n`);
+        }
+      }
+    }
     return;
   }
 
@@ -2585,7 +2747,7 @@ const printSessionCommandExecution = (
     process.stderr.write(execution.stderr);
   }
   if (execution.status !== 0) {
-    process.stderr.write(`[${command}] exited with status ${execution.status}\n`);
+    process.stderr.write(`[${session.command}] exited with status ${execution.status}\n`);
     return;
   }
   if (execution.followUp) {
@@ -3114,7 +3276,7 @@ const handleRootSlashCommand = (
   if (quickSession) {
     clearCandidatePicker(state);
     clearXacroRetry(state);
-    printSessionCommandExecution(executeSessionCommand(state, quickSession), quickSession.command);
+    printSessionCommandExecution(executeSessionCommand(state, quickSession), quickSession);
     return;
   }
 
@@ -3265,7 +3427,7 @@ const handleSessionSlashCommand = (
       return;
     }
 
-    printSessionCommandExecution(executeSessionCommand(state, session), session.command);
+    printSessionCommandExecution(executeSessionCommand(state, session), session);
     return;
   }
 
@@ -4418,11 +4580,14 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
           `[${quickSession.command}] exited with status ${execution.status}`
         );
       } else {
-        view.output = createOutputPanel(
-          execution.status === 0 ? "result" : "error",
-          buildExecutionPanelText(execution, quickSession.command),
-          execution.status === 0 ? "success" : "error"
-        );
+        const successPanel = getShellExecutionSuccessPanel(quickSession, execution);
+        view.output =
+          successPanel ??
+          createOutputPanel(
+            execution.status === 0 ? "result" : "error",
+            buildExecutionPanelText(execution, quickSession.command),
+            execution.status === 0 ? "success" : "error"
+          );
         view.notice =
           execution.status === 0
             ? { kind: "success", text: "run complete" }
@@ -4595,11 +4760,14 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return true;
       }
 
-      view.output = createOutputPanel(
-        execution.status === 0 ? "result" : "error",
-        buildExecutionPanelText(execution, session.command),
-        execution.status === 0 ? "success" : "error"
-      );
+      const successPanel = getShellExecutionSuccessPanel(session, execution);
+      view.output =
+        successPanel ??
+        createOutputPanel(
+          execution.status === 0 ? "result" : "error",
+          buildExecutionPanelText(execution, session.command),
+          execution.status === 0 ? "success" : "error"
+        );
       view.notice =
         execution.status === 0
           ? { kind: "success", text: "run complete" }

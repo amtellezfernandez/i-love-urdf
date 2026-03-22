@@ -1353,11 +1353,39 @@ const loadedAnalyzeTranscript = execFileSync(process.execPath, [cliPath, "shell"
   input: `${escapedDroppedUrdfPath}\n/analyze\n/exit\n`,
 });
 if (
-  !loadedAnalyzeTranscript.includes("ilu analyze --urdf") ||
+  !loadedAnalyzeTranscript.includes("source") ||
+  !loadedAnalyzeTranscript.includes("robot drop_robot") ||
   !loadedAnalyzeTranscript.includes(droppedUrdfPath) ||
-  loadedAnalyzeTranscript.includes("ready /run")
+  loadedAnalyzeTranscript.includes("ready /run") ||
+  loadedAnalyzeTranscript.includes("\"jointByChildLink\"")
 ) {
   throw new Error("ilu shell loaded analyze shortcut smoke test failed");
+}
+
+const loadedValidateTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedUrdfPath}\n/validate\n/exit\n`,
+});
+if (
+  !loadedValidateTranscript.includes("validation passed") ||
+  !loadedValidateTranscript.includes(droppedUrdfPath) ||
+  loadedValidateTranscript.includes("\"issues\"")
+) {
+  throw new Error("ilu shell loaded validate shortcut smoke test failed");
+}
+
+const loadedOrientationTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedUrdfPath}\n/guess-orientation\n/exit\n`,
+});
+if (
+  !loadedOrientationTranscript.includes("orientation likely") ||
+  !loadedOrientationTranscript.includes(droppedUrdfPath) ||
+  loadedOrientationTranscript.includes("\"signals\"")
+) {
+  throw new Error("ilu shell loaded orientation shortcut smoke test failed");
 }
 
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
