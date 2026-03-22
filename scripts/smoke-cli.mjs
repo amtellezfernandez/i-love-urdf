@@ -1278,6 +1278,19 @@ const shellDropDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-drop-"));
 const droppedUrdfPath = path.join(shellDropDir, "local robot.urdf");
 fs.writeFileSync(droppedUrdfPath, "<robot name=\"drop_robot\"><link name=\"base\"/></robot>", "utf8");
 const escapedDroppedUrdfPath = droppedUrdfPath.replaceAll(" ", "\\ ");
+const multiCandidateDir = path.join(shellDropDir, "multi-candidate");
+fs.mkdirSync(path.join(multiCandidateDir, "robots"), { recursive: true });
+fs.writeFileSync(
+  path.join(multiCandidateDir, "robots", "a.urdf"),
+  "<robot name=\"alpha_robot\"><link name=\"base\"/></robot>",
+  "utf8"
+);
+fs.writeFileSync(
+  path.join(multiCandidateDir, "robots", "b.urdf"),
+  "<robot name=\"beta_robot\"><link name=\"base\"/></robot>",
+  "utf8"
+);
+const escapedMultiCandidateDir = multiCandidateDir.replaceAll(" ", "\\ ");
 const droppedZipPath = path.join(shellDropDir, "robot bundle.zip");
 const droppedZip = new AdmZip();
 droppedZip.addLocalFile(droppedUrdfPath, "robot_bundle/urdf", "robot.urdf");
@@ -1343,6 +1356,20 @@ if (
   !checkTaskTranscript.includes(droppedUrdfPath)
 ) {
   throw new Error("ilu shell direct-check input smoke test failed");
+}
+
+const multiCandidateTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `/open\n/local\n${escapedMultiCandidateDir}\n2\n/exit\n`,
+});
+if (
+  !multiCandidateTranscript.includes("choose a candidate") ||
+  !multiCandidateTranscript.includes("press Enter for the highlighted match") ||
+  !multiCandidateTranscript.includes("loaded robots/b.urdf") ||
+  !multiCandidateTranscript.includes("selected robots/b.urdf from 2 candidates")
+) {
+  throw new Error("ilu shell multi-candidate picker smoke test failed");
 }
 
 const xacroShellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {

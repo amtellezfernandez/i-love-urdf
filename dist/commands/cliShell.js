@@ -287,6 +287,8 @@ const ROOT_GUIDANCE = "paste owner/repo or drop a local folder/file. type / for 
 let cachedGitHubAuthState;
 const formatRootPrompt = (state) => state?.rootTask ? `/${state.rootTask}> ` : "/> ";
 const formatSessionPrompt = (session) => session.pending ? `/${session.pending.slashName}> ` : `/${session.label}> `;
+const formatCandidatePrompt = () => "pick> ";
+const formatShellPrompt = (state) => state.candidatePicker ? formatCandidatePrompt() : state.session ? formatSessionPrompt(state.session) : formatRootPrompt(state);
 const quoteForPreview = (value) => (/\s/.test(value) ? JSON.stringify(value) : value);
 const buildCommandPreview = (command, args) => {
     const serializedArgs = Array.from(args.entries()).flatMap(([key, value]) => {
@@ -348,6 +350,31 @@ const printOutputPanel = (panel) => {
             : SHELL_THEME.muted;
     for (const line of panel.lines) {
         process.stdout.write(`  ${render(line)}\n`);
+    }
+};
+const clearCandidatePicker = (state) => {
+    state.candidatePicker = null;
+};
+const getCandidateDetails = (candidate) => {
+    const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
+    if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
+        details.push(`${candidate.unresolvedMeshReferenceCount} missing mesh refs`);
+    }
+    if ((candidate.xacroArgs?.length ?? 0) > 0) {
+        details.push(`${candidate.xacroArgs.length} xacro args`);
+    }
+    return details;
+};
+const printCandidatePicker = (picker) => {
+    printSectionTitle("choose");
+    process.stdout.write(`  ${SHELL_THEME.muted("type a number, press Enter for the highlighted match, or paste a repo entry path")}\n`);
+    for (const [index, candidate] of picker.candidates.slice(0, 9).entries()) {
+        const prefix = index === picker.selectedIndex ? SHELL_THEME.accent(">") : SHELL_THEME.muted(`${index + 1}.`);
+        const details = getCandidateDetails(candidate);
+        process.stdout.write(`  ${prefix} ${SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${SHELL_THEME.muted(details.join("  "))}` : ""}\n`);
+    }
+    if (picker.candidates.length > 9) {
+        process.stdout.write(`  ${SHELL_THEME.muted(`+${picker.candidates.length - 9} more`)}\n`);
     }
 };
 const hasGitHubAuthConfigured = () => {
@@ -1047,13 +1074,16 @@ const buildPreviewErrorPanel = (title, execution) => {
         lines: errorLines.length > 0 ? errorLines.slice(0, 6) : [`preview failed with status ${execution.status}`],
     };
 };
-const summarizeRepositoryPreview = (session, payload) => {
-    const sourceLabel = payload.repositoryUrl ??
+const summarizeRepositoryPreview = (session, payload, options = {}) => {
+    const sourceLabel = options.sourceLabelOverride ??
+        payload.repositoryUrl ??
         (payload.owner && payload.repo ? `${payload.owner}/${payload.repo}` : payload.inspectedPath ?? "source");
     const lines = [`source ${sourceLabel}`];
     if (payload.candidateCount === 0) {
         lines.push("no URDF or XACRO entrypoints found");
-        lines.push(session.label === "open" ? "use /entry if you already know the target path" : "use /open and /entry if you want to force a target path");
+        lines.push(session.label === "open"
+            ? "paste the repo entry path if you already know it"
+            : "use /open if you want to load a specific target path");
         return {
             title: "preview",
             kind: "info",
@@ -1065,20 +1095,16 @@ const summarizeRepositoryPreview = (session, payload) => {
         lines.push(`best match ${payload.primaryCandidatePath}`);
     }
     for (const [index, candidate] of payload.candidates.slice(0, 3).entries()) {
-        const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
-        if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
-            details.push(`${candidate.unresolvedMeshReferenceCount} missing mesh refs`);
-        }
-        if ((candidate.xacroArgs?.length ?? 0) > 0) {
-            details.push(`${candidate.xacroArgs?.length} xacro args`);
-        }
+        const details = getCandidateDetails(candidate);
         lines.push(`${index + 1}. ${candidate.path}${details.length > 0 ? `  ${details.join("  ")}` : ""}`);
     }
     if (payload.candidateCount > 3) {
         lines.push(`+${payload.candidateCount - 3} more`);
     }
     lines.push(session.label === "open"
-        ? "next /run to load the best match or /entry to override"
+        ? payload.candidateCount === 1
+            ? "press Enter to load the match"
+            : "select a candidate below and press Enter to load it"
         : "next /open to load it, or /path to narrow the repo");
     return {
         title: "preview",
@@ -1175,6 +1201,129 @@ const resolveLoadableSourcePath = (sourcePath) => {
         extractedArchivePath: localPath.inputPath,
     };
 };
+const cloneArgsMap = (args) => new Map(args.entries());
+const prepareLoadSourceArgs = (session) => {
+    const execArgs = cloneArgsMap(session.args);
+    let extractedArchivePath;
+    const sourcePath = execArgs.get("path");
+    if (typeof sourcePath === "string" && sourcePath.trim().length > 0) {
+        try {
+            const resolved = resolveLoadableSourcePath(sourcePath);
+            execArgs.set("path", resolved.workingPath);
+            extractedArchivePath = resolved.extractedArchivePath;
+        }
+        catch (error) {
+            return {
+                error: {
+                    panel: {
+                        title: "error",
+                        kind: "error",
+                        lines: [error instanceof Error ? error.message : String(error)],
+                    },
+                    notice: { kind: "error", text: "could not open archive" },
+                    clearSession: false,
+                },
+            };
+        }
+    }
+    if (!execArgs.has("token")) {
+        const token = resolveShellGitHubAccessToken(session);
+        if (token) {
+            execArgs.set("token", token);
+        }
+    }
+    return { execArgs, extractedArchivePath };
+};
+const inspectRepositoryCandidatesForLoad = (session, execArgs, options = {}) => {
+    const previewArgs = new Map();
+    const github = execArgs.get("github");
+    const sourcePath = execArgs.get("path");
+    if (typeof github === "string" && github.trim().length > 0) {
+        previewArgs.set("github", github);
+    }
+    else if (typeof sourcePath === "string" && sourcePath.trim().length > 0) {
+        const localPath = detectLocalPathDrop(sourcePath);
+        if (!localPath?.isDirectory) {
+            return null;
+        }
+        previewArgs.set("local", sourcePath);
+    }
+    else {
+        return null;
+    }
+    const execution = executeCliCommand("inspect-repo", previewArgs);
+    const payload = parseExecutionJson(execution);
+    if (!payload) {
+        return {
+            payload: {
+                candidateCount: 0,
+                primaryCandidatePath: null,
+                candidates: [],
+            },
+            panel: buildPreviewErrorPanel("preview", execution),
+        };
+    }
+    return {
+        payload,
+        panel: summarizeRepositoryPreview(session, payload, {
+            sourceLabelOverride: options.extractedArchivePath
+                ? quoteForPreview(options.extractedArchivePath)
+                : undefined,
+        }),
+    };
+};
+const executeLoadSourceChecks = (state, execArgs, options = {}) => {
+    const loadArgs = cloneArgsMap(execArgs);
+    const outputPath = createTempUrdfSnapshotPath(String(loadArgs.get("entry") || loadArgs.get("path") || loadArgs.get("github") || "robot.urdf"));
+    loadArgs.set("out", outputPath);
+    const loadExecution = executeCliCommand("load-source", loadArgs);
+    const loadPayload = parseExecutionJson(loadExecution);
+    if (!loadPayload || !loadPayload.outPath) {
+        return {
+            panel: buildPreviewErrorPanel("error", loadExecution),
+            notice: { kind: "error", text: "could not load source" },
+            clearSession: false,
+        };
+    }
+    state.lastUrdfPath = loadPayload.outPath;
+    const validationExecution = executeCliCommand("validate", new Map([["urdf", loadPayload.outPath]]));
+    const healthExecution = executeCliCommand("health-check", new Map([["urdf", loadPayload.outPath]]));
+    const validationPayload = parseExecutionJson(validationExecution);
+    const healthPayload = parseExecutionJson(healthExecution);
+    if (!validationPayload || !healthPayload) {
+        return {
+            panel: buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution),
+            notice: { kind: "error", text: "validation failed to run" },
+            clearSession: false,
+        };
+    }
+    const panel = summarizeAutoLoadChecks(loadPayload, validationPayload, healthPayload, {
+        extractedArchivePath: options.extractedArchivePath,
+        requestedEntryPath: options.requestedEntryPath,
+    });
+    return {
+        panel,
+        notice: {
+            kind: panel.kind === "success" ? "success" : "info",
+            text: panel.kind === "success"
+                ? "validation and health check passed"
+                : "source loaded. review the checks",
+        },
+        clearSession: true,
+    };
+};
+const runSelectedCandidatePicker = (state, selectionPath) => {
+    const picker = state.candidatePicker;
+    if (!picker) {
+        return null;
+    }
+    const execArgs = cloneArgsMap(picker.loadArgs);
+    execArgs.set("entry", selectionPath);
+    return executeLoadSourceChecks(state, execArgs, {
+        extractedArchivePath: picker.extractedArchivePath,
+        requestedEntryPath: selectionPath,
+    });
+};
 const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) => {
     const lines = [];
     if (options.extractedArchivePath) {
@@ -1188,7 +1337,9 @@ const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) =
     }
     lines.push(`loaded ${loadResult.entryPath}`);
     if ((loadResult.candidateCount ?? 0) > 1) {
-        lines.push(`picked best match from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`);
+        lines.push(options.requestedEntryPath === loadResult.entryPath
+            ? `selected ${loadResult.entryPath} from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`
+            : `picked best match from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`);
     }
     lines.push(validation.isValid
         ? "validation passed"
@@ -1256,75 +1407,62 @@ const runDirectInputAutomation = (state, session, changedKey) => {
         if (!requirementStatus.ready) {
             return null;
         }
-        const execArgs = new Map(session.args);
-        let extractedArchivePath;
-        const sourcePath = execArgs.get("path");
-        if (typeof sourcePath === "string" && sourcePath.trim().length > 0) {
-            try {
-                const resolved = resolveLoadableSourcePath(sourcePath);
-                execArgs.set("path", resolved.workingPath);
-                extractedArchivePath = resolved.extractedArchivePath;
+        const prepared = prepareLoadSourceArgs(session);
+        if ("error" in prepared) {
+            return prepared.error;
+        }
+        const { execArgs, extractedArchivePath } = prepared;
+        const hasExplicitEntry = typeof execArgs.get("entry") === "string" && String(execArgs.get("entry")).trim().length > 0;
+        if (!hasExplicitEntry && (changedKey === "github" || changedKey === "path")) {
+            const preview = inspectRepositoryCandidatesForLoad(session, execArgs, {
+                extractedArchivePath,
+            });
+            if (preview) {
+                if (preview.panel.kind === "error") {
+                    clearCandidatePicker(state);
+                    return {
+                        panel: preview.panel,
+                        notice: { kind: "error", text: "preview failed" },
+                        clearSession: false,
+                    };
+                }
+                if (preview.payload.candidateCount === 0) {
+                    clearCandidatePicker(state);
+                    return {
+                        panel: preview.panel,
+                        notice: { kind: "info", text: "preview ready" },
+                        clearSession: false,
+                    };
+                }
+                if (preview.payload.candidateCount > 1) {
+                    state.candidatePicker = {
+                        candidates: preview.payload.candidates,
+                        selectedIndex: 0,
+                        loadArgs: cloneArgsMap(execArgs),
+                        extractedArchivePath,
+                    };
+                    return {
+                        panel: preview.panel,
+                        notice: { kind: "info", text: "choose a candidate. arrows move, enter loads" },
+                        clearSession: false,
+                    };
+                }
+                if (preview.payload.primaryCandidatePath) {
+                    execArgs.set("entry", preview.payload.primaryCandidatePath);
+                }
             }
-            catch (error) {
-                return {
-                    panel: {
-                        title: "error",
-                        kind: "error",
-                        lines: [error instanceof Error ? error.message : String(error)],
-                    },
-                    notice: { kind: "error", text: "could not open archive" },
-                    clearSession: false,
-                };
+            else {
+                clearCandidatePicker(state);
             }
         }
-        if (!execArgs.has("token")) {
-            const token = resolveShellGitHubAccessToken(session);
-            if (token) {
-                execArgs.set("token", token);
-            }
-        }
-        const outputPath = createTempUrdfSnapshotPath(String(execArgs.get("entry") || execArgs.get("path") || execArgs.get("github") || "robot.urdf"));
-        execArgs.set("out", outputPath);
-        const loadExecution = executeCliCommand("load-source", execArgs);
-        const loadPayload = parseExecutionJson(loadExecution);
-        if (!loadPayload || !loadPayload.outPath) {
-            const fallbackPanel = buildAutoPreviewPanel(state, session, changedKey);
-            return {
-                panel: fallbackPanel ?? buildPreviewErrorPanel("error", loadExecution),
-                notice: {
-                    kind: fallbackPanel ? "info" : "error",
-                    text: fallbackPanel ? "preview ready" : "could not load source yet",
-                },
-                clearSession: false,
-            };
-        }
-        state.lastUrdfPath = loadPayload.outPath;
-        const validationExecution = executeCliCommand("validate", new Map([["urdf", loadPayload.outPath]]));
-        const healthExecution = executeCliCommand("health-check", new Map([["urdf", loadPayload.outPath]]));
-        const validationPayload = parseExecutionJson(validationExecution);
-        const healthPayload = parseExecutionJson(healthExecution);
-        if (!validationPayload || !healthPayload) {
-            return {
-                panel: buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution),
-                notice: { kind: "error", text: "validation failed to run" },
-                clearSession: false,
-            };
-        }
-        const panel = summarizeAutoLoadChecks(loadPayload, validationPayload, healthPayload, {
+        clearCandidatePicker(state);
+        return executeLoadSourceChecks(state, execArgs, {
             extractedArchivePath,
+            requestedEntryPath: typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
         });
-        return {
-            panel,
-            notice: {
-                kind: panel.kind === "success" ? "success" : "info",
-                text: panel.kind === "success"
-                    ? "validation and health check passed"
-                    : "source loaded. review the checks",
-            },
-            clearSession: true,
-        };
     }
     if (session.command === "health-check" && changedKey === "urdf") {
+        clearCandidatePicker(state);
         const urdfPath = session.args.get("urdf");
         if (typeof urdfPath !== "string" || urdfPath.trim().length === 0) {
             return null;
@@ -1355,7 +1493,21 @@ const runDirectInputAutomation = (state, session, changedKey) => {
     }
     return null;
 };
+const applyValueChangeEffects = (state, session, changedKey) => {
+    const automation = runDirectInputAutomation(state, session, changedKey);
+    if (automation) {
+        return {
+            automation,
+            preview: automation.panel,
+        };
+    }
+    return {
+        automation: null,
+        preview: buildAutoPreviewPanel(state, session, changedKey),
+    };
+};
 const buildAutoPreviewPanel = (state, session, changedKey) => {
+    clearCandidatePicker(state);
     let previewCommand = null;
     const previewArgs = new Map();
     if (session.command === "load-source" && (changedKey === "github" || changedKey === "path")) {
@@ -1818,6 +1970,9 @@ const shouldTreatAsSlashInput = (rawValue, state) => {
             return true;
         }
     }
+    if (looksLikeFilesystemSeed(trimmed)) {
+        return false;
+    }
     if (detectLocalPathDrop(trimmed)) {
         return false;
     }
@@ -1828,6 +1983,7 @@ const shouldTreatAsSlashInput = (rawValue, state) => {
 };
 const startRootTaskAction = (task, action, state, feedback) => {
     state.rootTask = task;
+    clearCandidatePicker(state);
     state.session = createSession(action.command, state, action.sessionLabel, feedback);
     if (state.session) {
         openPendingForSession(state.session, action.openPending);
@@ -1859,6 +2015,7 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         return;
     }
     if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
+        clearCandidatePicker(state);
         state.rootTask = slashCommand;
         printRootTaskOptions(state.rootTask);
         return;
@@ -1869,6 +2026,7 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         return;
     }
     state.rootTask = null;
+    clearCandidatePicker(state);
     const feedback = [];
     state.session = createSession(slashCommand, state, slashCommand, feedback);
     flushFeedback(feedback);
@@ -1885,6 +2043,7 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
         return;
     }
     if (slashCommand === "back") {
+        clearCandidatePicker(state);
         state.rootTask = null;
         process.stdout.write(`${SHELL_THEME.muted("back to tasks")}\n`);
         return;
@@ -1910,6 +2069,7 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
         return;
     }
     if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
+        clearCandidatePicker(state);
         state.rootTask = slashCommand;
         printRootTaskOptions(state.rootTask);
         return;
@@ -1934,6 +2094,7 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
     }
     const feedback = [];
     state.rootTask = null;
+    clearCandidatePicker(state);
     state.session = createSession(slashCommand, state, slashCommand, feedback);
     flushFeedback(feedback);
     printSessionOptions(state.session);
@@ -1948,12 +2109,14 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         return;
     }
     if (slashCommand === "back") {
+        clearCandidatePicker(state);
         state.session = null;
         process.stdout.write(`${SHELL_THEME.muted(state.rootTask ? `back to /${state.rootTask}` : "back to tasks")}\n`);
         return;
     }
     if (slashCommand === "reset") {
         const feedback = [];
+        clearCandidatePicker(state);
         state.session = createSession(session.command, state, session.label, feedback);
         flushFeedback(feedback);
         printSessionOptions(state.session);
@@ -1964,6 +2127,7 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         return;
     }
     if (slashCommand === "run") {
+        clearCandidatePicker(state);
         const requirementStatus = getRequirementStatus(session);
         if (!requirementStatus.ready) {
             process.stderr.write(`${SHELL_THEME.warning("[missing]")} ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
@@ -1994,6 +2158,7 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     }
     if (!target.option.valueHint) {
         const feedback = [];
+        clearCandidatePicker(state);
         toggleSessionFlag(session, target.key, feedback);
         flushFeedback(feedback);
         printSessionStatus(session);
@@ -2004,7 +2169,30 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         if (setSessionValue(session, target.key, inlineValue, feedback)) {
             session.pending = null;
             flushFeedback(feedback);
+            const { automation, preview } = applyValueChangeEffects(state, session, target.key);
+            if (automation) {
+                if (automation.notice) {
+                    writeFeedback(automation.notice);
+                }
+                printOutputPanel(automation.panel);
+                if (state.candidatePicker) {
+                    printCandidatePicker(state.candidatePicker);
+                }
+                if (automation.clearSession) {
+                    clearCandidatePicker(state);
+                    state.session = null;
+                    state.rootTask = null;
+                }
+                else if (state.session && !state.candidatePicker) {
+                    printSessionStatus(state.session);
+                }
+                return;
+            }
             printSessionStatus(session);
+            printOutputPanel(preview);
+            if (state.candidatePicker) {
+                printCandidatePicker(state.candidatePicker);
+            }
             return;
         }
         flushFeedback(feedback);
@@ -2020,9 +2208,33 @@ const handlePendingValue = (input, state) => {
     }
     const feedback = [];
     if (setSessionValue(session, session.pending.key, input, feedback)) {
+        const changedKey = session.pending.key;
         session.pending = null;
         flushFeedback(feedback);
+        const { automation, preview } = applyValueChangeEffects(state, session, changedKey);
+        if (automation) {
+            if (automation.notice) {
+                writeFeedback(automation.notice);
+            }
+            printOutputPanel(automation.panel);
+            if (state.candidatePicker) {
+                printCandidatePicker(state.candidatePicker);
+            }
+            if (automation.clearSession) {
+                clearCandidatePicker(state);
+                state.session = null;
+                state.rootTask = null;
+            }
+            else if (state.session && !state.candidatePicker) {
+                printSessionStatus(state.session);
+            }
+            return;
+        }
         printSessionStatus(session);
+        printOutputPanel(preview);
+        if (state.candidatePicker) {
+            printCandidatePicker(state.candidatePicker);
+        }
         return;
     }
     flushFeedback(feedback);
@@ -2056,6 +2268,25 @@ const applyFreeformInputToRootState = (state, rawValue, feedback) => {
         session: state.session,
         key: plan.key,
     };
+};
+const resolveCandidateSelectionInput = (state, rawValue) => {
+    const picker = state.candidatePicker;
+    if (!picker) {
+        return null;
+    }
+    const trimmed = rawValue.trim();
+    if (trimmed.length === 0) {
+        return picker.candidates[clamp(picker.selectedIndex, 0, picker.candidates.length - 1)]?.path ?? null;
+    }
+    if (/^\d+$/.test(trimmed)) {
+        const index = Number(trimmed) - 1;
+        if (index >= 0 && index < picker.candidates.length) {
+            picker.selectedIndex = index;
+            return picker.candidates[index]?.path ?? null;
+        }
+        return null;
+    }
+    return normalizeShellInput(rawValue);
 };
 const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
     ...entry,
@@ -2249,6 +2480,9 @@ const renderMenuEntry = (entry, selected, width) => {
     return selected ? SHELL_THEME.selected(line) : `${SHELL_THEME.command(left)}${SHELL_THEME.muted(`${summary} ${badge}`)}`;
 };
 const getPromptPlaceholder = (state) => {
+    if (state.candidatePicker) {
+        return "arrows choose a match, Enter loads it";
+    }
     if (state.session?.pending) {
         return state.session.pending.examples[0] ?? state.session.pending.title;
     }
@@ -2305,7 +2539,15 @@ const renderTtyShell = (state, view) => {
     }
     lines.push("");
     lines.push(SHELL_THEME.section(state.session ? "current" : state.rootTask ? `/${state.rootTask}` : "start"));
-    if (state.session) {
+    if (state.candidatePicker && state.session) {
+        const selectedCandidate = state.candidatePicker.candidates[clamp(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
+        lines.push(`  ${SHELL_THEME.accent("choose")} ${SHELL_THEME.muted("a candidate and press Enter")}`);
+        lines.push(`  ${SHELL_THEME.muted("flow")} ${SHELL_THEME.command(buildSessionHeadline(state.session))}`);
+        if (selectedCandidate) {
+            lines.push(`  ${SHELL_THEME.muted("selected")} ${SHELL_THEME.command(selectedCandidate.path)}`);
+        }
+    }
+    else if (state.session) {
         const requirementStatus = getRequirementStatus(state.session);
         lines.push(requirementStatus.ready
             ? `  ${SHELL_THEME.success("ready")} ${SHELL_THEME.command("/run")}`
@@ -2344,7 +2586,7 @@ const renderTtyShell = (state, view) => {
         }
     }
     lines.push("");
-    const promptLabel = state.session ? formatSessionPrompt(state.session).trimEnd() : formatRootPrompt(state).trimEnd();
+    const promptLabel = formatShellPrompt(state).trimEnd();
     const promptLineIndex = lines.length;
     const placeholder = view.input.length === 0 ? getPromptPlaceholder(state) : "";
     lines.push(`${SHELL_THEME.command(promptLabel)} ${view.input}${placeholder ? SHELL_THEME.muted(placeholder) : ""}`);
@@ -2364,7 +2606,21 @@ const renderTtyShell = (state, view) => {
             }
         }
     }
-    else if (view.input.startsWith("/")) {
+    else if (state.candidatePicker && !view.input.startsWith("/")) {
+        lines.push(SHELL_THEME.section("picker"));
+        for (const [index, candidate] of state.candidatePicker.candidates.slice(0, 8).entries()) {
+            const details = getCandidateDetails(candidate);
+            const line = `${candidate.path}${details.length > 0 ? `  ${details.join("  ")}` : ""}`;
+            const selected = index === state.candidatePicker.selectedIndex;
+            lines.push(selected
+                ? `  ${SHELL_THEME.selected(` ${truncateText(line, columns - 6)} `)}`
+                : `  ${SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${SHELL_THEME.muted(truncateText(details.join("  "), columns - candidate.path.length - 8))}` : ""}`);
+        }
+        if (state.candidatePicker.candidates.length > 8) {
+            lines.push(`  ${SHELL_THEME.muted("...")}`);
+        }
+    }
+    else if (shouldTreatAsSlashInput(view.input, state)) {
         lines.push(SHELL_THEME.section("picker"));
         if (menuEntries.length === 0) {
             lines.push(`  ${SHELL_THEME.warning("no matches")}`);
@@ -2454,6 +2710,7 @@ const runLineInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
         rootTask: null,
+        candidatePicker: null,
     };
     let isClosed = false;
     const rl = readline.createInterface({
@@ -2477,13 +2734,34 @@ const runLineInteractiveShell = async (options = {}) => {
             handleRootSlashCommand(parsed.slashCommand, state, close);
         }
     }
-    rl.setPrompt(formatRootPrompt(state));
+    rl.setPrompt(formatShellPrompt(state));
     rl.prompt();
     for await (const line of rl) {
         const trimmed = line.trim();
         const session = state.session;
         const isSlashInput = shouldTreatAsSlashInput(line, state);
-        if (session?.pending && !isSlashInput) {
+        if (state.candidatePicker && !isSlashInput) {
+            const selectedPath = resolveCandidateSelectionInput(state, line);
+            if (selectedPath) {
+                const result = runSelectedCandidatePicker(state, selectedPath);
+                if (result?.notice) {
+                    writeFeedback(result.notice);
+                }
+                printOutputPanel(result?.panel ?? null);
+                if (result?.clearSession) {
+                    clearCandidatePicker(state);
+                    state.session = null;
+                    state.rootTask = null;
+                }
+            }
+            else {
+                process.stdout.write(`${SHELL_THEME.warning("pick a valid number or paste a repo entry path")}\n`);
+                if (state.candidatePicker) {
+                    printCandidatePicker(state.candidatePicker);
+                }
+            }
+        }
+        else if (session?.pending && !isSlashInput) {
             handlePendingValue(line, state);
         }
         else if (isSlashInput) {
@@ -2521,17 +2799,26 @@ const runLineInteractiveShell = async (options = {}) => {
                         writeFeedback(automated.notice);
                     }
                     printOutputPanel(automated.panel);
+                    if (state.candidatePicker) {
+                        printCandidatePicker(state.candidatePicker);
+                    }
                     if (automated.clearSession) {
+                        clearCandidatePicker(state);
                         state.session = null;
                         state.rootTask = null;
                     }
                     else if (state.session) {
-                        printSessionStatus(state.session);
+                        if (!state.candidatePicker) {
+                            printSessionStatus(state.session);
+                        }
                     }
                 }
                 else {
                     printSessionStatus(session);
                     printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                    if (state.candidatePicker) {
+                        printCandidatePicker(state.candidatePicker);
+                    }
                 }
             }
             else {
@@ -2549,17 +2836,26 @@ const runLineInteractiveShell = async (options = {}) => {
                         writeFeedback(automated.notice);
                     }
                     printOutputPanel(automated.panel);
+                    if (state.candidatePicker) {
+                        printCandidatePicker(state.candidatePicker);
+                    }
                     if (automated.clearSession) {
+                        clearCandidatePicker(state);
                         state.session = null;
                         state.rootTask = null;
                     }
                     else if (state.session) {
-                        printSessionStatus(state.session);
+                        if (!state.candidatePicker) {
+                            printSessionStatus(state.session);
+                        }
                     }
                 }
                 else {
                     printSessionStatus(state.session);
                     printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                    if (state.candidatePicker) {
+                        printCandidatePicker(state.candidatePicker);
+                    }
                 }
             }
             else {
@@ -2570,7 +2866,7 @@ const runLineInteractiveShell = async (options = {}) => {
         if (isClosed) {
             break;
         }
-        rl.setPrompt(state.session ? formatSessionPrompt(state.session) : formatRootPrompt(state));
+        rl.setPrompt(formatShellPrompt(state));
         rl.prompt();
     }
 };
@@ -2578,6 +2874,7 @@ const runTtyInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
         rootTask: null,
+        candidatePicker: null,
     };
     const view = {
         input: "",
@@ -2598,6 +2895,7 @@ const runTtyInteractiveShell = async (options = {}) => {
     const openSession = (command) => {
         const feedback = [];
         state.rootTask = null;
+        clearCandidatePicker(state);
         state.session = createSession(command, state, command, feedback);
         setNoticeFromFeedback(view, feedback);
         view.output = null;
@@ -2606,6 +2904,7 @@ const runTtyInteractiveShell = async (options = {}) => {
     const openRootTask = (task) => {
         state.rootTask = task;
         state.session = null;
+        clearCandidatePicker(state);
         view.output = null;
         view.notice = { kind: "info", text: getRootTaskSummary(task) };
         pushTimelineEntry(view, `/${task}`);
@@ -2631,6 +2930,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "run") {
+            clearCandidatePicker(state);
             view.notice = {
                 kind: "info",
                 text: "nothing is pending. paste a source or use /check /fix /convert /inspect",
@@ -2671,6 +2971,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (slashCommand === "back") {
             state.rootTask = null;
+            clearCandidatePicker(state);
             view.notice = { kind: "info", text: "back to tasks" };
             view.output = null;
             pushTimelineEntry(view, "/back");
@@ -2692,6 +2993,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "run") {
+            clearCandidatePicker(state);
             view.notice = {
                 kind: "info",
                 text: "nothing is pending here. paste a source or choose one of these helpers",
@@ -2751,6 +3053,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "back") {
+            clearCandidatePicker(state);
             state.session = null;
             view.notice = { kind: "info", text: state.rootTask ? `back to /${state.rootTask}` : "back to tasks" };
             view.output = null;
@@ -2759,6 +3062,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (slashCommand === "reset") {
             const feedback = [];
+            clearCandidatePicker(state);
             state.session = createSession(session.command, state, session.label, feedback);
             setNoticeFromFeedback(view, feedback);
             view.output = null;
@@ -2772,6 +3076,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "run") {
+            clearCandidatePicker(state);
             const requirementStatus = getRequirementStatus(session);
             if (!requirementStatus.ready) {
                 view.notice = {
@@ -2822,6 +3127,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (!target.option.valueHint) {
             const feedback = [];
+            clearCandidatePicker(state);
             toggleSessionFlag(session, target.key, feedback);
             setNoticeFromFeedback(view, feedback);
             view.output = null;
@@ -2832,8 +3138,20 @@ const runTtyInteractiveShell = async (options = {}) => {
             const feedback = [];
             if (setSessionValue(session, target.key, inlineValue, feedback)) {
                 session.pending = null;
-                setNoticeFromFeedback(view, feedback);
-                view.output = null;
+                const { automation, preview } = applyValueChangeEffects(state, session, target.key);
+                if (automation) {
+                    view.notice = automation.notice;
+                    view.output = automation.panel;
+                    if (automation.clearSession) {
+                        clearCandidatePicker(state);
+                        state.session = null;
+                        state.rootTask = null;
+                    }
+                }
+                else {
+                    setNoticeFromFeedback(view, feedback);
+                    view.output = preview;
+                }
                 pushTimelineEntry(view, `/${slashCommand}${formatInlineValue(inlineValue)}`);
                 return true;
             }
@@ -2861,9 +3179,22 @@ const runTtyInteractiveShell = async (options = {}) => {
         const feedback = [];
         if (setSessionValue(session, session.pending.key, view.input, feedback)) {
             pushTimelineEntry(view, `/${session.pending.slashName}${formatInlineValue(view.input)}`);
+            const changedKey = session.pending.key;
             session.pending = null;
-            setNoticeFromFeedback(view, feedback);
-            view.output = null;
+            const { automation, preview } = applyValueChangeEffects(state, session, changedKey);
+            if (automation) {
+                view.notice = automation.notice;
+                view.output = automation.panel;
+                if (automation.clearSession) {
+                    clearCandidatePicker(state);
+                    state.session = null;
+                    state.rootTask = null;
+                }
+            }
+            else {
+                setNoticeFromFeedback(view, feedback);
+                view.output = preview;
+            }
             return;
         }
         setNoticeFromFeedback(view, feedback);
@@ -2871,6 +3202,24 @@ const runTtyInteractiveShell = async (options = {}) => {
     const handleEnter = () => {
         const trimmed = view.input.trim();
         const isSlashInput = shouldTreatAsSlashInput(view.input, state);
+        if (state.candidatePicker && !isSlashInput) {
+            const selectedPath = resolveCandidateSelectionInput(state, view.input);
+            if (selectedPath) {
+                const result = runSelectedCandidatePicker(state, selectedPath);
+                view.notice = result?.notice ?? { kind: "error", text: "could not load candidate" };
+                view.output = result?.panel ?? null;
+                if (result?.clearSession) {
+                    clearCandidatePicker(state);
+                    state.session = null;
+                    state.rootTask = null;
+                }
+            }
+            else {
+                view.notice = { kind: "warning", text: "pick a valid candidate or paste an entry path" };
+            }
+            setInput("");
+            return;
+        }
         if (state.session?.pending && !isSlashInput) {
             handlePendingInput();
             setInput("");
@@ -2928,6 +3277,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     view.notice = automated.notice;
                     view.output = automated.panel;
                     if (automated.clearSession) {
+                        clearCandidatePicker(state);
                         state.session = null;
                         state.rootTask = null;
                     }
@@ -2961,6 +3311,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     view.notice = automated.notice;
                     view.output = automated.panel;
                     if (automated.clearSession) {
+                        clearCandidatePicker(state);
                         state.session = null;
                         state.rootTask = null;
                     }
@@ -3017,6 +3368,11 @@ const runTtyInteractiveShell = async (options = {}) => {
             return;
         }
         if (key.name === "up" || (key.shift && key.name === "tab")) {
+            if (state.candidatePicker && !view.input.startsWith("/")) {
+                state.candidatePicker.selectedIndex = clamp(state.candidatePicker.selectedIndex - 1, 0, state.candidatePicker.candidates.length - 1);
+                render();
+                return;
+            }
             const menuEntries = getSlashMenuEntries(state, view.input);
             if (menuEntries.length > 0) {
                 view.menuIndex = clamp(view.menuIndex - 1, 0, menuEntries.length - 1);
@@ -3025,6 +3381,11 @@ const runTtyInteractiveShell = async (options = {}) => {
             return;
         }
         if (key.name === "down") {
+            if (state.candidatePicker && !view.input.startsWith("/")) {
+                state.candidatePicker.selectedIndex = clamp(state.candidatePicker.selectedIndex + 1, 0, state.candidatePicker.candidates.length - 1);
+                render();
+                return;
+            }
             const menuEntries = getSlashMenuEntries(state, view.input);
             if (menuEntries.length > 0) {
                 view.menuIndex = clamp(view.menuIndex + 1, 0, menuEntries.length - 1);
