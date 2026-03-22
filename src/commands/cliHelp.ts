@@ -177,7 +177,7 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
     "",
     formatBlock(
       "Shell",
-      ["ilu", "ilu shell", "Type / to see helpers, /show to inspect the current flow, /update for latest, and Ctrl+C to quit."],
+      ["ilu", "ilu shell", "Type / for task flows like /open, /inspect, /check, /convert, and /fix. Use /show to inspect the current flow, /update for latest, and Ctrl+C to quit."],
       theme
     ),
     "",

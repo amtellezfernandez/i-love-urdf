@@ -71,18 +71,129 @@ const SESSION_BUILTIN_COMMANDS = [
     { name: "reset", summary: "Clear the current helper state." },
     { name: "back", summary: "Return to the root slash-command menu." },
 ];
-const ROOT_COLD_START_COMMANDS = [
-    "load-source",
-    "inspect-repo",
-    "xacro-to-urdf",
-    "repair-mesh-refs",
+const ROOT_TASKS = [
+    { name: "open", summary: "Open a repo, folder, or file as a working URDF." },
+    { name: "inspect", summary: "Preview a repo or URDF before deciding what to do next." },
+    { name: "check", summary: "Run health, validation, and orientation checks." },
+    { name: "convert", summary: "Convert XACRO and URDF files into other formats." },
+    { name: "fix", summary: "Repair mesh paths, mesh refs, and basic URDF issues." },
 ];
-const ROOT_URDF_READY_COMMANDS = [
-    "health-check",
-    "analyze",
-    "validate",
-    "guess-orientation",
-];
+const ROOT_TASK_ACTIONS = {
+    open: [
+        {
+            name: "repo",
+            summary: "Open from GitHub and assemble a working URDF.",
+            command: "load-source",
+            sessionLabel: "open",
+            openPending: { key: "github", slashName: "repo" },
+        },
+        {
+            name: "local",
+            summary: "Open from a local repo or directory.",
+            command: "load-source",
+            sessionLabel: "open",
+            openPending: { key: "path", slashName: "local" },
+        },
+        {
+            name: "file",
+            summary: "Open a local URDF file directly.",
+            command: "load-source",
+            sessionLabel: "open",
+            openPending: { key: "path", slashName: "file" },
+        },
+    ],
+    inspect: [
+        {
+            name: "repo",
+            summary: "Preview a GitHub repo and suggest the right entrypoint.",
+            command: "inspect-repo",
+            sessionLabel: "inspect",
+            openPending: { key: "github", slashName: "repo" },
+        },
+        {
+            name: "local",
+            summary: "Preview a local repo and suggest the right entrypoint.",
+            command: "inspect-repo",
+            sessionLabel: "inspect",
+            openPending: { key: "local", slashName: "local" },
+        },
+        {
+            name: "file",
+            summary: "Inspect a prepared URDF file.",
+            command: "analyze",
+            sessionLabel: "inspect",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+    ],
+    check: [
+        {
+            name: "health",
+            summary: "Run the main URDF health check.",
+            command: "health-check",
+            sessionLabel: "check",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+        {
+            name: "validate",
+            summary: "Validate URDF structure and required tags.",
+            command: "validate",
+            sessionLabel: "check",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+        {
+            name: "orientation",
+            summary: "Guess the likely up-axis and forward axis.",
+            command: "guess-orientation",
+            sessionLabel: "check",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+    ],
+    convert: [
+        {
+            name: "xacro",
+            summary: "Expand a XACRO file, repo, or GitHub source into URDF.",
+            command: "xacro-to-urdf",
+            sessionLabel: "convert",
+            openPending: { key: "xacro", slashName: "xacro" },
+        },
+        {
+            name: "mjcf",
+            summary: "Convert a URDF file into MJCF.",
+            command: "urdf-to-mjcf",
+            sessionLabel: "convert",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+        {
+            name: "usd",
+            summary: "Convert a URDF file into initial USD output.",
+            command: "urdf-to-usd",
+            sessionLabel: "convert",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+    ],
+    fix: [
+        {
+            name: "mesh-paths",
+            summary: "Repair package:// and relative mesh paths in a URDF file.",
+            command: "fix-mesh-paths",
+            sessionLabel: "fix",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+        {
+            name: "mesh-refs",
+            summary: "Repair missing mesh references in a repo-based source.",
+            command: "repair-mesh-refs",
+            sessionLabel: "fix",
+        },
+        {
+            name: "axes",
+            summary: "Normalize non-unit or awkward joint axes in a URDF file.",
+            command: "normalize-axes",
+            sessionLabel: "fix",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+        },
+    ],
+};
 const COMMAND_SUMMARY_OVERRIDES = {
     "load-source": "Load from GitHub, a local repo, or a local file.",
     "inspect-repo": "Preview a local or GitHub repo and suggest the right URDF or XACRO entrypoint.",
@@ -172,14 +283,10 @@ const SESSION_SLASH_ALIASES = {
 const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
 const ROOT_GUIDANCE = "type / for commands, /update for latest, ctrl+c to quit";
 let cachedGitHubAuthState;
-const formatRootPrompt = () => "/> ";
-const formatSessionPrompt = (session) => session.pending ? `/${session.pending.slashName}> ` : `/${session.command}> `;
+const formatRootPrompt = (state) => state?.rootTask ? `/${state.rootTask}> ` : "/> ";
+const formatSessionPrompt = (session) => session.pending ? `/${session.pending.slashName}> ` : `/${session.label}> `;
 const quoteForPreview = (value) => (/\s/.test(value) ? JSON.stringify(value) : value);
-const getRootQuickStartCommands = (state) => (state.lastUrdfPath ? ROOT_URDF_READY_COMMANDS : ROOT_COLD_START_COMMANDS);
-const getRootQuickStartEntries = (state) => getRootQuickStartCommands(state).map((commandName) => ({
-    name: commandName,
-    summary: getShellCommandSummary(commandName),
-}));
+const getRootQuickStartEntries = () => ROOT_TASKS;
 const buildCommandPreview = (command, args) => {
     const serializedArgs = Array.from(args.entries()).flatMap(([key, value]) => {
         if (value === false || value === undefined || value === null) {
@@ -249,16 +356,16 @@ const printCommandList = (entries, prefix = "/", includeSummary = true) => {
         process.stdout.write(`  ${SHELL_THEME.command(label.padEnd(18))} ${SHELL_THEME.muted(entry.summary)}\n`);
     }
 };
-const printRootQuickStart = (state) => {
+const printRootQuickStart = () => {
     process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)}\n`);
     process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
     process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
     printSectionTitle("start");
-    printCommandList(getRootQuickStartEntries(state));
+    printCommandList(getRootQuickStartEntries());
 };
-const printRootOptions = (state) => {
+const printRootOptions = () => {
     printSectionTitle("start");
-    printCommandList(getRootQuickStartEntries(state));
+    printCommandList(getRootQuickStartEntries());
     printSectionTitle("system");
     printCommandList(SHELL_BUILTIN_COMMANDS);
     for (const section of commandCatalog_1.CLI_HELP_SECTIONS) {
@@ -269,6 +376,18 @@ const printRootOptions = (state) => {
         })), "/", false);
     }
 };
+const printRootTaskOptions = (task) => {
+    printSectionTitle(`/${task}`);
+    process.stdout.write(`  ${SHELL_THEME.muted(getRootTaskSummary(task))}\n`);
+    printSectionTitle("start");
+    printCommandList(getRootTaskActionDefinitions(task));
+    printSectionTitle("actions");
+    printCommandList([
+        { name: "back", summary: "Return to the main task menu." },
+        { name: "help", summary: "Show the current task options again." },
+        ...SHELL_BUILTIN_COMMANDS.filter((entry) => entry.name !== "help"),
+    ]);
+};
 const getSlashAliasesForCommand = (command) => SESSION_SLASH_ALIASES[command] ?? {};
 const getOptionSpecByKey = (session, key) => session.spec.options.find((option) => option.flag === `--${key}`);
 const getPreferredSlashName = (session, key) => {
@@ -277,6 +396,9 @@ const getPreferredSlashName = (session, key) => {
 };
 const getSlashDisplayName = (session, key) => `/${getPreferredSlashName(session, key)}`;
 const getShellCommandSummary = (command) => COMMAND_SUMMARY_OVERRIDES[command] ?? cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME[command].summary;
+const getRootTaskSummary = (task) => ROOT_TASKS.find((entry) => entry.name === task)?.summary ?? "Task flow";
+const getRootTaskActionDefinitions = (task) => ROOT_TASK_ACTIONS[task];
+const findRootTaskAction = (task, slashCommand) => getRootTaskActionDefinitions(task).find((entry) => entry.name === slashCommand);
 const getOptionOrderRank = (session, key) => {
     const customOrder = SESSION_OPTION_ORDER[session.command] ?? [];
     const customIndex = customOrder.indexOf(key);
@@ -484,7 +606,7 @@ const printSessionOptions = (session) => {
     const requiredEntries = entries.filter((entry) => entry.priority === "required");
     const commonEntries = entries.filter((entry) => entry.priority === "common");
     const advancedEntries = entries.filter((entry) => entry.priority === "advanced");
-    printSectionTitle(`/${session.command}`);
+    printSectionTitle(`/${session.label}`);
     process.stdout.write(`  ${SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
     if (requiredEntries.length > 0) {
         printSectionTitle("start");
@@ -718,10 +840,10 @@ const updateRememberedUrdfPath = (state, session) => {
 };
 const getFollowUpSuggestionMessage = (state, command) => {
     if ((command === "load-source" || command === "xacro-to-urdf") && state.lastUrdfPath) {
-        return `[next] /health-check /validate /analyze /guess-orientation\nusing ${state.lastUrdfPath}`;
+        return `[next] /check /inspect /fix\nusing ${state.lastUrdfPath}`;
     }
     if (command === "inspect-repo") {
-        return "[next] /load-source or /repair-mesh-refs";
+        return "[next] /open or /fix";
     }
     if (state.lastUrdfPath) {
         return `remembered ${state.lastUrdfPath}`;
@@ -791,9 +913,10 @@ const printSessionCommandExecution = (execution, command) => {
         }
     }
 };
-const createSession = (command, state, feedback) => {
+const createSession = (command, state, label = command, feedback) => {
     const session = {
         command,
+        label,
         spec: cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME[command],
         args: new Map(),
         pending: null,
@@ -811,17 +934,30 @@ const resolveSessionSlashTarget = (session, slashCommand) => {
     return option ? { key, option } : null;
 };
 const listAvailableSlashCommands = (state) => {
-    if (!state.session) {
+    if (state.session) {
         return [
-            ...SHELL_BUILTIN_COMMANDS.map((entry) => entry.name),
-            ...commandCatalog_1.CLI_HELP_SECTIONS.flatMap((section) => section.commands),
+            ...new Set([
+                ...SESSION_BUILTIN_COMMANDS.map((entry) => entry.name),
+                ...SESSION_SYSTEM_MENU_ENTRIES.map((entry) => entry.name),
+                ...getSessionOptionEntries(state.session).map((entry) => entry.name),
+            ]),
+        ];
+    }
+    if (state.rootTask) {
+        return [
+            ...new Set([
+                ...getRootTaskActionDefinitions(state.rootTask).map((entry) => entry.name),
+                "back",
+                "help",
+                ...SHELL_BUILTIN_COMMANDS.filter((entry) => entry.name !== "help").map((entry) => entry.name),
+            ]),
         ];
     }
     return [
         ...new Set([
-            ...SESSION_BUILTIN_COMMANDS.map((entry) => entry.name),
-            ...SESSION_SYSTEM_MENU_ENTRIES.map((entry) => entry.name),
-            ...getSessionOptionEntries(state.session).map((entry) => entry.name),
+            ...ROOT_TASKS.map((entry) => entry.name),
+            ...SHELL_BUILTIN_COMMANDS.map((entry) => entry.name),
+            ...commandCatalog_1.CLI_HELP_SECTIONS.flatMap((section) => section.commands),
         ]),
     ];
 };
@@ -879,9 +1015,25 @@ const createCompleter = (state) => {
         return [matches, line];
     };
 };
+const openPendingForSession = (session, pending) => {
+    if (!pending) {
+        return;
+    }
+    if (pending.onlyIfMissing && session.args.has(pending.key)) {
+        return;
+    }
+    session.pending = getPendingValuePrompt(session, pending.key, pending.slashName);
+};
+const startRootTaskAction = (task, action, state, feedback) => {
+    state.rootTask = task;
+    state.session = createSession(action.command, state, action.sessionLabel, feedback);
+    if (state.session) {
+        openPendingForSession(state.session, action.openPending);
+    }
+};
 const handleRootSlashCommand = (slashCommand, state, close) => {
     if (!slashCommand || slashCommand === "help") {
-        printRootOptions(state);
+        printRootOptions();
         return;
     }
     if (slashCommand === "exit" || slashCommand === "quit") {
@@ -900,13 +1052,79 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         printLastUrdf(state);
         return;
     }
+    if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
+        state.rootTask = slashCommand;
+        printRootTaskOptions(state.rootTask);
+        return;
+    }
     if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
         process.stderr.write(`Unknown slash command: /${slashCommand}\n`);
         process.stdout.write(`${ROOT_GUIDANCE}\n`);
         return;
     }
+    state.rootTask = null;
     const feedback = [];
-    state.session = createSession(slashCommand, state, feedback);
+    state.session = createSession(slashCommand, state, slashCommand, feedback);
+    flushFeedback(feedback);
+    printSessionOptions(state.session);
+};
+const handleRootTaskSlashCommand = (slashCommand, state, close) => {
+    const task = state.rootTask;
+    if (!task) {
+        handleRootSlashCommand(slashCommand, state, close);
+        return;
+    }
+    if (!slashCommand || slashCommand === "help") {
+        printRootTaskOptions(task);
+        return;
+    }
+    if (slashCommand === "back") {
+        state.rootTask = null;
+        process.stdout.write(`${SHELL_THEME.muted("back to tasks")}\n`);
+        return;
+    }
+    if (slashCommand === "exit" || slashCommand === "quit") {
+        close();
+        return;
+    }
+    if (slashCommand === "clear") {
+        console.clear();
+        return;
+    }
+    if (slashCommand === "update") {
+        (0, cliUpdate_1.runUpdateCommand)();
+        return;
+    }
+    if (slashCommand === "last") {
+        printLastUrdf(state);
+        return;
+    }
+    if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
+        state.rootTask = slashCommand;
+        printRootTaskOptions(state.rootTask);
+        return;
+    }
+    const action = findRootTaskAction(task, slashCommand);
+    if (action) {
+        const feedback = [];
+        startRootTaskAction(task, action, state, feedback);
+        flushFeedback(feedback);
+        if (state.session?.pending) {
+            printPendingValuePrompt(state.session.pending);
+            return;
+        }
+        if (state.session) {
+            printSessionOptions(state.session);
+            return;
+        }
+    }
+    if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
+        process.stderr.write(`Unknown helper command: /${slashCommand}\n`);
+        return;
+    }
+    const feedback = [];
+    state.rootTask = null;
+    state.session = createSession(slashCommand, state, slashCommand, feedback);
     flushFeedback(feedback);
     printSessionOptions(state.session);
 };
@@ -921,12 +1139,12 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     }
     if (slashCommand === "back") {
         state.session = null;
-        process.stdout.write(`${SHELL_THEME.muted("back to root")}\n`);
+        process.stdout.write(`${SHELL_THEME.muted(state.rootTask ? `back to /${state.rootTask}` : "back to tasks")}\n`);
         return;
     }
     if (slashCommand === "reset") {
         const feedback = [];
-        state.session = createSession(session.command, state, feedback);
+        state.session = createSession(session.command, state, session.label, feedback);
         flushFeedback(feedback);
         printSessionOptions(state.session);
         return;
@@ -1010,7 +1228,20 @@ const SESSION_SYSTEM_MENU_ENTRIES = [
     { name: "exit", summary: "Exit the interactive shell.", kind: "system" },
     { name: "quit", summary: "Exit the interactive shell.", kind: "system" },
 ];
+const getRootTaskMenuEntries = (task) => [
+    ...getRootTaskActionDefinitions(task).map((entry) => ({
+        name: entry.name,
+        summary: entry.summary,
+        kind: "action",
+    })),
+    { name: "back", summary: "Return to the main task menu.", kind: "system" },
+    { name: "help", summary: "Show the current task options again.", kind: "system" },
+    ...ROOT_SYSTEM_MENU_ENTRIES.filter((entry) => entry.name !== "help"),
+];
 const getRootMenuEntries = (state) => {
+    if (state.rootTask) {
+        return getRootTaskMenuEntries(state.rootTask);
+    }
     const seen = new Set();
     const entries = [];
     const addEntry = (entry) => {
@@ -1020,11 +1251,11 @@ const getRootMenuEntries = (state) => {
         seen.add(entry.name);
         entries.push(entry);
     };
-    for (const commandName of getRootQuickStartCommands(state)) {
+    for (const entry of ROOT_TASKS) {
         addEntry({
-            name: commandName,
-            summary: getShellCommandSummary(commandName),
-            kind: "flow",
+            name: entry.name,
+            summary: entry.summary,
+            kind: "task",
         });
     }
     for (const entry of ROOT_SYSTEM_MENU_ENTRIES) {
@@ -1159,7 +1390,15 @@ const renderNotice = (notice) => {
     }
 };
 const renderMenuEntry = (entry, selected, width) => {
-    const badge = entry.kind === "flow" ? "cmd" : entry.kind === "option" ? "set" : entry.kind === "action" ? "act" : "sys";
+    const badge = entry.kind === "task"
+        ? "top"
+        : entry.kind === "flow"
+            ? "cmd"
+            : entry.kind === "option"
+                ? "set"
+                : entry.kind === "action"
+                    ? "act"
+                    : "sys";
     const label = `/${entry.name}`;
     const left = `${selected ? ">" : " "} ${truncateText(label, 24).padEnd(24)} `;
     const availableSummaryWidth = Math.max(12, width - left.length - badge.length - 3);
@@ -1170,6 +1409,9 @@ const renderMenuEntry = (entry, selected, width) => {
 const getPromptPlaceholder = (state) => {
     if (state.session?.pending) {
         return state.session.pending.examples[0] ?? state.session.pending.title;
+    }
+    if (!state.session && state.rootTask) {
+        return `choose a ${state.rootTask} action`;
     }
     if (!state.session) {
         return "type / to open commands";
@@ -1191,8 +1433,10 @@ const renderTtyShell = (state, view) => {
     const lines = [];
     lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
     lines.push(state.session
-        ? SHELL_THEME.muted(`helper /${state.session.command}  arrows move  enter selects  ctrl+c exits`)
-        : SHELL_THEME.muted("press / to open commands  arrows move  enter selects  ctrl+c exits"));
+        ? SHELL_THEME.muted(`helper /${state.session.label}  arrows move  enter selects  ctrl+c exits`)
+        : state.rootTask
+            ? SHELL_THEME.muted(`task /${state.rootTask}  arrows move  enter selects  ctrl+c exits`)
+            : SHELL_THEME.muted("press / to open commands  arrows move  enter selects  ctrl+c exits"));
     if (view.notice) {
         lines.push(renderNotice(view.notice));
     }
@@ -1204,7 +1448,7 @@ const renderTtyShell = (state, view) => {
         }
     }
     lines.push("");
-    lines.push(SHELL_THEME.section(state.session ? "current" : "start"));
+    lines.push(SHELL_THEME.section(state.session ? "current" : state.rootTask ? `/${state.rootTask}` : "start"));
     if (state.session) {
         const requirementStatus = getRequirementStatus(state.session);
         lines.push(requirementStatus.ready
@@ -1215,9 +1459,15 @@ const renderTtyShell = (state, view) => {
             lines.push(`  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command(state.session.pending.title)}`);
         }
     }
+    else if (state.rootTask) {
+        lines.push(`  ${SHELL_THEME.muted(getRootTaskSummary(state.rootTask))}`);
+        for (const entry of getRootTaskActionDefinitions(state.rootTask)) {
+            lines.push(`  ${SHELL_THEME.command(`/${entry.name}`.padEnd(18))}${SHELL_THEME.muted(entry.summary)}`);
+        }
+    }
     else {
-        for (const commandName of getRootQuickStartCommands(state)) {
-            lines.push(`  ${SHELL_THEME.command(`/${commandName}`.padEnd(18))}${SHELL_THEME.muted(getShellCommandSummary(commandName))}`);
+        for (const entry of getRootQuickStartEntries()) {
+            lines.push(`  ${SHELL_THEME.command(`/${entry.name}`.padEnd(18))}${SHELL_THEME.muted(entry.summary)}`);
         }
     }
     if (view.output) {
@@ -1233,7 +1483,7 @@ const renderTtyShell = (state, view) => {
         }
     }
     lines.push("");
-    const promptLabel = state.session ? formatSessionPrompt(state.session).trimEnd() : formatRootPrompt().trimEnd();
+    const promptLabel = state.session ? formatSessionPrompt(state.session).trimEnd() : formatRootPrompt(state).trimEnd();
     const promptLineIndex = lines.length;
     const placeholder = view.input.length === 0 ? getPromptPlaceholder(state) : "";
     lines.push(`${SHELL_THEME.command(promptLabel)} ${view.input}${placeholder ? SHELL_THEME.muted(placeholder) : ""}`);
@@ -1318,6 +1568,7 @@ const completeTtyPathInput = (input, state) => {
 const runLineInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
+        rootTask: null,
     };
     let isClosed = false;
     const rl = readline.createInterface({
@@ -1334,14 +1585,14 @@ const runLineInteractiveShell = async (options = {}) => {
         rl.close();
     });
     const close = () => rl.close();
-    printRootQuickStart(state);
+    printRootQuickStart();
     if (options.initialSlashCommand) {
         const parsed = parseSlashInput(options.initialSlashCommand);
         if (parsed) {
             handleRootSlashCommand(parsed.slashCommand, state, close);
         }
     }
-    rl.setPrompt(formatRootPrompt());
+    rl.setPrompt(formatRootPrompt(state));
     rl.prompt();
     for await (const line of rl) {
         const trimmed = line.trim();
@@ -1355,6 +1606,9 @@ const runLineInteractiveShell = async (options = {}) => {
                 if (session) {
                     handleSessionSlashCommand(parsed.slashCommand, parsed.inlineValue, state);
                 }
+                else if (state.rootTask) {
+                    handleRootTaskSlashCommand(parsed.slashCommand, state, close);
+                }
                 else {
                     handleRootSlashCommand(parsed.slashCommand, state, close);
                 }
@@ -1363,6 +1617,9 @@ const runLineInteractiveShell = async (options = {}) => {
         else if (!trimmed) {
             if (session) {
                 printSessionStatus(session);
+            }
+            else if (state.rootTask) {
+                printRootTaskOptions(state.rootTask);
             }
             else {
                 process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
@@ -1377,13 +1634,14 @@ const runLineInteractiveShell = async (options = {}) => {
         if (isClosed) {
             break;
         }
-        rl.setPrompt(state.session ? formatSessionPrompt(state.session) : formatRootPrompt());
+        rl.setPrompt(state.session ? formatSessionPrompt(state.session) : formatRootPrompt(state));
         rl.prompt();
     }
 };
 const runTtyInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
+        rootTask: null,
     };
     const view = {
         input: "",
@@ -1403,10 +1661,18 @@ const runTtyInteractiveShell = async (options = {}) => {
     };
     const openSession = (command) => {
         const feedback = [];
-        state.session = createSession(command, state, feedback);
+        state.rootTask = null;
+        state.session = createSession(command, state, command, feedback);
         setNoticeFromFeedback(view, feedback);
         view.output = null;
         pushTimelineEntry(view, `/${command}`);
+    };
+    const openRootTask = (task) => {
+        state.rootTask = task;
+        state.session = null;
+        view.output = null;
+        view.notice = { kind: "info", text: getRootTaskSummary(task) };
+        pushTimelineEntry(view, `/${task}`);
     };
     const handleRootAction = (slashCommand) => {
         if (!slashCommand || slashCommand === "help") {
@@ -1439,8 +1705,85 @@ const runTtyInteractiveShell = async (options = {}) => {
             pushTimelineEntry(view, "/update");
             return true;
         }
+        if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
+            openRootTask(slashCommand);
+            return true;
+        }
         if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
             view.notice = { kind: "error", text: `Unknown slash command: /${slashCommand}` };
+            return true;
+        }
+        openSession(slashCommand);
+        return true;
+    };
+    const handleRootTaskAction = (slashCommand) => {
+        const task = state.rootTask;
+        if (!task) {
+            return handleRootAction(slashCommand);
+        }
+        if (!slashCommand || slashCommand === "help") {
+            setInput("/");
+            return true;
+        }
+        if (slashCommand === "back") {
+            state.rootTask = null;
+            view.notice = { kind: "info", text: "back to tasks" };
+            view.output = null;
+            pushTimelineEntry(view, "/back");
+            return true;
+        }
+        if (slashCommand === "exit" || slashCommand === "quit") {
+            close();
+            return true;
+        }
+        if (slashCommand === "clear") {
+            view.timeline = [];
+            view.notice = null;
+            view.output = null;
+            return true;
+        }
+        if (slashCommand === "last") {
+            view.notice = { kind: "info", text: getLastUrdfMessage(state) };
+            pushTimelineEntry(view, "/last");
+            return true;
+        }
+        if (slashCommand === "update") {
+            try {
+                (0, cliUpdate_1.runUpdateCommand)();
+                view.notice = { kind: "success", text: "ilu is up to date." };
+            }
+            catch (error) {
+                view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
+            }
+            pushTimelineEntry(view, "/update");
+            return true;
+        }
+        if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
+            openRootTask(slashCommand);
+            return true;
+        }
+        const action = findRootTaskAction(task, slashCommand);
+        if (action) {
+            const feedback = [];
+            startRootTaskAction(task, action, state, feedback);
+            setNoticeFromFeedback(view, feedback);
+            if (state.session?.pending) {
+                view.notice = {
+                    kind: state.session.pending.notes.length > 0 ? "warning" : "info",
+                    text: [
+                        state.session.pending.examples[0] !== undefined
+                            ? `${state.session.pending.title}: ${state.session.pending.examples[0]}`
+                            : state.session.pending.title,
+                        ...state.session.pending.notes,
+                    ].join("  "),
+                };
+            }
+            view.output = null;
+            pushTimelineEntry(view, `/${slashCommand}`);
+            return true;
+        }
+        if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
+            view.notice = { kind: "error", text: `Unknown helper command: /${slashCommand}` };
             return true;
         }
         openSession(slashCommand);
@@ -1457,14 +1800,14 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (slashCommand === "back") {
             state.session = null;
-            view.notice = { kind: "info", text: "back to root" };
+            view.notice = { kind: "info", text: state.rootTask ? `back to /${state.rootTask}` : "back to tasks" };
             view.output = null;
             pushTimelineEntry(view, "/back");
             return true;
         }
         if (slashCommand === "reset") {
             const feedback = [];
-            state.session = createSession(session.command, state, feedback);
+            state.session = createSession(session.command, state, session.label, feedback);
             setNoticeFromFeedback(view, feedback);
             view.output = null;
             pushTimelineEntry(view, "/reset");
@@ -1593,6 +1936,9 @@ const runTtyInteractiveShell = async (options = {}) => {
                         if (state.session) {
                             handleSessionAction(selected.name, "");
                         }
+                        else if (state.rootTask) {
+                            handleRootTaskAction(selected.name);
+                        }
                         else {
                             handleRootAction(selected.name);
                         }
@@ -1604,6 +1950,9 @@ const runTtyInteractiveShell = async (options = {}) => {
             if (state.session) {
                 handleSessionAction(parsed.slashCommand, parsed.inlineValue);
             }
+            else if (state.rootTask) {
+                handleRootTaskAction(parsed.slashCommand);
+            }
             else {
                 handleRootAction(parsed.slashCommand);
             }
@@ -1613,7 +1962,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         if (trimmed.length === 0) {
             view.notice = {
                 kind: "info",
-                text: state.session ? getPromptPlaceholder(state) : ROOT_GUIDANCE,
+                text: state.session || state.rootTask ? getPromptPlaceholder(state) : ROOT_GUIDANCE,
             };
             return;
         }
@@ -1743,8 +2092,12 @@ const renderShellHelp = () => {
         "  enter              Select the highlighted option",
         "  ctrl+c             Exit immediately",
         "  esc                Close the picker or cancel a pending value",
+        "  /open              Open a repo, folder, or file as a working URDF",
+        "  /inspect           Preview a repo or URDF before choosing the next step",
+        "  /check             Run health, validation, and orientation checks",
+        "  /convert           Convert XACRO and URDF files into other formats",
+        "  /fix               Repair mesh paths, mesh refs, and axis issues",
         "  /update            Install the latest ilu release",
-        "  /load-source       Start a guided load-source flow",
         "  /repo              Set a GitHub repo or URL when the helper supports it",
         "  /local             Set a local path when the helper supports it",
         "  /show              Show the assembled command and next step",

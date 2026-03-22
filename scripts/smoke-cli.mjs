@@ -1264,7 +1264,8 @@ const shellHelpOutput = execFileSync(process.execPath, [cliPath, "help", "shell"
 });
 if (
   !shellHelpOutput.includes("ilu shell") ||
-  !shellHelpOutput.includes("/load-source") ||
+  !shellHelpOutput.includes("/open") ||
+  !shellHelpOutput.includes("/convert") ||
   !shellHelpOutput.includes("/update")
 ) {
   throw new Error("ilu shell help smoke test failed");
@@ -1273,20 +1274,23 @@ if (
 const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: "/load-source\n/\n/repo\nANYbotics/anymal_b_simple_description\n/show\n/back\n/health-check\n/show\n/exit\n",
+  input: "/open\n/repo\nANYbotics/anymal_b_simple_description\n/show\n/back\n/back\n/check\n/health\n/show\n/exit\n",
 });
 if (
   !shellTranscript.includes("interactive urdf shell") ||
   !shellTranscript.includes("type / for commands, /update for latest, ctrl+c to quit") ||
   !shellTranscript.includes("start") ||
-  !shellTranscript.includes("/xacro-to-urdf") ||
-  !shellTranscript.includes("/repair-mesh-refs") ||
+  !shellTranscript.includes("/open") ||
+  !shellTranscript.includes("/check") ||
+  !shellTranscript.includes("/convert") ||
+  !shellTranscript.includes("/fix") ||
   !shellTranscript.includes("/repo") ||
   !shellTranscript.includes("input") ||
-  !shellTranscript.includes("[next] /repo or /local") ||
+  !shellTranscript.includes("Open a repo, folder, or file as a working URDF.") ||
   !shellTranscript.includes("[ready] /run") ||
   !shellTranscript.includes("cmd") ||
   !shellTranscript.includes("ilu load-source --github ANYbotics/anymal_b_simple_description") ||
+  !shellTranscript.includes("back to tasks") ||
   !shellTranscript.includes("next\n  /urdf")
 ) {
   throw new Error("ilu shell guided-helper smoke test failed");
@@ -1295,12 +1299,13 @@ if (
 const xacroShellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: "/xacro-to-urdf\n/exit\n",
+  input: "/convert\n/xacro\n/exit\n",
 });
 if (
-  !xacroShellTranscript.includes("[next] /xacro or /repo or /local") ||
-  !xacroShellTranscript.includes("/entry") ||
-  !xacroShellTranscript.includes("more")
+  !xacroShellTranscript.includes("/convert") ||
+  !xacroShellTranscript.includes("/mjcf") ||
+  !xacroShellTranscript.includes("/usd") ||
+  !xacroShellTranscript.includes("XACRO file path")
 ) {
   throw new Error("ilu shell xacro workflow guidance smoke test failed");
 }

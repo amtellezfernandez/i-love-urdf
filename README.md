@@ -13,7 +13,7 @@ Inside `ilu`:
 - use arrow keys to move
 - press `Enter` to select
 - press `Ctrl+C` to exit
-- start with `/load-source`
+- start with `/open`, `/inspect`, `/check`, `/convert`, or `/fix`
 
 `/repo` accepts `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`, and `git@github.com:owner/repo.git`.
 
