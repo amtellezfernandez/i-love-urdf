@@ -1944,10 +1944,10 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
   lines.push(
     state.session
-      ? SHELL_THEME.muted(`helper /${state.session.label}  arrows move  enter selects  ctrl+c exits`)
+      ? SHELL_THEME.muted(`helper /${state.session.label}  arrows move  tab completes  enter selects  ctrl+c exits`)
       : state.rootTask
-        ? SHELL_THEME.muted(`task /${state.rootTask}  arrows move  enter selects  ctrl+c exits`)
-        : SHELL_THEME.muted("press / to open commands  arrows move  enter selects  ctrl+c exits")
+        ? SHELL_THEME.muted(`task /${state.rootTask}  arrows move  tab completes  enter selects  ctrl+c exits`)
+        : SHELL_THEME.muted("press / to open commands  arrows move  tab completes  enter selects  ctrl+c exits")
   );
 
   if (view.notice) {
@@ -2101,6 +2101,25 @@ const completeTtyPathInput = (
     };
   }
   return null;
+};
+
+const completeSelectedSlashInput = (
+  input: string,
+  state: ShellState,
+  selectedIndex: number
+): string | null => {
+  const parsed = parseSlashInput(input);
+  if (!parsed || parsed.inlineValue) {
+    return null;
+  }
+
+  const menuEntries = getSlashMenuEntries(state, input);
+  if (menuEntries.length === 0) {
+    return null;
+  }
+
+  const selected = menuEntries[clamp(selectedIndex, 0, menuEntries.length - 1)];
+  return selected ? `/${selected.name}` : null;
 };
 
 const runLineInteractiveShell = async (options: ShellOptions = {}) => {
@@ -2608,9 +2627,9 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (key.name === "tab") {
-      const menuEntries = getSlashMenuEntries(state, view.input);
-      if (menuEntries.length > 0) {
-        view.menuIndex = clamp(view.menuIndex + 1, 0, menuEntries.length - 1);
+      const slashCompletion = completeSelectedSlashInput(view.input, state, view.menuIndex);
+      if (slashCompletion) {
+        setInput(slashCompletion);
         render();
         return;
       }
@@ -2691,7 +2710,8 @@ export const renderShellHelp = (): string => {
     "",
     "Inside the shell",
     "  /                  Open the picker under the prompt",
-    "  up/down/tab        Move through picker options",
+    "  up/down            Move through picker options",
+    "  tab                Complete the selected option or path",
     "  enter              Select the highlighted option",
     "  ctrl+c             Exit immediately",
     "  esc                Close the picker or cancel a pending value",

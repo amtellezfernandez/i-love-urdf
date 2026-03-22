@@ -11,6 +11,7 @@ Inside `ilu`:
 
 - type `/` to open the command picker
 - use arrow keys to move
+- press `Tab` to complete the selected option
 - press `Enter` to select
 - press `Ctrl+C` to exit
 - start with `/open`, `/inspect`, `/check`, `/convert`, or `/fix`
