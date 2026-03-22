@@ -166,7 +166,8 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
         "2. paste `owner/repo` or drop a local folder, `.urdf`, or `.zip`",
         "3. ilu auto-runs validation and a health check when it can",
         "4. if there are multiple entrypoints, use arrows and Enter to pick one",
-        "5. use `/` only when you want extra helpers or an explicit flow",
+        "5. if XACRO runtime is missing, run `!xacro` inside the shell",
+        "6. use `/` only when you want extra helpers or an explicit flow",
       ],
       theme
     ),
@@ -179,7 +180,7 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
     "",
     formatBlock(
       "Shell",
-      ["ilu", "ilu shell", "Paste owner/repo or drop a local path directly to start. ilu auto-loads the source and runs validation plus a health check when it can. When a repo has multiple entrypoints, use the picker and press Enter on the one you want. Use / when you want extra helpers like /check, /convert, /fix, /open, or /inspect. Use /show to inspect the current flow, /update for latest, and Ctrl+C to quit."],
+      ["ilu", "ilu shell", "Paste owner/repo or drop a local path directly to start. ilu auto-loads the source and runs validation plus a health check when it can. When a repo has multiple entrypoints, use the picker and press Enter on the one you want. If XACRO runtime is missing, run !xacro in the shell. Use / when you want extra helpers like /check, /convert, /fix, /open, or /inspect. Use /show to inspect the current flow, /update for latest, and Ctrl+C to quit."],
       theme
     ),
     "",

@@ -1267,6 +1267,7 @@ if (
   !shellHelpOutput.includes("ilu shell") ||
   !shellHelpOutput.includes("owner/repo") ||
   !shellHelpOutput.includes("./robot.urdf") ||
+  !shellHelpOutput.includes("!xacro") ||
   !shellHelpOutput.includes("/open") ||
   !shellHelpOutput.includes("/convert") ||
   !shellHelpOutput.includes("/update")
@@ -1384,6 +1385,19 @@ if (
   !xacroShellTranscript.includes("XACRO file path")
 ) {
   throw new Error("ilu shell xacro workflow guidance smoke test failed");
+}
+
+const xacroSetupTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-xacro-")),
+  encoding: "utf8",
+  input: "!xacro\n/exit\n",
+});
+if (
+  !xacroSetupTranscript.includes("xacro") ||
+  (!xacroSetupTranscript.includes("xacro runtime ready") &&
+    !xacroSetupTranscript.includes("xacro runtime installed"))
+) {
+  throw new Error("ilu shell xacro setup shortcut smoke test failed");
 }
 
 let invalidCommandOutput = "";

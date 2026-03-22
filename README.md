@@ -12,6 +12,7 @@ Inside `ilu`:
 - paste `owner/repo` or drop a local folder, `.urdf`, or `.zip`
 - `ilu` auto-runs validation and a health check when it can
 - if there are multiple matches, use arrow keys and `Enter` to pick one
+- if XACRO runtime is missing, run `!xacro`
 - type `/` only when you want extra helpers
 - use arrow keys to move
 - press `Tab` to complete the selected option

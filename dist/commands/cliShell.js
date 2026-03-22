@@ -58,6 +58,7 @@ const createTheme = (enabled) => ({
 });
 const SHELL_THEME = createTheme(resolveColorSupport());
 const SHELL_BRAND = "i<3urdf";
+const XACRO_RUNTIME_NOTICE = "xacro runtime not set. run !xacro, then retry";
 const SHELL_BUILTIN_COMMANDS = [
     { name: "help", summary: "Show slash commands for the current context." },
     { name: "update", summary: "Install the latest ilu release." },
@@ -283,7 +284,7 @@ const SESSION_SLASH_ALIASES = {
     },
 };
 const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
-const ROOT_GUIDANCE = "paste owner/repo or drop a local folder/file. type / for extra helpers, /update for latest, ctrl+c to quit";
+const ROOT_GUIDANCE = "paste owner/repo or drop a local folder/file. type / for helpers, !xacro for xacro setup, /update for latest, ctrl+c to quit";
 let cachedGitHubAuthState;
 const formatRootPrompt = (state) => state?.rootTask ? `/${state.rootTask}> ` : "/> ";
 const formatSessionPrompt = (session) => session.pending ? `/${session.pending.slashName}> ` : `/${session.label}> `;
@@ -754,6 +755,17 @@ const stripMatchingQuotes = (value) => {
     return value;
 };
 const normalizeShellInput = (rawValue) => decodeShellEscapes(stripMatchingQuotes(rawValue.trim()));
+const parseBangInput = (input) => {
+    const trimmed = input.trim();
+    if (!trimmed.startsWith("!")) {
+        return null;
+    }
+    const command = trimmed.slice(1).trim().toLowerCase();
+    if (command === "xacro") {
+        return "xacro";
+    }
+    return null;
+};
 const normalizeFilesystemInput = (rawValue) => {
     const normalized = normalizeShellInput(rawValue);
     if (normalized.startsWith("~")) {
@@ -1058,8 +1070,58 @@ const parseExecutionJson = (execution) => {
         return null;
     }
 };
+const summarizeXacroRuntimePanel = (payload, statusLine) => {
+    const lines = [statusLine];
+    if (payload.runtime) {
+        lines.push(`runtime ${payload.runtime}`);
+    }
+    lines.push(`python ${quoteForPreview(payload.pythonExecutable)}`);
+    if (payload.venvPath) {
+        lines.push(`venv ${quoteForPreview(payload.venvPath)}`);
+    }
+    return {
+        title: "xacro",
+        kind: "info",
+        lines,
+    };
+};
+const runXacroBangCommand = () => {
+    const probeExecution = executeCliCommand("probe-xacro-runtime", new Map());
+    const probePayload = parseExecutionJson(probeExecution);
+    if (probePayload?.available) {
+        return {
+            panel: summarizeXacroRuntimePanel(probePayload, "xacro runtime ready"),
+            notice: { kind: "success", text: "xacro runtime ready" },
+        };
+    }
+    const setupExecution = executeCliCommand("setup-xacro-runtime", new Map());
+    const setupPayload = parseExecutionJson(setupExecution);
+    if (setupPayload?.available) {
+        return {
+            panel: summarizeXacroRuntimePanel(setupPayload, "xacro runtime installed"),
+            notice: { kind: "success", text: "xacro runtime installed" },
+        };
+    }
+    const panel = buildPreviewErrorPanel("xacro", setupExecution);
+    return {
+        panel,
+        notice: buildShellFailureNotice(panel, "xacro setup failed"),
+    };
+};
 const formatCount = (count, singular, plural = `${singular}s`) => `${count} ${count === 1 ? singular : plural}`;
 const buildPreviewErrorPanel = (title, execution) => {
+    const combinedOutput = [execution.stderr, execution.stdout].filter(Boolean).join("\n").trim();
+    if (isMissingXacroRuntimeErrorText(combinedOutput)) {
+        return {
+            title: "xacro",
+            kind: "info",
+            lines: [
+                "xacro runtime not set",
+                "run !xacro",
+                "retry when setup finishes",
+            ],
+        };
+    }
     const errorLines = (execution.stderr || execution.stdout)
         .split(/\r?\n/)
         .map((line) => line.trim())
@@ -1068,6 +1130,21 @@ const buildPreviewErrorPanel = (title, execution) => {
         title,
         kind: "error",
         lines: errorLines.length > 0 ? errorLines.slice(0, 6) : [`preview failed with status ${execution.status}`],
+    };
+};
+const isMissingXacroRuntimeErrorText = (text) => /no (python |vendored )?xacro runtime available/i.test(text) ||
+    /install xacro or provide i_love_urdf_xacrodoc_wheel/i.test(text) ||
+    /set up a local xacro runtime/i.test(text);
+const buildShellFailureNotice = (panel, fallbackText, fallbackKind = "error") => {
+    if (panel?.title === "xacro") {
+        return {
+            kind: "warning",
+            text: XACRO_RUNTIME_NOTICE,
+        };
+    }
+    return {
+        kind: fallbackKind,
+        text: fallbackText,
     };
 };
 const summarizeRepositoryPreview = (session, payload, options = {}) => {
@@ -1275,9 +1352,10 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
     const loadExecution = executeCliCommand("load-source", loadArgs);
     const loadPayload = parseExecutionJson(loadExecution);
     if (!loadPayload || !loadPayload.outPath) {
+        const panel = buildPreviewErrorPanel("error", loadExecution);
         return {
-            panel: buildPreviewErrorPanel("error", loadExecution),
-            notice: { kind: "error", text: "could not load source" },
+            panel,
+            notice: buildShellFailureNotice(panel, "could not load source"),
             clearSession: false,
         };
     }
@@ -1287,9 +1365,10 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
     const validationPayload = parseExecutionJson(validationExecution);
     const healthPayload = parseExecutionJson(healthExecution);
     if (!validationPayload || !healthPayload) {
+        const panel = buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution);
         return {
-            panel: buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution),
-            notice: { kind: "error", text: "validation failed to run" },
+            panel,
+            notice: buildShellFailureNotice(panel, "validation failed to run"),
             clearSession: false,
         };
     }
@@ -1469,9 +1548,10 @@ const runDirectInputAutomation = (state, session, changedKey) => {
         const validationPayload = parseExecutionJson(validationExecution);
         const healthPayload = parseExecutionJson(healthExecution);
         if (!validationPayload || !healthPayload) {
+            const panel = buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution);
             return {
-                panel: buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution),
-                notice: { kind: "error", text: "checks failed to run" },
+                panel,
+                notice: buildShellFailureNotice(panel, "checks failed to run"),
                 clearSession: false,
             };
         }
@@ -1591,7 +1671,29 @@ const executeSessionCommand = (state, session) => {
         followUp: status === 0 ? getFollowUpSuggestionMessage(state, session.command) : null,
     };
 };
+const getShellExecutionFailurePanel = (execution, command) => {
+    const combinedOutput = [execution.stderr, execution.stdout].filter(Boolean).join("\n").trim();
+    if (command === "xacro-to-urdf" &&
+        isMissingXacroRuntimeErrorText(combinedOutput)) {
+        return {
+            title: "xacro",
+            kind: "info",
+            lines: [
+                "xacro runtime not set",
+                "run !xacro",
+                "retry /run when setup finishes",
+            ],
+        };
+    }
+    return null;
+};
 const printSessionCommandExecution = (execution, command) => {
+    const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, command) : null;
+    if (compactFailurePanel) {
+        writeFeedback(buildShellFailureNotice(compactFailurePanel, `[${command}] exited with status ${execution.status}`));
+        printOutputPanel(compactFailurePanel);
+        return;
+    }
     process.stdout.write(`\n${formatStatusTag("cmd")} ${SHELL_THEME.command(execution.preview)}\n`);
     if (execution.stdout) {
         process.stdout.write(execution.stdout);
@@ -2522,7 +2624,7 @@ const renderTtyShell = (state, view) => {
         ? SHELL_THEME.muted(`helper /${state.session.label}  arrows move  tab completes  enter selects  ctrl+c exits`)
         : state.rootTask
             ? SHELL_THEME.muted(`task /${state.rootTask}  paste a source or type /  tab completes  ctrl+c exits`)
-            : SHELL_THEME.muted("paste owner/repo or drop a local path  / shows helpers  tab completes  ctrl+c exits"));
+            : SHELL_THEME.muted("paste owner/repo or drop a local path  / shows helpers  !xacro sets up xacro  ctrl+c exits"));
     if (view.notice) {
         lines.push(renderNotice(view.notice));
     }
@@ -2732,7 +2834,16 @@ const runLineInteractiveShell = async (options = {}) => {
         const trimmed = line.trim();
         const session = state.session;
         const isSlashInput = shouldTreatAsSlashInput(line, state);
-        if (state.candidatePicker && !isSlashInput) {
+        const bangCommand = parseBangInput(line);
+        if (bangCommand) {
+            if (bangCommand === "xacro") {
+                process.stdout.write(`${SHELL_THEME.muted("setting up xacro runtime...")}\n`);
+                const result = runXacroBangCommand();
+                writeFeedback(result.notice);
+                printOutputPanel(result.panel);
+            }
+        }
+        else if (state.candidatePicker && !isSlashInput) {
             const selectedPath = resolveCandidateSelectionInput(state, line);
             if (selectedPath) {
                 const result = runSelectedCandidatePicker(state, selectedPath);
@@ -3078,6 +3189,13 @@ const runTtyInteractiveShell = async (options = {}) => {
                 return true;
             }
             const execution = executeSessionCommand(state, session);
+            const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
+            if (compactFailurePanel) {
+                view.output = compactFailurePanel;
+                view.notice = buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`);
+                pushTimelineEntry(view, "/run");
+                return true;
+            }
             view.output = createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, session.command), execution.status === 0 ? "success" : "error");
             view.notice =
                 execution.status === 0
@@ -3193,7 +3311,19 @@ const runTtyInteractiveShell = async (options = {}) => {
     };
     const handleEnter = () => {
         const trimmed = view.input.trim();
+        const bangCommand = parseBangInput(trimmed);
         const isSlashInput = shouldTreatAsSlashInput(view.input, state);
+        if (bangCommand) {
+            if (bangCommand === "xacro") {
+                view.notice = { kind: "info", text: "setting up xacro runtime..." };
+                render();
+                const result = runXacroBangCommand();
+                view.notice = result.notice;
+                view.output = result.panel;
+            }
+            setInput("");
+            return;
+        }
         if (state.candidatePicker && !isSlashInput) {
             const selectedPath = resolveCandidateSelectionInput(state, view.input);
             if (selectedPath) {
@@ -3496,6 +3626,7 @@ const renderShellHelp = () => {
         "  ./robot.urdf       Run validation and a health check",
         "  ./robot.zip        Unpack and check an uploaded archive",
         "  ./robot-folder/    Load a local repo or folder and auto-run checks",
+        "  !xacro            Install or verify the local XACRO runtime",
         "  /                  Open extra helpers under the prompt",
         "  up/down            Move through picker options",
         "  tab                Complete the selected option or path",
