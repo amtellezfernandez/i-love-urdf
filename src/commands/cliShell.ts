@@ -509,13 +509,7 @@ const ROOT_GUIDANCE =
   "paste owner/repo or drop a local folder/file. type / for helpers, !xacro for xacro setup, /update for latest, ctrl+c to quit";
 let cachedGitHubAuthState: boolean | undefined;
 
-const formatRootPrompt = (state?: Pick<ShellState, "rootTask">): string =>
-  state?.rootTask ? `/${state.rootTask}> ` : "/> ";
-const formatSessionPrompt = (session: ShellSession): string =>
-  session.pending ? `/${session.pending.slashName}> ` : `/${session.label}> `;
-const formatCandidatePrompt = (): string => "pick> ";
-const formatShellPrompt = (state: ShellState): string =>
-  state.candidatePicker ? formatCandidatePrompt() : state.session ? formatSessionPrompt(state.session) : formatRootPrompt(state);
+const formatShellPrompt = (_state: ShellState): string => "/> ";
 
 const quoteForPreview = (value: string): string => (/\s/.test(value) ? JSON.stringify(value) : value);
 
@@ -4454,33 +4448,13 @@ const getPromptPlaceholder = (state: ShellState): string => {
 const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   const columns = process.stdout.columns ?? 100;
   const rows = process.stdout.rows ?? 24;
-  if (view.busy) {
-    const lines: string[] = [];
-    lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
-    lines.push(SHELL_THEME.muted("working..."));
-    lines.push("");
-    lines.push(SHELL_THEME.section(view.busy.title));
-    for (const line of view.busy.lines) {
-      lines.push(`  ${SHELL_THEME.muted(truncateText(line, columns - 4))}`);
-    }
-    process.stdout.write("\u001b[2J\u001b[H");
-    process.stdout.write(lines.join("\n"));
-    return;
-  }
-
   const menuEntries = getSlashMenuEntries(state, view.input);
   const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
   view.menuIndex = menuWindow.selectedIndex;
 
   const lines: string[] = [];
   lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
-  lines.push(
-    state.session
-      ? SHELL_THEME.muted(`helper /${state.session.label}  arrows move  tab completes  enter selects  ctrl+c exits`)
-      : state.rootTask
-        ? SHELL_THEME.muted(`task /${state.rootTask}  paste a source or type /  tab completes  ctrl+c exits`)
-        : SHELL_THEME.muted("paste owner/repo or drop a local path  / shows helpers  !xacro sets up xacro  ctrl+c exits")
-  );
+  lines.push(SHELL_THEME.muted("paste owner/repo or drop a local path  / shows helpers  !xacro sets up xacro  ctrl+c exits"));
 
   if (view.notice) {
     lines.push(renderNotice(view.notice));
@@ -4495,7 +4469,7 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   }
 
   lines.push("");
-  lines.push(SHELL_THEME.section(state.session ? "current" : state.rootTask ? `/${state.rootTask}` : "start"));
+  lines.push(SHELL_THEME.section(state.session ? "current" : state.rootTask ? "task" : "start"));
   if (state.candidatePicker && state.session) {
     const selectedCandidate =
       state.candidatePicker.candidates[clamp(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
@@ -4518,12 +4492,8 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
       lines.push(`  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command(state.session.pending.title)}`);
     }
   } else if (state.rootTask) {
-    lines.push(`  ${SHELL_THEME.muted(getRootTaskSummary(state.rootTask))}`);
-    for (const entry of getRootTaskActionDefinitions(state.rootTask)) {
-      lines.push(
-        `  ${SHELL_THEME.command(`/${entry.name}`.padEnd(18))}${SHELL_THEME.muted(entry.summary)}`
-      );
-    }
+    lines.push(`  ${SHELL_THEME.muted(`task /${state.rootTask}`)} ${SHELL_THEME.muted(getRootTaskSummary(state.rootTask))}`);
+    lines.push(`  ${SHELL_THEME.muted("pick a helper below or paste input directly")}`);
   } else {
     const readySourceLabel = getReadySourceLabel(state);
     if (readySourceLabel) {
@@ -4543,12 +4513,22 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     }
   }
 
+  if (view.busy) {
+    lines.push("");
+    lines.push(SHELL_THEME.section(view.busy.title));
+    for (const line of view.busy.lines) {
+      lines.push(`  ${SHELL_THEME.icon("…")} ${SHELL_THEME.muted(truncateText(line, columns - 6))}`);
+    }
+  }
+
   lines.push("");
   const promptLabel = formatShellPrompt(state).trimEnd();
   const promptLineIndex = lines.length;
-  const placeholder = view.input.length === 0 ? getPromptPlaceholder(state) : "";
+  const placeholder = view.input.length === 0 && !view.busy ? getPromptPlaceholder(state) : "";
   lines.push(
-    `${SHELL_THEME.command(promptLabel)} ${view.input}${placeholder ? SHELL_THEME.muted(placeholder) : ""}`
+    `${SHELL_THEME.command(promptLabel)} ${view.input}${
+      view.busy ? SHELL_THEME.muted("working...") : placeholder ? SHELL_THEME.muted(placeholder) : ""
+    }`
   );
 
   if (state.session?.pending && !view.input.startsWith("/")) {
@@ -4598,7 +4578,7 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     }
   }
 
-  process.stdout.write("\u001b[2J\u001b[H");
+  process.stdout.write("\u001b[H\u001b[J");
   process.stdout.write(lines.join("\n"));
 
   const linesBelowPrompt = lines.length - promptLineIndex - 1;
@@ -4895,7 +4875,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     clearXacroRetry(state);
     state.session = createSession(command, state, command, feedback);
     setNoticeFromFeedback(view, feedback);
-    view.output = null;
+    setInput(state.session?.pending ? "" : "/");
     pushTimelineEntry(view, `/${command}`);
   };
 
@@ -4904,8 +4884,8 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     state.session = null;
     clearCandidatePicker(state);
     clearXacroRetry(state);
-    view.output = null;
-    view.notice = { kind: "info", text: getRootTaskSummary(task) };
+    setInput("/");
+    view.notice = { kind: "info", text: `${getRootTaskSummary(task)}  choose below or paste input directly` };
     pushTimelineEntry(view, `/${task}`);
   };
 
@@ -4965,7 +4945,26 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     return {
       title: "working",
       lines: ["running command..."],
-    };
+      };
+  };
+
+  const syncInputAfterSlashAction = (parsed: { slashCommand: string; inlineValue: string }) => {
+    if (state.candidatePicker || state.session?.pending) {
+      setInput("");
+      return;
+    }
+
+    if (!parsed.inlineValue && (!parsed.slashCommand || parsed.slashCommand === "help")) {
+      setInput("/");
+      return;
+    }
+
+    if (state.rootTask || state.session) {
+      setInput("/");
+      return;
+    }
+
+    setInput("");
   };
 
   const handleRootAction = (slashCommand: string): boolean => {
@@ -5077,7 +5076,6 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       clearCandidatePicker(state);
       clearXacroRetry(state);
       view.notice = { kind: "info", text: "back to tasks" };
-      view.output = null;
       pushTimelineEntry(view, "/back");
       return true;
     }
@@ -5173,7 +5171,6 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
           ].join("  "),
         };
       }
-      view.output = null;
       pushTimelineEntry(view, `/${slashCommand}`);
       return true;
     }
@@ -5203,7 +5200,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       clearXacroRetry(state);
       state.session = null;
       view.notice = { kind: "info", text: state.rootTask ? `back to /${state.rootTask}` : "back to tasks" };
-      view.output = null;
+      setInput(state.rootTask ? "/" : "");
       pushTimelineEntry(view, "/back");
       return true;
     }
@@ -5214,7 +5211,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       clearXacroRetry(state);
       state.session = createSession(session.command, state, session.label, feedback);
       setNoticeFromFeedback(view, feedback);
-      view.output = null;
+      setInput(state.session?.pending ? "" : "/");
       pushTimelineEntry(view, "/reset");
       return true;
     }
@@ -5349,7 +5346,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         ...session.pending.notes,
       ].join("  "),
     };
-    view.output = null;
+    setInput("");
     return true;
   };
 
@@ -5458,7 +5455,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
             } else {
               handleRootAction(selected.name);
             }
-            setInput("");
+            syncInputAfterSlashAction(parsed);
             return;
           }
         }
@@ -5471,7 +5468,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       } else {
         handleRootAction(parsed.slashCommand);
       }
-      setInput("");
+      syncInputAfterSlashAction(parsed);
       return;
     }
 
@@ -5767,7 +5764,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     process.stdin.off("keypress", onKeypress);
     process.stdin.setRawMode(false);
     process.stdin.pause();
-    process.stdout.write("\u001b[2J\u001b[H\n");
+    process.stdout.write("\u001b[H\u001b[J\n");
   }
 };
 
