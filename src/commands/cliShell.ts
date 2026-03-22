@@ -75,6 +75,12 @@ type TtyShellViewState = {
   menuIndex: number;
   notice: ShellFeedback | null;
   output: ShellOutputPanel;
+  busy:
+    | {
+        title: string;
+        lines: readonly string[];
+      }
+    | null;
 };
 
 type Keypress = {
@@ -3642,6 +3648,20 @@ const getPromptPlaceholder = (state: ShellState): string => {
 const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   const columns = process.stdout.columns ?? 100;
   const rows = process.stdout.rows ?? 24;
+  if (view.busy) {
+    const lines: string[] = [];
+    lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
+    lines.push(SHELL_THEME.muted("working..."));
+    lines.push("");
+    lines.push(SHELL_THEME.section(view.busy.title));
+    for (const line of view.busy.lines) {
+      lines.push(`  ${SHELL_THEME.muted(truncateText(line, columns - 4))}`);
+    }
+    process.stdout.write("\u001b[2J\u001b[H");
+    process.stdout.write(lines.join("\n"));
+    return;
+  }
+
   const menuEntries = getSlashMenuEntries(state, view.input);
   const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
   view.menuIndex = menuWindow.selectedIndex;
@@ -4039,8 +4059,10 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     menuIndex: 0,
     notice: null,
     output: null,
+    busy: null,
   };
   let closed = false;
+  let ignoreKeypressUntilMs = 0;
 
   const close = () => {
     closed = true;
@@ -4069,6 +4091,58 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     view.output = null;
     view.notice = { kind: "info", text: getRootTaskSummary(task) };
     pushTimelineEntry(view, `/${task}`);
+  };
+
+  const getBusyStateForSession = (
+    session: ShellSession,
+    changedKey?: string
+  ): {
+    title: string;
+    lines: readonly string[];
+  } => {
+    if (session.command === "load-source") {
+      if (
+        changedKey === "github" ||
+        (typeof session.args.get("github") === "string" && String(session.args.get("github")).trim().length > 0)
+      ) {
+        return {
+          title: "loading",
+          lines: ["reading repository...", "finding URDF entrypoints..."],
+        };
+      }
+
+      const sourcePath = session.args.get("path");
+      if (typeof sourcePath === "string" && sourcePath.toLowerCase().endsWith(".zip")) {
+        return {
+          title: "loading",
+          lines: ["opening archive...", "finding URDF entrypoints..."],
+        };
+      }
+
+      return {
+        title: "loading",
+        lines: ["reading local source...", "finding URDF entrypoints..."],
+      };
+    }
+
+    if (session.command === "health-check") {
+      return {
+        title: "checking",
+        lines: ["running validation...", "running health check..."],
+      };
+    }
+
+    if (session.command === "xacro-to-urdf") {
+      return {
+        title: "xacro",
+        lines: ["expanding xacro...", "building URDF output..."],
+      };
+    }
+
+    return {
+      title: "working",
+      lines: ["running command..."],
+    };
   };
 
   const handleRootAction = (slashCommand: string): boolean => {
@@ -4272,7 +4346,9 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return true;
       }
 
-      const execution = executeSessionCommand(state, session);
+      const execution = runBusyOperation(getBusyStateForSession(session), () =>
+        executeSessionCommand(state, session)
+      );
       const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
       if (compactFailurePanel) {
         view.output = compactFailurePanel;
@@ -4346,7 +4422,10 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       const feedback: ShellFeedback[] = [];
       if (setSessionValue(session, target.key, inlineValue, feedback)) {
         session.pending = null;
-        const { automation, preview } = applyValueChangeEffects(state, session, target.key);
+        const { automation, preview } = runBusyOperation(
+          getBusyStateForSession(session, target.key),
+          () => applyValueChangeEffects(state, session, target.key)
+        );
         if (automation) {
           view.notice = automation.notice;
           view.output = automation.panel;
@@ -4391,7 +4470,10 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       pushTimelineEntry(view, `/${session.pending.slashName}${formatInlineValue(view.input)}`);
       const changedKey = session.pending.key;
       session.pending = null;
-      const { automation, preview } = applyValueChangeEffects(state, session, changedKey);
+      const { automation, preview } = runBusyOperation(
+        getBusyStateForSession(session, changedKey),
+        () => applyValueChangeEffects(state, session, changedKey)
+      );
       if (automation) {
         view.notice = automation.notice;
         view.output = automation.panel;
@@ -4416,9 +4498,13 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     const isSlashInput = shouldTreatAsSlashInput(view.input, state);
     if (bangCommand) {
       if (bangCommand === "xacro") {
-        view.notice = { kind: "info", text: "setting up xacro runtime..." };
-        render();
-        const result = runXacroBangCommand();
+        const result = runBusyOperation(
+          {
+            title: "xacro",
+            lines: ["setting up xacro runtime...", "this can take a moment..."],
+          },
+          () => runXacroBangCommand()
+        );
         view.notice = result.notice;
         view.output = result.panel;
       }
@@ -4429,7 +4515,13 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     if (state.candidatePicker && !isSlashInput) {
       const selectedPath = resolveCandidateSelectionInput(state, view.input);
       if (selectedPath) {
-        const result = runSelectedCandidatePicker(state, selectedPath);
+        const result = runBusyOperation(
+          {
+            title: "loading",
+            lines: ["loading selected entry...", "running validation and health check..."],
+          },
+          () => runSelectedCandidatePicker(state, selectedPath)
+        );
         view.notice = result?.notice ?? { kind: "error", text: "could not load candidate" };
         view.output = result?.panel ?? null;
         if (result?.clearSession) {
@@ -4495,9 +4587,13 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if (state.session) {
       const feedback: ShellFeedback[] = [];
+      const submittedInput = view.input.trim();
       const applied = applyFreeformInputToSession(state.session, view.input, feedback);
       if (applied) {
-        const automated = runDirectInputAutomation(state, applied.session, applied.key);
+        const automated = runBusyOperation(
+          getBusyStateForSession(applied.session, applied.key),
+          () => runDirectInputAutomation(state, applied.session, applied.key)
+        );
         if (automated) {
           view.notice = automated.notice;
           view.output = automated.panel;
@@ -4521,16 +4617,20 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
             : { kind: "info", text: buildSessionHeadline(applied.session) };
           view.output = preview;
         }
-        pushTimelineEntry(view, view.input.trim());
+        pushTimelineEntry(view, submittedInput);
         setInput("");
         return;
       }
       setNoticeFromFeedback(view, feedback);
     } else {
       const feedback: ShellFeedback[] = [];
+      const submittedInput = view.input.trim();
       const applied = applyFreeformInputToRootState(state, view.input, feedback);
       if (applied && state.session) {
-        const automated = runDirectInputAutomation(state, applied.session, applied.key);
+        const automated = runBusyOperation(
+          getBusyStateForSession(applied.session, applied.key),
+          () => runDirectInputAutomation(state, applied.session, applied.key)
+        );
         if (automated) {
           view.notice = automated.notice;
           view.output = automated.panel;
@@ -4554,7 +4654,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
             : { kind: "info", text: buildSessionHeadline(applied.session) };
           view.output = preview;
         }
-        pushTimelineEntry(view, view.input.trim());
+        pushTimelineEntry(view, submittedInput);
         setInput("");
         return;
       }
@@ -4567,6 +4667,24 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
   const render = () => {
     renderTtyShell(state, view);
+  };
+
+  const runBusyOperation = <T>(
+    busy: {
+      title: string;
+      lines: readonly string[];
+    },
+    operation: () => T
+  ): T => {
+    setInput("");
+    view.busy = busy;
+    queueRender("force");
+    try {
+      return operation();
+    } finally {
+      view.busy = null;
+      ignoreKeypressUntilMs = Date.now() + 200;
+    }
   };
 
   let pendingRenderTimer: NodeJS.Timeout | null = null;
@@ -4620,6 +4738,14 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
   const onKeypress = (input: string, key: Keypress) => {
     if (closed) {
+      return;
+    }
+
+    if (view.busy) {
+      return;
+    }
+
+    if (Date.now() < ignoreKeypressUntilMs && !(key.ctrl && key.name === "c")) {
       return;
     }
 
