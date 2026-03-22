@@ -135,10 +135,13 @@ const parseArgs = (argv) => {
         ? rawCommand
         : "help";
     const args = new Map();
+    const positionals = [];
     for (let index = 0; index < rest.length; index += 1) {
         const token = rest[index];
-        if (!token.startsWith("--"))
+        if (!token.startsWith("--")) {
+            positionals.push(token);
             continue;
+        }
         const key = token.slice(2);
         const nextToken = rest[index + 1];
         if (!nextToken || nextToken.startsWith("--")) {
@@ -148,7 +151,7 @@ const parseArgs = (argv) => {
         args.set(key, nextToken);
         index += 1;
     }
-    return { rawCommand, command, args };
+    return { rawCommand, command, args, positionals };
 };
 exports.parseArgs = parseArgs;
 const createCliCommandHelpers = () => ({

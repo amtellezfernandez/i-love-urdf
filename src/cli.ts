@@ -3,7 +3,10 @@
 import * as process from "node:process";
 import { isAnalysisCommand, runAnalysisCommand } from "./commands/analysisCommands";
 import { createCliCommandHelpers, parseArgs } from "./commands/cliArgs";
+import type { CompletionShell } from "./commands/cliCompletion";
+import { isCompletionShell, renderCompletionHelp, renderCompletionScript } from "./commands/cliCompletion";
 import { printHelp } from "./commands/cliHelp";
+import { renderShellHelp, runInteractiveShell } from "./commands/cliShell";
 import { isEditCommand, runEditCommand } from "./commands/editCommands";
 import { isSourceCommand, runSourceCommand } from "./commands/sourceCommands";
 import { installNodeDomGlobals } from "./node/nodeDomRuntime";
@@ -11,11 +14,53 @@ import { installNodeDomGlobals } from "./node/nodeDomRuntime";
 const cliHelpers = createCliCommandHelpers();
 
 const run = async () => {
-  const { rawCommand, command, args } = parseArgs(process.argv);
+  const { rawCommand, command, args, positionals } = parseArgs(process.argv);
   installNodeDomGlobals();
 
+  if (process.argv.length <= 2) {
+    await runInteractiveShell();
+    return;
+  }
+
+  if (rawCommand === "shell") {
+    if (args.has("help")) {
+      console.log(renderShellHelp());
+      return;
+    }
+
+    await runInteractiveShell({
+      initialSlashCommand: positionals[0]?.startsWith("/") ? positionals[0] : undefined,
+    });
+    return;
+  }
+
   if (rawCommand === "help" || rawCommand === "--help" || rawCommand === "-h") {
+    if (positionals[0] === "shell") {
+      console.log(renderShellHelp());
+      return;
+    }
+
     printHelp();
+    return;
+  }
+
+  if (rawCommand === "completion") {
+    if (args.has("help")) {
+      console.log(renderCompletionHelp());
+      return;
+    }
+
+    const requestedShell = positionals[0];
+    if (!requestedShell) {
+      cliHelpers.fail(renderCompletionHelp());
+    }
+
+    if (!isCompletionShell(requestedShell)) {
+      cliHelpers.fail(renderCompletionHelp());
+    }
+
+    const completionShell = requestedShell as CompletionShell;
+    console.log(renderCompletionScript(completionShell));
     return;
   }
 

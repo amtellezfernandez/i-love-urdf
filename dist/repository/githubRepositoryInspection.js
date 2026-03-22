@@ -173,18 +173,35 @@ const parseGitHubRepositoryReference = (value) => {
     const trimmed = value.trim().replace(/\/$/, "");
     if (!trimmed)
         return null;
-    if (!trimmed.includes("github.com")) {
+    const sshRemoteMatch = /^git@github\.com:(?<owner>[^/]+)\/(?<repo>[^/]+?)(?:\.git)?$/i.exec(trimmed);
+    if (sshRemoteMatch?.groups) {
+        return {
+            owner: sanitizeRepoSegment(sshRemoteMatch.groups.owner),
+            repo: sanitizeRepoSegment(sshRemoteMatch.groups.repo),
+        };
+    }
+    const looksLikeGitHubHostReference = /^(?:(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^/@]+@)?(?:www\.)?github\.com\/|(?:www\.)?github\.com\/)/i.test(trimmed);
+    if (!looksLikeGitHubHostReference) {
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) || /^[^/]+@[^/]+[:/]/.test(trimmed)) {
+            return null;
+        }
         const parts = trimmed.split("/").filter(Boolean);
         if (parts.length < 2)
             return null;
+        const owner = sanitizeRepoSegment(parts[0]);
+        const repo = sanitizeRepoSegment(parts[1]);
+        if (!owner || !repo || owner.includes(":") || repo.includes(":") || owner.includes("@") || repo.includes("@")) {
+            return null;
+        }
         return {
-            owner: sanitizeRepoSegment(parts[0]),
-            repo: sanitizeRepoSegment(parts[1]),
+            owner,
+            repo,
             path: parts.length > 2 ? parts.slice(2).join("/") : undefined,
         };
     }
     try {
-        const url = new URL(trimmed);
+        const normalizedUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+        const url = new URL(normalizedUrl);
         if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
             return null;
         }

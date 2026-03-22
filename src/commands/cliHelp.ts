@@ -156,6 +156,10 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
     "",
     formatBlock("GitHub Auth", ["gh auth login", "gh auth status"], theme),
     "",
+    formatBlock("Shell", ["ilu", "ilu shell", "Type / to see helpers and /exit to quit."], theme),
+    "",
+    formatBlock("Completion", ["ilu completion bash", "ilu completion zsh", "ilu completion fish"], theme),
+    "",
     formatBlock(
       "Token Resolution",
       ["--token <token> -> GITHUB_TOKEN -> GH_TOKEN -> GitHub CLI auth"],

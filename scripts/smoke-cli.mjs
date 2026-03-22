@@ -828,6 +828,35 @@ const repoRef = lib.parseGitHubRepositoryReference("https://github.com/acme/robo
 if (!repoRef || repoRef.owner !== "acme" || repoRef.repo !== "robot-repo" || repoRef.ref !== "main" || repoRef.path !== "robots/arm") {
   throw new Error("ilu GitHub repository parsing smoke test failed");
 }
+const repoRefWithoutScheme = lib.parseGitHubRepositoryReference("github.com/acme/robot-repo/tree/main/robots/arm");
+if (
+  !repoRefWithoutScheme ||
+  repoRefWithoutScheme.owner !== "acme" ||
+  repoRefWithoutScheme.repo !== "robot-repo" ||
+  repoRefWithoutScheme.ref !== "main" ||
+  repoRefWithoutScheme.path !== "robots/arm"
+) {
+  throw new Error("ilu GitHub repository parsing without scheme smoke test failed");
+}
+const repoRefFromSshRemote = lib.parseGitHubRepositoryReference("git@github.com:acme/robot-repo.git");
+if (
+  !repoRefFromSshRemote ||
+  repoRefFromSshRemote.owner !== "acme" ||
+  repoRefFromSshRemote.repo !== "robot-repo"
+) {
+  throw new Error("ilu GitHub SSH remote parsing smoke test failed");
+}
+const repoRefFromSshUrl = lib.parseGitHubRepositoryReference("ssh://git@github.com/acme/robot-repo.git");
+if (
+  !repoRefFromSshUrl ||
+  repoRefFromSshUrl.owner !== "acme" ||
+  repoRefFromSshUrl.repo !== "robot-repo"
+) {
+  throw new Error("ilu GitHub SSH URL parsing smoke test failed");
+}
+if (lib.parseGitHubRepositoryReference("https://gitlab.com/acme/robot-repo") !== null) {
+  throw new Error("ilu non-GitHub repository parsing smoke test failed");
+}
 
 const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-smoke-"));
 fs.mkdirSync(path.join(tempRepo, "meshes"), { recursive: true });
@@ -1186,6 +1215,8 @@ const cliHelpOutput = execFileSync(process.execPath, [cliPath, "help"], {
 if (
   !cliHelpOutput.includes("health-check") ||
   !cliHelpOutput.includes("morphology-card") ||
+  !cliHelpOutput.includes("ilu shell") ||
+  !cliHelpOutput.includes("ilu completion bash") ||
   !cliHelpOutput.includes("--name-hints <a,b,c>") ||
   !cliHelpOutput.includes("snap-axes") ||
   !cliHelpOutput.includes("set-joint-type") ||
@@ -1201,6 +1232,54 @@ if (
   !cliHelpOutput.includes("urdf-to-usd")
 ) {
   throw new Error("ilu CLI surface smoke test failed");
+}
+
+const bashCompletionOutput = execFileSync(process.execPath, [cliPath, "completion", "bash"], {
+  cwd: root,
+  encoding: "utf8",
+});
+if (!bashCompletionOutput.includes("complete -o bashdefault -o default -F _ilu ilu")) {
+  throw new Error("ilu bash completion smoke test failed");
+}
+
+const shellHelpOutput = execFileSync(process.execPath, [cliPath, "help", "shell"], {
+  cwd: root,
+  encoding: "utf8",
+});
+if (!shellHelpOutput.includes("ilu shell") || !shellHelpOutput.includes("/load-source")) {
+  throw new Error("ilu shell help smoke test failed");
+}
+
+const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: "/load-source\n/\n/repo\nANYbotics/anymal_b_simple_description\n/show\n/back\n/health-check\n/show\n/exit\n",
+});
+if (
+  !shellTranscript.includes("Slash-first help for loading, checking, and fixing URDFs.") ||
+  !shellTranscript.includes("Start Here") ||
+  !shellTranscript.includes("/repo") ||
+  !shellTranscript.includes("GitHub repo or URL") ||
+  !shellTranscript.includes("Next: /repo or /local") ||
+  !shellTranscript.includes("Ready: /run") ||
+  !shellTranscript.includes("Current Command") ||
+  !shellTranscript.includes("ilu load-source --github ANYbotics/anymal_b_simple_description") ||
+  !shellTranscript.includes("Next\n  /urdf")
+) {
+  throw new Error("ilu shell guided-helper smoke test failed");
+}
+
+const xacroShellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: "/xacro-to-urdf\n/exit\n",
+});
+if (
+  !xacroShellTranscript.includes("Next: /xacro or /repo or /local") ||
+  !xacroShellTranscript.includes("/entry") ||
+  !xacroShellTranscript.includes("Common")
+) {
+  throw new Error("ilu shell xacro workflow guidance smoke test failed");
 }
 
 let invalidCommandOutput = "";

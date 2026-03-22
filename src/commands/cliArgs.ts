@@ -8,6 +8,7 @@ export type ParsedCliArgs = {
   rawCommand: string;
   command: CommandName;
   args: CliArgMap;
+  positionals: readonly string[];
 };
 
 const SUPPORTED_COMMAND_SET = new Set<string>(SUPPORTED_COMMANDS);
@@ -170,10 +171,14 @@ export const parseArgs = (argv: string[]): ParsedCliArgs => {
     ? (rawCommand as SupportedCommandName)
     : "help";
   const args: CliArgMap = new Map();
+  const positionals: string[] = [];
 
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
-    if (!token.startsWith("--")) continue;
+    if (!token.startsWith("--")) {
+      positionals.push(token);
+      continue;
+    }
 
     const key = token.slice(2);
     const nextToken = rest[index + 1];
@@ -186,7 +191,7 @@ export const parseArgs = (argv: string[]): ParsedCliArgs => {
     index += 1;
   }
 
-  return { rawCommand, command, args };
+  return { rawCommand, command, args, positionals };
 };
 
 export const createCliCommandHelpers = (): CliCommandHelpers => ({

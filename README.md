@@ -65,6 +65,31 @@ npm install -g .
 ilu --help
 ```
 
+Interactive shell:
+
+```sh
+ilu
+# or
+ilu shell
+```
+
+Inside the shell, start with `/`.
+For example, `/load-source` opens a guided helper and then offers `/repo` and `/local`.
+`/repo` accepts either `owner/repo` or a full GitHub repository URL.
+
+Enable tab completion:
+
+```sh
+# bash
+source <(ilu completion bash)
+
+# zsh
+source <(ilu completion zsh)
+
+# fish
+ilu completion fish > ~/.config/fish/completions/ilu.fish
+```
+
 After modifying a local checkout, refresh the global CLI binaries with:
 
 ```sh
