@@ -9,8 +9,8 @@ ilu
 
 Inside `ilu`:
 
-- paste `owner/repo` to preview a GitHub repo immediately
-- drag and drop a local folder or `.urdf` into the shell
+- paste `owner/repo` or drop a local folder, `.urdf`, or `.zip`
+- `ilu` auto-runs validation and a health check when it can
 - type `/` only when you want extra helpers
 - use arrow keys to move
 - press `Tab` to complete the selected option

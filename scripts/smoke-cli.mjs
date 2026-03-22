@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
+import AdmZip from "adm-zip";
 import { installDomGlobals } from "./install-dom-globals.mjs";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -1277,6 +1278,11 @@ const shellDropDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-drop-"));
 const droppedUrdfPath = path.join(shellDropDir, "local robot.urdf");
 fs.writeFileSync(droppedUrdfPath, "<robot name=\"drop_robot\"><link name=\"base\"/></robot>", "utf8");
 const escapedDroppedUrdfPath = droppedUrdfPath.replaceAll(" ", "\\ ");
+const droppedZipPath = path.join(shellDropDir, "robot bundle.zip");
+const droppedZip = new AdmZip();
+droppedZip.addLocalFile(droppedUrdfPath, "robot_bundle/urdf", "robot.urdf");
+droppedZip.writeZip(droppedZipPath);
+const escapedDroppedZipPath = droppedZipPath.replaceAll(" ", "\\ ");
 
 const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
@@ -1287,11 +1293,11 @@ if (
   !shellTranscript.includes("interactive urdf shell") ||
   !shellTranscript.includes("paste owner/repo or drop a local folder/file") ||
   !shellTranscript.includes("ANYbotics/anymal_b_simple_description") ||
-  !shellTranscript.includes("[ready] /run") ||
-  !shellTranscript.includes("flow open ANYbotics/anymal_b_simple_description") ||
-  !shellTranscript.includes("preview") ||
-  !shellTranscript.includes("best match") ||
-  !shellTranscript.includes("next /run to load the best match or /entry to override")
+  !shellTranscript.includes("validation and health check passed") ||
+  !shellTranscript.includes("loaded") ||
+  !shellTranscript.includes("loaded urdf/anymal.urdf") ||
+  !shellTranscript.includes("validation passed") ||
+  !shellTranscript.includes("health check passed")
 ) {
   throw new Error("ilu shell direct-repo entry smoke test failed");
 }
@@ -1302,12 +1308,26 @@ const localDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   input: `${escapedDroppedUrdfPath}\n/exit\n`,
 });
 if (
-  !localDropTranscript.includes("flow check") ||
+  !localDropTranscript.includes("validation and health check passed") ||
   !localDropTranscript.includes(droppedUrdfPath) ||
-  !localDropTranscript.includes("health") ||
-  !localDropTranscript.includes("looks healthy")
+  !localDropTranscript.includes("validation passed") ||
+  !localDropTranscript.includes("health check passed")
 ) {
   throw new Error("ilu shell local-urdf entry smoke test failed");
+}
+
+const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedZipPath}\n/exit\n`,
+});
+if (
+  !zipDropTranscript.includes("validation and health check passed") ||
+  !zipDropTranscript.includes("opened archive") ||
+  !zipDropTranscript.includes(droppedZipPath) ||
+  !zipDropTranscript.includes("loaded urdf/robot.urdf")
+) {
+  throw new Error("ilu shell zip-drop smoke test failed");
 }
 
 const checkTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
@@ -1317,8 +1337,9 @@ const checkTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
 });
 if (
   !checkTaskTranscript.includes("/check") ||
-  !checkTaskTranscript.includes("flow check") ||
-  !checkTaskTranscript.includes("health") ||
+  !checkTaskTranscript.includes("checks") ||
+  !checkTaskTranscript.includes("validation passed") ||
+  !checkTaskTranscript.includes("health check passed") ||
   !checkTaskTranscript.includes(droppedUrdfPath)
 ) {
   throw new Error("ilu shell direct-check input smoke test failed");

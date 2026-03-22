@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@types/adm-zip':
+        specifier: ^0.5.8
+        version: 0.5.8
+      adm-zip:
+        specifier: ^0.5.16
+        version: 0.5.16
       linkedom:
         specifier: ^0.18.12
         version: 0.18.12
@@ -24,8 +30,15 @@ importers:
 
 packages:
 
+  '@types/adm-zip@0.5.8':
+    resolution: {integrity: sha512-RVVH7QvZYbN+ihqZ4kX/dMiowf6o+Jk1fNwiSdx0NahBJLU787zkULhGhJM8mf/obmLGmgdMM0bXsQTmyfbR7Q==}
+
   '@types/node@25.5.0':
     resolution: {integrity: sha512-jp2P3tQMSxWugkCUKLRPVUpGaL5MVFwF8RDuSRztfwgN1wmqJeMSbKlnEtQqU8UrhTmzEmZdu2I6v2dpp7XIxw==}
+
+  adm-zip@0.5.16:
+    resolution: {integrity: sha512-TGw5yVi4saajsSEgz25grObGHEUaDrniwvA2qwSC060KfqGPdglhvPMA2lPIoxs3PQIItj2iag35fONcQqgUaQ==}
+    engines: {node: '>=12.0'}
 
   boolbase@1.0.0:
     resolution: {integrity: sha512-JZOSA7Mo9sNGB8+UjSgzdLtokWAky1zbztM3WRLCbZ70/3cTANmQmOdR7y2g+J0e2WXywy1yS468tY+IruqEww==}
@@ -99,9 +112,15 @@ packages:
 
 snapshots:
 
+  '@types/adm-zip@0.5.8':
+    dependencies:
+      '@types/node': 25.5.0
+
   '@types/node@25.5.0':
     dependencies:
       undici-types: 7.18.2
+
+  adm-zip@0.5.16: {}
 
   boolbase@1.0.0: {}
 

@@ -3,9 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runInteractiveShell = exports.renderShellHelp = void 0;
 const node_child_process_1 = require("node:child_process");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 const process = require("node:process");
+const AdmZip = require("adm-zip");
 const commandCatalog_1 = require("./commandCatalog");
 const cliCompletion_1 = require("./cliCompletion");
 const cliUpdate_1 = require("./cliUpdate");
@@ -759,6 +761,7 @@ const detectLocalPathDrop = (rawValue) => {
             isDirectory: stats.isDirectory(),
             isUrdfFile: stats.isFile() && lowerPath.endsWith(".urdf"),
             isXacroFile: stats.isFile() && (lowerPath.endsWith(".xacro") || lowerPath.endsWith(".urdf.xacro")),
+            isZipFile: stats.isFile() && lowerPath.endsWith(".zip"),
         };
     }
     catch {
@@ -1133,6 +1136,225 @@ const summarizeAnalysisPreview = (payload, urdfPath) => {
         lines,
     };
 };
+const resolveShellGitHubAccessToken = (session) => {
+    const sessionToken = session?.args.get("token");
+    if (typeof sessionToken === "string" && sessionToken.trim().length > 0) {
+        return sessionToken.trim();
+    }
+    const envToken = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
+    return envToken || (0, githubCliAuth_1.readGitHubCliToken)() || undefined;
+};
+const sanitizeUrdfSnapshotName = (hint) => {
+    const normalized = path.basename(hint || "robot.urdf").replace(/\.(urdf\.xacro|xacro|zip)$/i, ".urdf");
+    const safe = normalized.replace(/[^A-Za-z0-9._-]+/g, "-");
+    return safe.toLowerCase().endsWith(".urdf") ? safe : `${safe || "robot"}.urdf`;
+};
+const createTempUrdfSnapshotPath = (hint) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-loaded-"));
+    return path.join(tempDir, sanitizeUrdfSnapshotName(hint));
+};
+const resolveExtractedArchiveRoot = (archiveRoot) => {
+    const entries = fs
+        .readdirSync(archiveRoot, { withFileTypes: true })
+        .filter((entry) => entry.name !== "__MACOSX" && entry.name !== ".DS_Store");
+    if (entries.length === 1 && entries[0]?.isDirectory()) {
+        return path.join(archiveRoot, entries[0].name);
+    }
+    return archiveRoot;
+};
+const resolveLoadableSourcePath = (sourcePath) => {
+    const localPath = detectLocalPathDrop(sourcePath);
+    if (!localPath?.isZipFile) {
+        return { workingPath: sourcePath };
+    }
+    const archiveRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-archive-"));
+    const archive = new AdmZip(localPath.absolutePath);
+    archive.extractAllTo(archiveRoot, true);
+    return {
+        workingPath: resolveExtractedArchiveRoot(archiveRoot),
+        extractedArchivePath: localPath.inputPath,
+    };
+};
+const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) => {
+    const lines = [];
+    if (options.extractedArchivePath) {
+        lines.push(`opened archive ${quoteForPreview(options.extractedArchivePath)}`);
+    }
+    if (loadResult.repositoryUrl) {
+        lines.push(`source ${loadResult.repositoryUrl}`);
+    }
+    else {
+        lines.push(`source ${quoteForPreview(loadResult.inspectedPath)}`);
+    }
+    lines.push(`loaded ${loadResult.entryPath}`);
+    if ((loadResult.candidateCount ?? 0) > 1) {
+        lines.push(`picked best match from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`);
+    }
+    lines.push(validation.isValid
+        ? "validation passed"
+        : `validation found ${formatCount(validation.issues.filter((issue) => issue.level === "error").length, "error")} and ${formatCount(validation.issues.filter((issue) => issue.level === "warning").length, "warning")}`);
+    if (health.ok && health.summary.warnings === 0) {
+        lines.push("health check passed");
+    }
+    else if (health.ok) {
+        lines.push(`health check passed with ${formatCount(health.summary.warnings, "warning")}`);
+    }
+    else {
+        lines.push(`health check found ${formatCount(health.summary.errors, "error")} and ${formatCount(health.summary.warnings, "warning")}`);
+    }
+    if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
+        lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
+    }
+    for (const finding of health.findings.slice(0, 2)) {
+        if (health.ok && health.summary.warnings === 0 && finding.level === "info") {
+            continue;
+        }
+        const prefix = finding.context ? `${finding.context}: ` : "";
+        lines.push(`${finding.level} ${prefix}${finding.message}`);
+    }
+    lines.push("next /fix /convert /inspect or paste another source");
+    return {
+        title: "loaded",
+        kind: validation.isValid && health.ok && health.summary.warnings === 0 ? "success" : "info",
+        lines,
+    };
+};
+const summarizeDirectUrdfChecks = (urdfPath, validation, health) => {
+    const lines = [`source ${quoteForPreview(urdfPath)}`];
+    lines.push(validation.isValid
+        ? "validation passed"
+        : `validation found ${formatCount(validation.issues.filter((issue) => issue.level === "error").length, "error")} and ${formatCount(validation.issues.filter((issue) => issue.level === "warning").length, "warning")}`);
+    if (health.ok && health.summary.warnings === 0) {
+        lines.push("health check passed");
+    }
+    else if (health.ok) {
+        lines.push(`health check passed with ${formatCount(health.summary.warnings, "warning")}`);
+    }
+    else {
+        lines.push(`health check found ${formatCount(health.summary.errors, "error")} and ${formatCount(health.summary.warnings, "warning")}`);
+    }
+    if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
+        lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
+    }
+    for (const finding of health.findings.slice(0, 2)) {
+        if (health.ok && health.summary.warnings === 0 && finding.level === "info") {
+            continue;
+        }
+        const prefix = finding.context ? `${finding.context}: ` : "";
+        lines.push(`${finding.level} ${prefix}${finding.message}`);
+    }
+    lines.push("next /fix /convert /inspect or paste another source");
+    return {
+        title: "checks",
+        kind: validation.isValid && health.ok && health.summary.warnings === 0 ? "success" : "info",
+        lines,
+    };
+};
+const runDirectInputAutomation = (state, session, changedKey) => {
+    if (session.command === "load-source" && (changedKey === "github" || changedKey === "path" || changedKey === "entry")) {
+        const requirementStatus = getRequirementStatus(session);
+        if (!requirementStatus.ready) {
+            return null;
+        }
+        const execArgs = new Map(session.args);
+        let extractedArchivePath;
+        const sourcePath = execArgs.get("path");
+        if (typeof sourcePath === "string" && sourcePath.trim().length > 0) {
+            try {
+                const resolved = resolveLoadableSourcePath(sourcePath);
+                execArgs.set("path", resolved.workingPath);
+                extractedArchivePath = resolved.extractedArchivePath;
+            }
+            catch (error) {
+                return {
+                    panel: {
+                        title: "error",
+                        kind: "error",
+                        lines: [error instanceof Error ? error.message : String(error)],
+                    },
+                    notice: { kind: "error", text: "could not open archive" },
+                    clearSession: false,
+                };
+            }
+        }
+        if (!execArgs.has("token")) {
+            const token = resolveShellGitHubAccessToken(session);
+            if (token) {
+                execArgs.set("token", token);
+            }
+        }
+        const outputPath = createTempUrdfSnapshotPath(String(execArgs.get("entry") || execArgs.get("path") || execArgs.get("github") || "robot.urdf"));
+        execArgs.set("out", outputPath);
+        const loadExecution = executeCliCommand("load-source", execArgs);
+        const loadPayload = parseExecutionJson(loadExecution);
+        if (!loadPayload || !loadPayload.outPath) {
+            const fallbackPanel = buildAutoPreviewPanel(state, session, changedKey);
+            return {
+                panel: fallbackPanel ?? buildPreviewErrorPanel("error", loadExecution),
+                notice: {
+                    kind: fallbackPanel ? "info" : "error",
+                    text: fallbackPanel ? "preview ready" : "could not load source yet",
+                },
+                clearSession: false,
+            };
+        }
+        state.lastUrdfPath = loadPayload.outPath;
+        const validationExecution = executeCliCommand("validate", new Map([["urdf", loadPayload.outPath]]));
+        const healthExecution = executeCliCommand("health-check", new Map([["urdf", loadPayload.outPath]]));
+        const validationPayload = parseExecutionJson(validationExecution);
+        const healthPayload = parseExecutionJson(healthExecution);
+        if (!validationPayload || !healthPayload) {
+            return {
+                panel: buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution),
+                notice: { kind: "error", text: "validation failed to run" },
+                clearSession: false,
+            };
+        }
+        const panel = summarizeAutoLoadChecks(loadPayload, validationPayload, healthPayload, {
+            extractedArchivePath,
+        });
+        return {
+            panel,
+            notice: {
+                kind: panel.kind === "success" ? "success" : "info",
+                text: panel.kind === "success"
+                    ? "validation and health check passed"
+                    : "source loaded. review the checks",
+            },
+            clearSession: true,
+        };
+    }
+    if (session.command === "health-check" && changedKey === "urdf") {
+        const urdfPath = session.args.get("urdf");
+        if (typeof urdfPath !== "string" || urdfPath.trim().length === 0) {
+            return null;
+        }
+        state.lastUrdfPath = urdfPath;
+        const validationExecution = executeCliCommand("validate", new Map([["urdf", urdfPath]]));
+        const healthExecution = executeCliCommand("health-check", new Map([["urdf", urdfPath]]));
+        const validationPayload = parseExecutionJson(validationExecution);
+        const healthPayload = parseExecutionJson(healthExecution);
+        if (!validationPayload || !healthPayload) {
+            return {
+                panel: buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution),
+                notice: { kind: "error", text: "checks failed to run" },
+                clearSession: false,
+            };
+        }
+        const panel = summarizeDirectUrdfChecks(urdfPath, validationPayload, healthPayload);
+        return {
+            panel,
+            notice: {
+                kind: panel.kind === "success" ? "success" : "info",
+                text: panel.kind === "success"
+                    ? "validation and health check passed"
+                    : "checks complete. review the results",
+            },
+            clearSession: true,
+        };
+    }
+    return null;
+};
 const buildAutoPreviewPanel = (state, session, changedKey) => {
     let previewCommand = null;
     const previewArgs = new Map();
@@ -1291,6 +1513,13 @@ const listAvailableSlashCommands = (state) => {
             ...commandCatalog_1.CLI_HELP_SECTIONS.flatMap((section) => section.commands),
         ]),
     ];
+};
+const listRecognizedSlashCommands = (state) => {
+    const commands = new Set(listAvailableSlashCommands(state));
+    if (!state.session) {
+        commands.add("run");
+    }
+    return [...commands];
 };
 const completePathFragment = (fragment) => {
     const raw = fragment.length > 0 ? fragment : ".";
@@ -1580,6 +1809,15 @@ const shouldTreatAsSlashInput = (rawValue, state) => {
     if (!trimmed.startsWith("/")) {
         return false;
     }
+    const parsed = parseSlashInput(trimmed);
+    if (parsed && !parsed.inlineValue) {
+        if (!parsed.slashCommand) {
+            return true;
+        }
+        if (listRecognizedSlashCommands(state).includes(parsed.slashCommand)) {
+            return true;
+        }
+    }
     if (detectLocalPathDrop(trimmed)) {
         return false;
     }
@@ -1614,6 +1852,10 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
     }
     if (slashCommand === "last") {
         printLastUrdf(state);
+        return;
+    }
+    if (slashCommand === "run") {
+        process.stdout.write(`${SHELL_THEME.muted("nothing is pending. paste a source or use /check /fix /convert /inspect")}\n`);
         return;
     }
     if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
@@ -1661,6 +1903,10 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
     }
     if (slashCommand === "last") {
         printLastUrdf(state);
+        return;
+    }
+    if (slashCommand === "run") {
+        process.stdout.write(`${SHELL_THEME.muted("nothing is pending here. paste a source or use one of these helpers")}\n`);
         return;
     }
     if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
@@ -2009,7 +2255,7 @@ const getPromptPlaceholder = (state) => {
     if (!state.session && state.rootTask) {
         switch (state.rootTask) {
             case "open":
-                return "paste owner/repo or drop a local folder, .urdf, or .xacro";
+                return "paste owner/repo or drop a local folder, .urdf, .xacro, or .zip";
             case "inspect":
                 return "paste owner/repo or drop a local folder or .urdf";
             case "check":
@@ -2021,6 +2267,9 @@ const getPromptPlaceholder = (state) => {
         }
     }
     if (!state.session) {
+        if (state.lastUrdfPath) {
+            return "use /fix /convert /inspect /check or paste another source";
+        }
         return "paste owner/repo, drop a folder or .urdf, or type /";
     }
     const requirementStatus = getRequirementStatus(state.session);
@@ -2073,8 +2322,14 @@ const renderTtyShell = (state, view) => {
         }
     }
     else {
-        lines.push(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file")}`);
-        lines.push(`  ${SHELL_THEME.muted("/ opens extra helpers when you need them")}`);
+        if (state.lastUrdfPath) {
+            lines.push(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(state.lastUrdfPath)}`)}`);
+            lines.push(`  ${SHELL_THEME.muted("use /fix /convert /inspect /check or paste another source")}`);
+        }
+        else {
+            lines.push(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file")}`);
+            lines.push(`  ${SHELL_THEME.muted("/ opens extra helpers when you need them")}`);
+        }
     }
     if (view.output) {
         lines.push("");
@@ -2260,8 +2515,24 @@ const runLineInteractiveShell = async (options = {}) => {
             const feedback = [];
             const applied = applyFreeformInputToSession(session, line, feedback);
             if (applied) {
-                printSessionStatus(session);
-                printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                const automated = runDirectInputAutomation(state, applied.session, applied.key);
+                if (automated) {
+                    if (automated.notice) {
+                        writeFeedback(automated.notice);
+                    }
+                    printOutputPanel(automated.panel);
+                    if (automated.clearSession) {
+                        state.session = null;
+                        state.rootTask = null;
+                    }
+                    else if (state.session) {
+                        printSessionStatus(state.session);
+                    }
+                }
+                else {
+                    printSessionStatus(session);
+                    printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                }
             }
             else {
                 flushFeedback(feedback);
@@ -2272,8 +2543,24 @@ const runLineInteractiveShell = async (options = {}) => {
             const feedback = [];
             const applied = applyFreeformInputToRootState(state, line, feedback);
             if (applied && state.session) {
-                printSessionStatus(state.session);
-                printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                const automated = runDirectInputAutomation(state, applied.session, applied.key);
+                if (automated) {
+                    if (automated.notice) {
+                        writeFeedback(automated.notice);
+                    }
+                    printOutputPanel(automated.panel);
+                    if (automated.clearSession) {
+                        state.session = null;
+                        state.rootTask = null;
+                    }
+                    else if (state.session) {
+                        printSessionStatus(state.session);
+                    }
+                }
+                else {
+                    printSessionStatus(state.session);
+                    printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                }
             }
             else {
                 flushFeedback(feedback);
@@ -2343,6 +2630,14 @@ const runTtyInteractiveShell = async (options = {}) => {
             pushTimelineEntry(view, "/last");
             return true;
         }
+        if (slashCommand === "run") {
+            view.notice = {
+                kind: "info",
+                text: "nothing is pending. paste a source or use /check /fix /convert /inspect",
+            };
+            pushTimelineEntry(view, "/run");
+            return true;
+        }
         if (slashCommand === "update") {
             try {
                 (0, cliUpdate_1.runUpdateCommand)();
@@ -2394,6 +2689,14 @@ const runTtyInteractiveShell = async (options = {}) => {
         if (slashCommand === "last") {
             view.notice = { kind: "info", text: getLastUrdfMessage(state) };
             pushTimelineEntry(view, "/last");
+            return true;
+        }
+        if (slashCommand === "run") {
+            view.notice = {
+                kind: "info",
+                text: "nothing is pending here. paste a source or choose one of these helpers",
+            };
+            pushTimelineEntry(view, "/run");
             return true;
         }
         if (slashCommand === "update") {
@@ -2620,18 +2923,29 @@ const runTtyInteractiveShell = async (options = {}) => {
             const feedback = [];
             const applied = applyFreeformInputToSession(state.session, view.input, feedback);
             if (applied) {
-                const preview = buildAutoPreviewPanel(state, applied.session, applied.key);
-                view.notice = preview
-                    ? {
-                        kind: preview.kind === "error" ? "error" : "info",
-                        text: preview.kind === "error"
-                            ? "preview failed"
-                            : preview.title === "health"
-                                ? "health preview ready"
-                                : "preview ready",
+                const automated = runDirectInputAutomation(state, applied.session, applied.key);
+                if (automated) {
+                    view.notice = automated.notice;
+                    view.output = automated.panel;
+                    if (automated.clearSession) {
+                        state.session = null;
+                        state.rootTask = null;
                     }
-                    : { kind: "info", text: buildSessionHeadline(applied.session) };
-                view.output = preview;
+                }
+                else {
+                    const preview = buildAutoPreviewPanel(state, applied.session, applied.key);
+                    view.notice = preview
+                        ? {
+                            kind: preview.kind === "error" ? "error" : "info",
+                            text: preview.kind === "error"
+                                ? "preview failed"
+                                : preview.title === "health"
+                                    ? "health preview ready"
+                                    : "preview ready",
+                        }
+                        : { kind: "info", text: buildSessionHeadline(applied.session) };
+                    view.output = preview;
+                }
                 pushTimelineEntry(view, view.input.trim());
                 setInput("");
                 return;
@@ -2642,18 +2956,29 @@ const runTtyInteractiveShell = async (options = {}) => {
             const feedback = [];
             const applied = applyFreeformInputToRootState(state, view.input, feedback);
             if (applied && state.session) {
-                const preview = buildAutoPreviewPanel(state, applied.session, applied.key);
-                view.notice = preview
-                    ? {
-                        kind: preview.kind === "error" ? "error" : "info",
-                        text: preview.kind === "error"
-                            ? "preview failed"
-                            : preview.title === "health"
-                                ? "health preview ready"
-                                : "preview ready",
+                const automated = runDirectInputAutomation(state, applied.session, applied.key);
+                if (automated) {
+                    view.notice = automated.notice;
+                    view.output = automated.panel;
+                    if (automated.clearSession) {
+                        state.session = null;
+                        state.rootTask = null;
                     }
-                    : { kind: "info", text: buildSessionHeadline(applied.session) };
-                view.output = preview;
+                }
+                else {
+                    const preview = buildAutoPreviewPanel(state, applied.session, applied.key);
+                    view.notice = preview
+                        ? {
+                            kind: preview.kind === "error" ? "error" : "info",
+                            text: preview.kind === "error"
+                                ? "preview failed"
+                                : preview.title === "health"
+                                    ? "health preview ready"
+                                    : "preview ready",
+                        }
+                        : { kind: "info", text: buildSessionHeadline(applied.session) };
+                    view.output = preview;
+                }
                 pushTimelineEntry(view, view.input.trim());
                 setInput("");
                 return;
@@ -2781,9 +3106,10 @@ const renderShellHelp = () => {
         "  ilu shell",
         "",
         "Inside the shell",
-        "  owner/repo         Preview a GitHub repo immediately",
-        "  ./robot.urdf       Run a quick health preview on a local URDF",
-        "  ./robot-folder/    Preview a local repo or folder",
+        "  owner/repo         Load a GitHub repo and auto-run checks",
+        "  ./robot.urdf       Run validation and a health check",
+        "  ./robot.zip        Unpack and check an uploaded archive",
+        "  ./robot-folder/    Load a local repo or folder and auto-run checks",
         "  /                  Open extra helpers under the prompt",
         "  up/down            Move through picker options",
         "  tab                Complete the selected option or path",
@@ -2797,7 +3123,7 @@ const renderShellHelp = () => {
         "  /inspect           Explicitly inspect a repo or URDF without loading it",
         "  /update            Install the latest ilu release",
         "  /show              Show the assembled command and next step",
-        "  /run               Execute the assembled command",
+        "  /run               Execute an explicit helper flow when one is pending",
         "  /back              Return to the root helper menu",
         "  /exit              Quit the shell",
     ].join("\n");

@@ -25,6 +25,8 @@
     "build:package": "node ./scripts/build-package.mjs"
   },
   "dependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "adm-zip": "^0.5.16",
     "linkedom": "^0.18.12",
     "saxes": "^6.0.0"
   },
