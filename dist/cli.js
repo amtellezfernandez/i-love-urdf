@@ -7,6 +7,7 @@ const cliArgs_1 = require("./commands/cliArgs");
 const cliCompletion_1 = require("./commands/cliCompletion");
 const cliHelp_1 = require("./commands/cliHelp");
 const cliShell_1 = require("./commands/cliShell");
+const cliUpdate_1 = require("./commands/cliUpdate");
 const editCommands_1 = require("./commands/editCommands");
 const sourceCommands_1 = require("./commands/sourceCommands");
 const nodeDomRuntime_1 = require("./node/nodeDomRuntime");
@@ -33,7 +34,19 @@ const run = async () => {
             console.log((0, cliShell_1.renderShellHelp)());
             return;
         }
+        if (positionals[0] === "update") {
+            console.log((0, cliUpdate_1.renderUpdateHelp)());
+            return;
+        }
         (0, cliHelp_1.printHelp)();
+        return;
+    }
+    if (rawCommand === "update") {
+        if (args.has("help")) {
+            console.log((0, cliUpdate_1.renderUpdateHelp)());
+            return;
+        }
+        (0, cliUpdate_1.runUpdateCommand)(args);
         return;
     }
     if (rawCommand === "completion") {

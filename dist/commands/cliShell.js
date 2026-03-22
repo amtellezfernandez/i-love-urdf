@@ -8,9 +8,50 @@ const readline = require("node:readline");
 const process = require("node:process");
 const commandCatalog_1 = require("./commandCatalog");
 const cliCompletion_1 = require("./cliCompletion");
+const cliUpdate_1 = require("./cliUpdate");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
+const ANSI = {
+    reset: "\u001b[0m",
+    bold: "\u001b[1m",
+    dim: "\u001b[2m",
+    gray: "\u001b[90m",
+    cyan: "\u001b[36m",
+    green: "\u001b[32m",
+    yellow: "\u001b[33m",
+};
+const paint = (enabled, text, ...codes) => {
+    if (!enabled || text.length === 0) {
+        return text;
+    }
+    return `${codes.join("")}${text}${ANSI.reset}`;
+};
+const resolveColorSupport = () => {
+    const forceColor = process.env.FORCE_COLOR;
+    if (forceColor !== undefined) {
+        return forceColor !== "0";
+    }
+    if ("NO_COLOR" in process.env) {
+        return false;
+    }
+    if (process.env.TERM === "dumb") {
+        return false;
+    }
+    return Boolean(process.stdout?.isTTY);
+};
+const createTheme = (enabled) => ({
+    enabled,
+    brand: (text) => paint(enabled, text, ANSI.bold),
+    command: (text) => paint(enabled, text, ANSI.bold, ANSI.cyan),
+    muted: (text) => paint(enabled, text, ANSI.dim),
+    section: (text) => paint(enabled, text, ANSI.dim, ANSI.gray),
+    success: (text) => paint(enabled, text, ANSI.bold, ANSI.green),
+    accent: (text) => paint(enabled, text, ANSI.bold, ANSI.cyan),
+    warning: (text) => paint(enabled, text, ANSI.bold, ANSI.yellow),
+});
+const SHELL_THEME = createTheme(resolveColorSupport());
 const SHELL_BUILTIN_COMMANDS = [
     { name: "help", summary: "Show slash commands for the current context." },
+    { name: "update", summary: "Install the latest ilu release." },
     { name: "clear", summary: "Clear the terminal." },
     { name: "last", summary: "Show the last remembered URDF path." },
     { name: "exit", summary: "Exit the interactive shell." },
@@ -19,6 +60,7 @@ const SHELL_BUILTIN_COMMANDS = [
 const SESSION_BUILTIN_COMMANDS = [
     { name: "show", summary: "Show the current command, values, and next step." },
     { name: "run", summary: "Run the current command." },
+    { name: "update", summary: "Install the latest ilu release." },
     { name: "reset", summary: "Clear the current helper state." },
     { name: "back", summary: "Return to the root slash-command menu." },
 ];
@@ -111,7 +153,7 @@ const SESSION_SLASH_ALIASES = {
     },
 };
 const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
-const ROOT_GUIDANCE = "Type / for all helpers. /exit quits.";
+const ROOT_GUIDANCE = "type / for commands, /update for latest, /exit to quit";
 const formatRootPrompt = () => "/> ";
 const formatSessionPrompt = (session) => session.pending ? `/${session.pending.slashName}> ` : `/${session.command}> `;
 const quoteForPreview = (value) => (/\s/.test(value) ? JSON.stringify(value) : value);
@@ -128,40 +170,38 @@ const buildCommandPreview = (command, args) => {
     return `ilu ${[command, ...serializedArgs].join(" ")}`.trim();
 };
 const printSectionTitle = (title) => {
-    process.stdout.write(`\n${title}\n`);
+    process.stdout.write(`\n${SHELL_THEME.section(title)}\n`);
 };
 const printCommandList = (entries, prefix = "/", includeSummary = true) => {
     for (const entry of entries) {
+        const label = `${prefix}${entry.name}`;
         if (!includeSummary || !entry.summary) {
-            process.stdout.write(`  ${prefix}${entry.name}\n`);
+            process.stdout.write(`  ${SHELL_THEME.command(label)}\n`);
             continue;
         }
-        process.stdout.write(`  ${prefix}${entry.name.padEnd(18)} ${entry.summary}\n`);
+        process.stdout.write(`  ${SHELL_THEME.command(label.padEnd(18))} ${SHELL_THEME.muted(entry.summary)}\n`);
     }
 };
 const printRootQuickStart = () => {
-    process.stdout.write("ILU shell\n");
-    process.stdout.write("Slash-first help for loading, checking, and fixing URDFs.\n");
-    printSectionTitle("Start Here");
+    process.stdout.write(`${SHELL_THEME.brand("ilu")}\n`);
+    process.stdout.write(`${SHELL_THEME.muted("interactive urdf shell")}\n`);
+    process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
+    printSectionTitle("start");
     printCommandList(ROOT_QUICK_START_COMMANDS.map((commandName) => ({
         name: commandName,
         summary: getShellCommandSummary(commandName),
     })));
-    process.stdout.write(`\n${ROOT_GUIDANCE}\n`);
 };
 const printRootOptions = () => {
-    printSectionTitle("Quick Start");
+    printSectionTitle("start");
     printCommandList(ROOT_QUICK_START_COMMANDS.map((commandName) => ({
         name: commandName,
         summary: getShellCommandSummary(commandName),
     })));
-    printSectionTitle("Shell");
+    printSectionTitle("system");
     printCommandList(SHELL_BUILTIN_COMMANDS);
     for (const section of commandCatalog_1.CLI_HELP_SECTIONS) {
-        printSectionTitle(section.title);
-        if (section.summary) {
-            process.stdout.write(`  ${section.summary}\n`);
-        }
+        printSectionTitle(section.title.toLowerCase());
         printCommandList(section.commands.map((commandName) => ({
             name: commandName,
             summary: "",
@@ -300,6 +340,16 @@ const getSessionOptionEntries = (session) => {
     });
 };
 const formatSlashSequence = (session, keys) => keys.map((key) => getSlashDisplayName(session, key)).join(" + ");
+const formatStatusTag = (label) => {
+    switch (label) {
+        case "next":
+            return SHELL_THEME.accent(`[${label}]`);
+        case "ready":
+            return SHELL_THEME.success(`[${label}]`);
+        case "cmd":
+            return SHELL_THEME.muted(label);
+    }
+};
 const getRequirementStatus = (session) => {
     if (session.spec.requiredAlternatives.length === 0) {
         return { ready: true, nextSteps: [] };
@@ -344,28 +394,28 @@ const printSessionStatus = (session) => {
     const requirementStatus = getRequirementStatus(session);
     process.stdout.write("\n");
     process.stdout.write(requirementStatus.ready
-        ? "Ready: /run\n"
-        : `Next: ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
-    process.stdout.write(`Preview: ${buildCommandPreview(session.command, session.args)}\n`);
+        ? `${formatStatusTag("ready")} ${SHELL_THEME.command("/run")}\n`
+        : `${formatStatusTag("next")} ${requirementStatus.nextSteps.map((step) => SHELL_THEME.command(formatSlashSequence(session, step))).join(SHELL_THEME.muted(" or "))}\n`);
+    process.stdout.write(`${formatStatusTag("cmd")} ${SHELL_THEME.command(buildCommandPreview(session.command, session.args))}\n`);
 };
 const printSessionPreview = (session) => {
-    printSectionTitle("Current Command");
-    process.stdout.write(`  ${buildCommandPreview(session.command, session.args)}\n`);
+    printSectionTitle("cmd");
+    process.stdout.write(`  ${SHELL_THEME.command(buildCommandPreview(session.command, session.args))}\n`);
     if (session.args.size > 0) {
-        printSectionTitle("Collected Values");
+        printSectionTitle("values");
         for (const [key, value] of session.args.entries()) {
             const renderedValue = value === true ? "enabled" : quoteForPreview(String(value));
-            process.stdout.write(`  ${getSlashDisplayName(session, key).padEnd(18)} ${renderedValue}\n`);
+            process.stdout.write(`  ${SHELL_THEME.command(getSlashDisplayName(session, key).padEnd(18))} ${renderedValue}\n`);
         }
     }
     const requirementStatus = getRequirementStatus(session);
-    printSectionTitle(requirementStatus.ready ? "Ready" : "Next");
+    printSectionTitle(requirementStatus.ready ? "ready" : "next");
     if (requirementStatus.ready) {
-        process.stdout.write("  /run\n");
+        process.stdout.write(`  ${SHELL_THEME.command("/run")}\n`);
         return;
     }
     for (const step of requirementStatus.nextSteps) {
-        process.stdout.write(`  ${formatSlashSequence(session, step)}\n`);
+        process.stdout.write(`  ${SHELL_THEME.command(formatSlashSequence(session, step))}\n`);
     }
 };
 const printSessionOptions = (session) => {
@@ -374,20 +424,20 @@ const printSessionOptions = (session) => {
     const commonEntries = entries.filter((entry) => entry.priority === "common");
     const advancedEntries = entries.filter((entry) => entry.priority === "advanced");
     printSectionTitle(`/${session.command}`);
-    process.stdout.write(`  ${getShellCommandSummary(session.command)}\n`);
+    process.stdout.write(`  ${SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
     if (requiredEntries.length > 0) {
-        printSectionTitle("Start Here");
+        printSectionTitle("start");
         printCommandList(requiredEntries);
     }
     if (commonEntries.length > 0) {
-        printSectionTitle("Common");
+        printSectionTitle("more");
         printCommandList(commonEntries);
     }
     if (advancedEntries.length > 0) {
-        printSectionTitle("Advanced");
+        printSectionTitle("advanced");
         printCommandList(advancedEntries);
     }
-    printSectionTitle("Actions");
+    printSectionTitle("actions");
     printCommandList(SESSION_BUILTIN_COMMANDS);
     printSessionStatus(session);
 };
@@ -536,15 +586,16 @@ const getPendingValuePrompt = (session, key, slashName) => {
     };
 };
 const printPendingValuePrompt = (pending) => {
-    process.stdout.write(`\n${pending.title}\n`);
+    process.stdout.write(`\n${SHELL_THEME.section("input")}\n`);
+    process.stdout.write(`${SHELL_THEME.command(pending.title)}\n`);
     if (pending.examples.length === 1) {
-        process.stdout.write(`Example: ${pending.examples[0]}\n`);
+        process.stdout.write(`${SHELL_THEME.muted(`example: ${pending.examples[0]}`)}\n`);
         return;
     }
     if (pending.examples.length > 1) {
-        process.stdout.write("Examples:\n");
+        process.stdout.write(`${SHELL_THEME.muted("examples:")}\n`);
         for (const example of pending.examples) {
-            process.stdout.write(`  ${example}\n`);
+            process.stdout.write(`  ${SHELL_THEME.muted(example)}\n`);
         }
     }
 };
@@ -562,24 +613,24 @@ const setSessionValue = (session, key, rawValue) => {
     }
     clearMutuallyExclusiveArgs(session, key);
     session.args.set(key, value);
-    process.stdout.write(`Set --${key} ${quoteForPreview(value)}\n`);
+    process.stdout.write(`${SHELL_THEME.success("[set]")} ${SHELL_THEME.command(`--${key}`)} ${quoteForPreview(value)}\n`);
     return true;
 };
 const toggleSessionFlag = (session, key) => {
     if (session.args.get(key) === true) {
         session.args.delete(key);
-        process.stdout.write(`Unset --${key}\n`);
+        process.stdout.write(`${SHELL_THEME.warning("[unset]")} ${SHELL_THEME.command(`--${key}`)}\n`);
         return;
     }
     session.args.set(key, true);
-    process.stdout.write(`Enabled --${key}\n`);
+    process.stdout.write(`${SHELL_THEME.success("[on]")} ${SHELL_THEME.command(`--${key}`)}\n`);
 };
 const printLastUrdf = (state) => {
     if (!state.lastUrdfPath) {
-        process.stdout.write("No URDF path is currently remembered.\n");
+        process.stdout.write(`${SHELL_THEME.muted("no remembered URDF yet")}\n`);
         return;
     }
-    process.stdout.write(`Last URDF: ${state.lastUrdfPath}\n`);
+    process.stdout.write(`${SHELL_THEME.muted("last")} ${state.lastUrdfPath}\n`);
 };
 const updateRememberedUrdfPath = (state, session) => {
     const directUrdfPath = session.args.get("urdf");
@@ -594,20 +645,20 @@ const updateRememberedUrdfPath = (state, session) => {
 };
 const printFollowUpSuggestions = (state, command) => {
     if ((command === "load-source" || command === "xacro-to-urdf") && state.lastUrdfPath) {
-        process.stdout.write(`Next helpers: /health-check, /validate, /analyze, /guess-orientation\nUsing remembered URDF: ${state.lastUrdfPath}\n`);
+        process.stdout.write(`${SHELL_THEME.accent("[next]")} ${SHELL_THEME.command("/health-check")} ${SHELL_THEME.muted("/validate /analyze /guess-orientation")}\n${SHELL_THEME.muted("using")} ${state.lastUrdfPath}\n`);
         return;
     }
     if (command === "inspect-repo") {
-        process.stdout.write("Next helpers: /load-source or /repair-mesh-refs\n");
+        process.stdout.write(`${SHELL_THEME.accent("[next]")} ${SHELL_THEME.command("/load-source")} ${SHELL_THEME.muted("or")} ${SHELL_THEME.command("/repair-mesh-refs")}\n`);
         return;
     }
     if (state.lastUrdfPath) {
-        process.stdout.write(`Remembered URDF: ${state.lastUrdfPath}\n`);
+        process.stdout.write(`${SHELL_THEME.muted("remembered")} ${state.lastUrdfPath}\n`);
     }
 };
 const executeSessionCommand = (state, session) => {
     const preview = buildCommandPreview(session.command, session.args);
-    process.stdout.write(`\n> ${preview}\n`);
+    process.stdout.write(`\n${formatStatusTag("cmd")} ${SHELL_THEME.command(preview)}\n`);
     const argv = [CLI_ENTRY_PATH, session.command];
     for (const [key, value] of session.args.entries()) {
         if (value === true) {
@@ -642,7 +693,7 @@ const createSession = (command, state) => {
     };
     if (state.lastUrdfPath && getOptionSpecByKey(session, "urdf")) {
         session.args.set("urdf", state.lastUrdfPath);
-        process.stdout.write(`Using remembered URDF: ${state.lastUrdfPath}\n`);
+        process.stdout.write(`${SHELL_THEME.muted("using")} ${state.lastUrdfPath}\n`);
     }
     return session;
 };
@@ -733,6 +784,10 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         console.clear();
         return;
     }
+    if (slashCommand === "update") {
+        (0, cliUpdate_1.runUpdateCommand)();
+        return;
+    }
     if (slashCommand === "last") {
         printLastUrdf(state);
         return;
@@ -756,7 +811,7 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     }
     if (slashCommand === "back") {
         state.session = null;
-        process.stdout.write("Returned to root. Type / for commands.\n");
+        process.stdout.write(`${SHELL_THEME.muted("back to root")}\n`);
         return;
     }
     if (slashCommand === "reset") {
@@ -771,7 +826,7 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     if (slashCommand === "run") {
         const requirementStatus = getRequirementStatus(session);
         if (!requirementStatus.ready) {
-            process.stderr.write(`Missing input. Next: ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
+            process.stderr.write(`${SHELL_THEME.warning("[missing]")} ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
             return;
         }
         executeSessionCommand(state, session);
@@ -779,6 +834,10 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     }
     if (slashCommand === "last") {
         printLastUrdf(state);
+        return;
+    }
+    if (slashCommand === "update") {
+        (0, cliUpdate_1.runUpdateCommand)();
         return;
     }
     if (slashCommand === "clear") {
@@ -830,6 +889,7 @@ const renderShellHelp = () => {
         "",
         "Inside the shell",
         "  /                  Show all helpers",
+        "  /update            Install the latest ilu release",
         "  /load-source       Start a guided load-source flow",
         "  /repo              Set a GitHub repo or URL when the helper supports it",
         "  /local             Set a local path when the helper supports it",
@@ -886,14 +946,14 @@ const runInteractiveShell = async (options = {}) => {
                 printSessionStatus(session);
             }
             else {
-                process.stdout.write(`${ROOT_GUIDANCE}\n`);
+                process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
             }
         }
         else if (session?.pending) {
             handlePendingValue(line, state);
         }
         else {
-            process.stdout.write("Use / to choose a helper. Type / for commands.\n");
+            process.stdout.write(`${SHELL_THEME.muted("type / for commands")}\n`);
         }
         if (isClosed) {
             break;

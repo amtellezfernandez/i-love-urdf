@@ -7,6 +7,7 @@ import type { CompletionShell } from "./commands/cliCompletion";
 import { isCompletionShell, renderCompletionHelp, renderCompletionScript } from "./commands/cliCompletion";
 import { printHelp } from "./commands/cliHelp";
 import { renderShellHelp, runInteractiveShell } from "./commands/cliShell";
+import { renderUpdateHelp, runUpdateCommand } from "./commands/cliUpdate";
 import { isEditCommand, runEditCommand } from "./commands/editCommands";
 import { isSourceCommand, runSourceCommand } from "./commands/sourceCommands";
 import { installNodeDomGlobals } from "./node/nodeDomRuntime";
@@ -40,7 +41,22 @@ const run = async () => {
       return;
     }
 
+    if (positionals[0] === "update") {
+      console.log(renderUpdateHelp());
+      return;
+    }
+
     printHelp();
+    return;
+  }
+
+  if (rawCommand === "update") {
+    if (args.has("help")) {
+      console.log(renderUpdateHelp());
+      return;
+    }
+
+    runUpdateCommand(args);
     return;
   }
 

@@ -128,8 +128,18 @@ const formatHelpSection = (section: HelpSectionDefinition, theme: HelpTheme): st
 const formatBlock = (label: string, lines: readonly string[], theme: HelpTheme): string =>
   [theme.label(label), ...lines.map((line) => `${HELP_INDENT}${line}`)].join("\n");
 
-const formatUsageBannerLine = (binaryName: string, theme: HelpTheme): string =>
-  `${theme.command(binaryName)} ${highlightUsageSyntax("<command> [arguments]", theme)}`;
+const formatUsageBannerLine = (text: string, theme: HelpTheme): string => {
+  if (text === "ilu") {
+    return theme.command(text);
+  }
+
+  const prefix = "ilu ";
+  if (text.startsWith(prefix)) {
+    return `${theme.command("ilu")} ${highlightUsageSyntax(text.slice(prefix.length), theme)}`;
+  }
+
+  return highlightUsageSyntax(text, theme);
+};
 
 export const renderHelp = (options: RenderHelpOptions = {}): string => {
   const theme = createTheme(options.colorEnabled ?? resolveColorSupport());
@@ -138,25 +148,38 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
 
   return [
     theme.title("ILU CLI"),
-    theme.summary("Source-first URDF parsing, validation, repair, and conversion."),
+    theme.summary("Interactive shell for loading, checking, fixing, and converting URDFs."),
     "",
-    formatBlock("Usage", [formatUsageBannerLine("ilu", theme)], theme),
+    formatBlock(
+      "Usage",
+      [
+        `${formatUsageBannerLine("ilu", theme)}  ${theme.summary("Open the interactive shell.")}`,
+        `${formatUsageBannerLine("ilu <command> [arguments]", theme)}  ${theme.summary("Run a one-shot command.")}`,
+      ],
+      theme
+    ),
     "",
     formatBlock(
       "Workflow",
       [
-        "1. load-source or inspect-repo",
-        "2. health-check / validate / analyze",
-        "3. edit / normalize / optimize / convert",
+        "1. type `ilu`",
+        "2. type `/` to see helpers",
+        "3. follow the next-step prompts and `/run` when ready",
       ],
       theme
     ),
+    "",
+    formatBlock("Update", ["ilu update"], theme),
     "",
     ...helpSectionBlocks,
     "",
     formatBlock("GitHub Auth", ["gh auth login", "gh auth status"], theme),
     "",
-    formatBlock("Shell", ["ilu", "ilu shell", "Type / to see helpers and /exit to quit."], theme),
+    formatBlock(
+      "Shell",
+      ["ilu", "ilu shell", "Type / to see helpers, /show to inspect the current flow, /update for latest, and /exit to quit."],
+      theme
+    ),
     "",
     formatBlock("Completion", ["ilu completion bash", "ilu completion zsh", "ilu completion fish"], theme),
     "",
@@ -166,7 +189,7 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
       theme
     ),
     "",
-    formatBlock("Output", ["All commands print JSON to stdout."], theme),
+    formatBlock("Output", ["One-shot commands print JSON to stdout.", "`ilu` opens the interactive shell."], theme),
   ].join("\n");
 };
 

@@ -1215,6 +1215,8 @@ const cliHelpOutput = execFileSync(process.execPath, [cliPath, "help"], {
 if (
   !cliHelpOutput.includes("health-check") ||
   !cliHelpOutput.includes("morphology-card") ||
+  !cliHelpOutput.includes("ilu  Open the interactive shell.") ||
+  !cliHelpOutput.includes("ilu update") ||
   !cliHelpOutput.includes("ilu shell") ||
   !cliHelpOutput.includes("ilu completion bash") ||
   !cliHelpOutput.includes("--name-hints <a,b,c>") ||
@@ -1238,15 +1240,33 @@ const bashCompletionOutput = execFileSync(process.execPath, [cliPath, "completio
   cwd: root,
   encoding: "utf8",
 });
-if (!bashCompletionOutput.includes("complete -o bashdefault -o default -F _ilu ilu")) {
+if (
+  !bashCompletionOutput.includes("complete -o bashdefault -o default -F _ilu ilu") ||
+  !bashCompletionOutput.includes("help update shell completion")
+) {
   throw new Error("ilu bash completion smoke test failed");
+}
+
+const updateDryRunOutput = execFileSync(process.execPath, [cliPath, "update", "--dry-run"], {
+  cwd: root,
+  encoding: "utf8",
+});
+if (
+  !updateDryRunOutput.includes("npm install -g --install-links=true") ||
+  !updateDryRunOutput.includes("git+https://github.com/amtellezfernandez/i-love-urdf.git")
+) {
+  throw new Error("ilu update dry-run smoke test failed");
 }
 
 const shellHelpOutput = execFileSync(process.execPath, [cliPath, "help", "shell"], {
   cwd: root,
   encoding: "utf8",
 });
-if (!shellHelpOutput.includes("ilu shell") || !shellHelpOutput.includes("/load-source")) {
+if (
+  !shellHelpOutput.includes("ilu shell") ||
+  !shellHelpOutput.includes("/load-source") ||
+  !shellHelpOutput.includes("/update")
+) {
   throw new Error("ilu shell help smoke test failed");
 }
 
@@ -1256,15 +1276,16 @@ const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   input: "/load-source\n/\n/repo\nANYbotics/anymal_b_simple_description\n/show\n/back\n/health-check\n/show\n/exit\n",
 });
 if (
-  !shellTranscript.includes("Slash-first help for loading, checking, and fixing URDFs.") ||
-  !shellTranscript.includes("Start Here") ||
+  !shellTranscript.includes("interactive urdf shell") ||
+  !shellTranscript.includes("type / for commands, /update for latest, /exit to quit") ||
+  !shellTranscript.includes("start") ||
   !shellTranscript.includes("/repo") ||
-  !shellTranscript.includes("GitHub repo or URL") ||
-  !shellTranscript.includes("Next: /repo or /local") ||
-  !shellTranscript.includes("Ready: /run") ||
-  !shellTranscript.includes("Current Command") ||
+  !shellTranscript.includes("input") ||
+  !shellTranscript.includes("[next] /repo or /local") ||
+  !shellTranscript.includes("[ready] /run") ||
+  !shellTranscript.includes("cmd") ||
   !shellTranscript.includes("ilu load-source --github ANYbotics/anymal_b_simple_description") ||
-  !shellTranscript.includes("Next\n  /urdf")
+  !shellTranscript.includes("next\n  /urdf")
 ) {
   throw new Error("ilu shell guided-helper smoke test failed");
 }
@@ -1275,9 +1296,9 @@ const xacroShellTranscript = execFileSync(process.execPath, [cliPath, "shell"], 
   input: "/xacro-to-urdf\n/exit\n",
 });
 if (
-  !xacroShellTranscript.includes("Next: /xacro or /repo or /local") ||
+  !xacroShellTranscript.includes("[next] /xacro or /repo or /local") ||
   !xacroShellTranscript.includes("/entry") ||
-  !xacroShellTranscript.includes("Common")
+  !xacroShellTranscript.includes("more")
 ) {
   throw new Error("ilu shell xacro workflow guidance smoke test failed");
 }

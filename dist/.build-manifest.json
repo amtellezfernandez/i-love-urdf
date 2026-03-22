@@ -39,6 +39,8 @@
     "commands/cliHelp.js",
     "commands/cliShell.d.ts",
     "commands/cliShell.js",
+    "commands/cliUpdate.d.ts",
+    "commands/cliUpdate.js",
     "commands/commandCatalog.d.ts",
     "commands/commandCatalog.js",
     "commands/commandConsistency.d.ts",

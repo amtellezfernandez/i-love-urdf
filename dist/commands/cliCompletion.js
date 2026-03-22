@@ -200,6 +200,7 @@ exports.COMMAND_COMPLETION_SPECS = commandCatalog_1.SUPPORTED_COMMANDS.map((comm
 exports.COMMAND_COMPLETION_SPEC_BY_NAME = Object.fromEntries(exports.COMMAND_COMPLETION_SPECS.map((entry) => [entry.name, entry]));
 const TOP_LEVEL_SPECS = [
     { name: "help", summary: "Show CLI help." },
+    { name: "update", summary: "Update ilu to the latest version from GitHub." },
     { name: "shell", summary: "Start the interactive slash-command shell." },
     { name: "completion", summary: "Generate shell completion scripts." },
     ...exports.COMMAND_COMPLETION_SPECS.map((entry) => ({
@@ -208,6 +209,7 @@ const TOP_LEVEL_SPECS = [
     })),
 ];
 const HELP_TOPIC_SPECS = [
+    { name: "update", summary: "Update ilu to the latest version from GitHub." },
     { name: "shell", summary: "Start the interactive slash-command shell." },
     { name: "completion", summary: "Generate shell completion scripts." },
     ...exports.COMMAND_COMPLETION_SPECS.map((entry) => ({

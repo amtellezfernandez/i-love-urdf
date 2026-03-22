@@ -271,6 +271,7 @@ export const COMMAND_COMPLETION_SPEC_BY_NAME: Readonly<
 
 const TOP_LEVEL_SPECS: readonly CompletionTopLevelSpec[] = [
   { name: "help", summary: "Show CLI help." },
+  { name: "update", summary: "Update ilu to the latest version from GitHub." },
   { name: "shell", summary: "Start the interactive slash-command shell." },
   { name: "completion", summary: "Generate shell completion scripts." },
   ...COMMAND_COMPLETION_SPECS.map((entry) => ({
@@ -280,6 +281,7 @@ const TOP_LEVEL_SPECS: readonly CompletionTopLevelSpec[] = [
 ];
 
 const HELP_TOPIC_SPECS: readonly CompletionTopLevelSpec[] = [
+  { name: "update", summary: "Update ilu to the latest version from GitHub." },
   { name: "shell", summary: "Start the interactive slash-command shell." },
   { name: "completion", summary: "Generate shell completion scripts." },
   ...COMMAND_COMPLETION_SPECS.map((entry) => ({
