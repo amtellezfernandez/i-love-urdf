@@ -1269,9 +1269,13 @@ if (
   !shellHelpOutput.includes("./robot.urdf") ||
   !shellHelpOutput.includes("!xacro") ||
   !shellHelpOutput.includes("/open") ||
-  !shellHelpOutput.includes("/convert") ||
+  !shellHelpOutput.includes("/health") ||
+  !shellHelpOutput.includes("/orientation") ||
   !shellHelpOutput.includes("/update") ||
-  shellHelpOutput.includes("/exit")
+  shellHelpOutput.includes("/exit") ||
+  shellHelpOutput.includes("/convert") ||
+  shellHelpOutput.includes("/fix") ||
+  shellHelpOutput.includes("/check")
 ) {
   throw new Error("ilu shell help smoke test failed");
 }
@@ -1348,10 +1352,13 @@ if (
   !loadedFollowUpMenuTranscript.includes("ready from") ||
   !loadedFollowUpMenuTranscript.includes(droppedUrdfPath) ||
   !loadedFollowUpMenuTranscript.includes("/analyze") ||
-  !loadedFollowUpMenuTranscript.includes("/fix") ||
-  !loadedFollowUpMenuTranscript.includes("/convert") ||
-  !loadedFollowUpMenuTranscript.includes("/check") ||
+  !loadedFollowUpMenuTranscript.includes("/health") ||
+  !loadedFollowUpMenuTranscript.includes("/validate") ||
+  !loadedFollowUpMenuTranscript.includes("/orientation") ||
   loadedFollowUpMenuTranscript.includes("paste owner/repo or drop a local folder/file first") ||
+  loadedFollowUpMenuTranscript.includes("/fix") ||
+  loadedFollowUpMenuTranscript.includes("/convert") ||
+  loadedFollowUpMenuTranscript.includes("/check") ||
   loadedFollowUpMenuTranscript.includes("/exit") ||
   loadedFollowUpMenuTranscript.includes("/quit")
 ) {
@@ -1394,7 +1401,7 @@ if (
 const loadedOrientationTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/guess-orientation\n/exit\n`,
+  input: `${escapedDroppedUrdfPath}\n/orientation\n/exit\n`,
 });
 if (
   !loadedOrientationTranscript.includes("orientation likely") ||
@@ -1404,56 +1411,18 @@ if (
   throw new Error("ilu shell loaded orientation shortcut smoke test failed");
 }
 
-const loadedCheckTaskHealthTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+const loadedHealthTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/check\n/health\n/exit\n`,
+  input: `${escapedDroppedUrdfPath}\n/health\n/exit\n`,
 });
 if (
-  !loadedCheckTaskHealthTranscript.includes("looks healthy") ||
-  !loadedCheckTaskHealthTranscript.includes(droppedUrdfPath) ||
-  loadedCheckTaskHealthTranscript.includes("/urdf              URDF file path.") ||
-  loadedCheckTaskHealthTranscript.includes("[ready] /run")
+  !loadedHealthTranscript.includes("looks healthy") ||
+  !loadedHealthTranscript.includes(droppedUrdfPath) ||
+  loadedHealthTranscript.includes("/urdf              URDF file path.") ||
+  loadedHealthTranscript.includes("[ready] /run")
 ) {
-  throw new Error("ilu shell loaded check helper smoke test failed");
-}
-
-const loadedConvertTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
-  cwd: root,
-  encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/convert\n/mjcf\n/exit\n`,
-});
-if (
-  !loadedConvertTaskTranscript.includes("/out               Write the output to a file.") ||
-  loadedConvertTaskTranscript.includes("/urdf              URDF file path.")
-) {
-  throw new Error("ilu shell loaded convert helper smoke test failed");
-}
-
-const loadedFixTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
-  cwd: root,
-  encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/fix\n/mesh-paths\n/exit\n`,
-});
-if (
-  !loadedFixTaskTranscript.includes("/package           Set --package (name).") ||
-  loadedFixTaskTranscript.includes("/urdf              URDF file path.")
-) {
-  throw new Error("ilu shell loaded fix helper smoke test failed");
-}
-
-const loadedRepoMeshRefsTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
-  cwd: root,
-  encoding: "utf8",
-  input: `${escapedSingleRepoDir}/robot\n/fix\n/mesh-refs\n/exit\n`,
-});
-if (
-  !loadedRepoMeshRefsTranscript.includes(`using ${singleRepoDir}/robot`) ||
-  !loadedRepoMeshRefsTranscript.includes("/out               Write the output to a file.") ||
-  loadedRepoMeshRefsTranscript.includes("/repo              GitHub repo or URL.") ||
-  loadedRepoMeshRefsTranscript.includes("/local")
-) {
-  throw new Error("ilu shell loaded repo mesh-ref helper smoke test failed");
+  throw new Error("ilu shell loaded health shortcut smoke test failed");
 }
 
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
@@ -1470,25 +1439,26 @@ if (
   throw new Error("ilu shell zip-drop smoke test failed");
 }
 
-const checkTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+const healthShortcutTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `/check\n${escapedDroppedUrdfPath}\n/exit\n`,
+  input: `/health\n${escapedDroppedUrdfPath}\n/exit\n`,
 });
 if (
-  !checkTaskTranscript.includes("/check") ||
-  !checkTaskTranscript.includes("checks") ||
-  !checkTaskTranscript.includes("validation passed") ||
-  !checkTaskTranscript.includes("health check passed") ||
-  !checkTaskTranscript.includes(droppedUrdfPath)
+  !healthShortcutTranscript.includes("URDF file path") ||
+  !healthShortcutTranscript.includes("validation passed") ||
+  !healthShortcutTranscript.includes("health check passed") ||
+  !healthShortcutTranscript.includes(droppedUrdfPath) ||
+  healthShortcutTranscript.includes("  /file") ||
+  healthShortcutTranscript.includes("[ready] /run")
 ) {
-  throw new Error("ilu shell direct-check input smoke test failed");
+  throw new Error("ilu shell direct-health input smoke test failed");
 }
 
 const multiCandidateTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `/open\n/local\n${escapedMultiCandidateDir}\n2\n/exit\n`,
+  input: `/open\n${escapedMultiCandidateDir}\n2\n/exit\n`,
 });
 if (
   !multiCandidateTranscript.includes("choose a candidate") ||
@@ -1499,18 +1469,18 @@ if (
   throw new Error("ilu shell multi-candidate picker smoke test failed");
 }
 
-const xacroShellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+const openShortcutTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: "/convert\n/xacro\n/exit\n",
+  input: "/open\n/exit\n",
 });
 if (
-  !xacroShellTranscript.includes("/convert") ||
-  !xacroShellTranscript.includes("/mjcf") ||
-  !xacroShellTranscript.includes("/usd") ||
-  !xacroShellTranscript.includes("XACRO file path")
+  !openShortcutTranscript.includes("paste owner/repo or drop a local folder/file") ||
+  openShortcutTranscript.includes("  /repo") ||
+  openShortcutTranscript.includes("  /local") ||
+  openShortcutTranscript.includes("  /file")
 ) {
-  throw new Error("ilu shell xacro workflow guidance smoke test failed");
+  throw new Error("ilu shell open shortcut smoke test failed");
 }
 
 const xacroRetryCwd = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-xacro-"));
