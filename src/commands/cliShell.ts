@@ -10,6 +10,7 @@ import {
   type CompletionOptionSpec,
 } from "./cliCompletion";
 import { runUpdateCommand } from "./cliUpdate";
+import { readGitHubCliToken } from "../node/githubCliAuth";
 import { parseGitHubRepositoryReference } from "../repository/githubRepositoryInspection";
 
 type ShellOptions = {
@@ -21,6 +22,7 @@ type PendingValuePrompt = {
   slashName: string;
   title: string;
   examples: readonly string[];
+  notes: readonly string[];
   expectsPath: boolean;
 };
 
@@ -183,7 +185,7 @@ const ROOT_URDF_READY_COMMANDS = [
 
 const COMMAND_SUMMARY_OVERRIDES: Partial<Record<SupportedCommandName, string>> = {
   "load-source": "Load from GitHub, a local repo, or a local file.",
-  "inspect-repo": "Inspect a repo before choosing the right entrypoint.",
+  "inspect-repo": "Preview a local or GitHub repo and suggest the right URDF or XACRO entrypoint.",
   "xacro-to-urdf": "Expand a XACRO file, repo, or GitHub source into URDF.",
   "repair-mesh-refs": "Repair broken mesh references in a local or GitHub repo.",
   "health-check": "Check structure, axes, and orientation risks.",
@@ -275,6 +277,7 @@ const SESSION_SLASH_ALIASES: Partial<Record<SupportedCommandName, Readonly<Recor
 
 const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
 const ROOT_GUIDANCE = "type / for commands, /update for latest, ctrl+c to quit";
+let cachedGitHubAuthState: boolean | undefined;
 
 const formatRootPrompt = (): string => "/> ";
 const formatSessionPrompt = (session: ShellSession): string =>
@@ -362,6 +365,16 @@ const createOutputPanel = (
     lines: lines.slice(-10),
     kind,
   };
+};
+
+const hasGitHubAuthConfigured = (): boolean => {
+  if (cachedGitHubAuthState !== undefined) {
+    return cachedGitHubAuthState;
+  }
+
+  const envToken = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
+  cachedGitHubAuthState = Boolean(envToken || readGitHubCliToken());
+  return cachedGitHubAuthState;
 };
 
 const printSectionTitle = (title: string) => {
@@ -817,6 +830,9 @@ const getPendingValuePrompt = (
         "ANYbotics/anymal_b_simple_description",
         "github.com/ANYbotics/anymal_b_simple_description",
       ],
+      notes: hasGitHubAuthConfigured()
+        ? []
+        : ["GitHub auth not found. Public repos still work. Run gh auth login for private repos and higher limits."],
       expectsPath: false,
     };
   }
@@ -827,6 +843,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "Local file or repository path",
       examples: ["./robot.urdf", "./robot-description/"],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -837,6 +854,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "Local repository path",
       examples: ["./robot-description/"],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -847,6 +865,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "Path inside the repository",
       examples: ["urdf/robot.urdf.xacro"],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -857,6 +876,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "URDF file path",
       examples: ["./robot.urdf"],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -867,6 +887,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "XACRO file path",
       examples: ["./robot.urdf.xacro"],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -877,6 +898,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "XACRO args",
       examples: ["prefix=demo,use_mock_hardware=true"],
+      notes: [],
       expectsPath: false,
     };
   }
@@ -887,6 +909,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "Output file path",
       examples: ["./robot.fixed.urdf"],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -897,6 +920,7 @@ const getPendingValuePrompt = (
       slashName,
       title: "Repository subdirectory",
       examples: ["robots/arm"],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -907,6 +931,7 @@ const getPendingValuePrompt = (
       slashName,
       title: `${key === "left" ? "Left" : "Right"} URDF path`,
       examples: [`./${key}.urdf`],
+      notes: [],
       expectsPath: true,
     };
   }
@@ -917,6 +942,7 @@ const getPendingValuePrompt = (
     slashName,
     title: option?.valueHint ? `${option.flag} (${option.valueHint})` : option?.flag ?? `--${key}`,
     examples: [],
+    notes: [],
     expectsPath: option?.isFilesystemPath === true,
   };
 };
@@ -926,14 +952,15 @@ const printPendingValuePrompt = (pending: PendingValuePrompt) => {
   process.stdout.write(`${SHELL_THEME.command(pending.title)}\n`);
   if (pending.examples.length === 1) {
     process.stdout.write(`${SHELL_THEME.muted(`example: ${pending.examples[0]}`)}\n`);
-    return;
-  }
-
-  if (pending.examples.length > 1) {
+  } else if (pending.examples.length > 1) {
     process.stdout.write(`${SHELL_THEME.muted("examples:")}\n`);
     for (const example of pending.examples) {
       process.stdout.write(`  ${SHELL_THEME.muted(example)}\n`);
     }
+  }
+
+  for (const note of pending.notes) {
+    process.stdout.write(`${SHELL_THEME.warning(note)}\n`);
   }
 };
 
@@ -1679,10 +1706,20 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     `${SHELL_THEME.command(promptLabel)} ${view.input}${placeholder ? SHELL_THEME.muted(placeholder) : ""}`
   );
 
-  if (state.session?.pending && state.session.pending.examples.length > 0 && !view.input.startsWith("/")) {
-    lines.push(SHELL_THEME.section("examples"));
-    for (const example of state.session.pending.examples.slice(0, 2)) {
-      lines.push(`  ${SHELL_THEME.muted(example)}`);
+  if (state.session?.pending && !view.input.startsWith("/")) {
+    const hasExamples = state.session.pending.examples.length > 0;
+    const hasNotes = state.session.pending.notes.length > 0;
+    if (hasExamples) {
+      lines.push(SHELL_THEME.section("examples"));
+      for (const example of state.session.pending.examples.slice(0, 2)) {
+        lines.push(`  ${SHELL_THEME.muted(example)}`);
+      }
+    }
+    if (hasNotes) {
+      lines.push(SHELL_THEME.section("note"));
+      for (const note of state.session.pending.notes) {
+        lines.push(`  ${SHELL_THEME.warning(truncateText(note, columns - 4))}`);
+      }
     }
   } else if (view.input.startsWith("/")) {
     lines.push(SHELL_THEME.section("picker"));
@@ -2021,11 +2058,13 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     session.pending = getPendingValuePrompt(session, target.key, slashCommand);
     view.notice = {
-      kind: "info",
-      text:
+      kind: session.pending.notes.length > 0 ? "warning" : "info",
+      text: [
         session.pending.examples[0] !== undefined
           ? `${session.pending.title}: ${session.pending.examples[0]}`
           : session.pending.title,
+        ...session.pending.notes,
+      ].join("  "),
     };
     view.output = null;
     return true;
