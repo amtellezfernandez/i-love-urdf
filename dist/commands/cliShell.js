@@ -343,11 +343,7 @@ const printOutputPanel = (panel) => {
         return;
     }
     printSectionTitle(panel.title);
-    const render = panel.kind === "error"
-        ? SHELL_THEME.error
-        : panel.kind === "success"
-            ? SHELL_THEME.success
-            : SHELL_THEME.muted;
+    const render = panel.kind === "error" ? SHELL_THEME.error : SHELL_THEME.muted;
     for (const line of panel.lines) {
         process.stdout.write(`  ${render(line)}\n`);
     }
@@ -2576,11 +2572,7 @@ const renderTtyShell = (state, view) => {
     if (view.output) {
         lines.push("");
         lines.push(SHELL_THEME.section(view.output.title));
-        const renderOutputLine = view.output.kind === "error"
-            ? SHELL_THEME.error
-            : view.output.kind === "success"
-                ? SHELL_THEME.success
-                : SHELL_THEME.muted;
+        const renderOutputLine = view.output.kind === "error" ? SHELL_THEME.error : SHELL_THEME.muted;
         for (const line of view.output.lines) {
             lines.push(`  ${renderOutputLine(truncateText(line, columns - 4))}`);
         }
@@ -3342,6 +3334,36 @@ const runTtyInteractiveShell = async (options = {}) => {
     const render = () => {
         renderTtyShell(state, view);
     };
+    let pendingRenderTimer = null;
+    let renderQueued = false;
+    let lastRenderAt = 0;
+    const queueRender = (mode = "navigation") => {
+        const flush = () => {
+            if (closed) {
+                return;
+            }
+            renderQueued = false;
+            if (pendingRenderTimer) {
+                clearTimeout(pendingRenderTimer);
+                pendingRenderTimer = null;
+            }
+            lastRenderAt = Date.now();
+            render();
+        };
+        if (mode === "force") {
+            flush();
+            return;
+        }
+        const waitMs = mode === "typing" ? 32 : Math.max(0, 16 - (Date.now() - lastRenderAt));
+        if (renderQueued) {
+            if (waitMs === 0) {
+                flush();
+            }
+            return;
+        }
+        renderQueued = true;
+        pendingRenderTimer = setTimeout(flush, waitMs);
+    };
     if (options.initialSlashCommand) {
         const parsed = parseSlashInput(options.initialSlashCommand);
         if (parsed) {
@@ -3352,7 +3374,7 @@ const runTtyInteractiveShell = async (options = {}) => {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     const onResize = () => {
-        render();
+        queueRender("force");
     };
     const onKeypress = (input, key) => {
         if (closed) {
@@ -3364,32 +3386,32 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (key.name === "return" || key.name === "enter") {
             handleEnter();
-            render();
+            queueRender("force");
             return;
         }
         if (key.name === "up" || (key.shift && key.name === "tab")) {
             if (state.candidatePicker && !view.input.startsWith("/")) {
                 state.candidatePicker.selectedIndex = clamp(state.candidatePicker.selectedIndex - 1, 0, state.candidatePicker.candidates.length - 1);
-                render();
+                queueRender("navigation");
                 return;
             }
             const menuEntries = getSlashMenuEntries(state, view.input);
             if (menuEntries.length > 0) {
                 view.menuIndex = clamp(view.menuIndex - 1, 0, menuEntries.length - 1);
-                render();
+                queueRender("navigation");
             }
             return;
         }
         if (key.name === "down") {
             if (state.candidatePicker && !view.input.startsWith("/")) {
                 state.candidatePicker.selectedIndex = clamp(state.candidatePicker.selectedIndex + 1, 0, state.candidatePicker.candidates.length - 1);
-                render();
+                queueRender("navigation");
                 return;
             }
             const menuEntries = getSlashMenuEntries(state, view.input);
             if (menuEntries.length > 0) {
                 view.menuIndex = clamp(view.menuIndex + 1, 0, menuEntries.length - 1);
-                render();
+                queueRender("navigation");
             }
             return;
         }
@@ -3397,40 +3419,40 @@ const runTtyInteractiveShell = async (options = {}) => {
             const slashCompletion = completeSelectedSlashInput(view.input, state, view.menuIndex);
             if (slashCompletion) {
                 setInput(slashCompletion);
-                render();
+                queueRender("navigation");
                 return;
             }
             const pathCompletion = completeTtyPathInput(view.input, state);
             if (pathCompletion) {
                 setInput(pathCompletion.nextInput);
                 view.notice = pathCompletion.notice;
-                render();
+                queueRender("navigation");
             }
             return;
         }
         if (key.name === "escape") {
             if (view.input.startsWith("/")) {
                 setInput("");
-                render();
+                queueRender("navigation");
                 return;
             }
             if (state.session?.pending) {
                 state.session.pending = null;
                 view.notice = { kind: "info", text: "input cancelled" };
-                render();
+                queueRender("navigation");
             }
             return;
         }
         if (key.name === "backspace") {
             if (view.input.length > 0) {
                 setInput(view.input.slice(0, -1));
-                render();
+                queueRender("typing");
             }
             return;
         }
         if (key.ctrl && key.name === "u") {
             setInput("");
-            render();
+            queueRender("typing");
             return;
         }
         if (input && !key.ctrl && !key.meta) {
@@ -3439,7 +3461,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                 view.menuIndex = 0;
             }
             view.notice = null;
-            render();
+            queueRender("typing");
         }
     };
     process.stdout.on("resize", onResize);
@@ -3451,6 +3473,9 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
     }
     finally {
+        if (pendingRenderTimer) {
+            clearTimeout(pendingRenderTimer);
+        }
         process.stdout.off("resize", onResize);
         process.stdin.off("keypress", onKeypress);
         process.stdin.setRawMode(false);
