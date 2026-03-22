@@ -34,7 +34,16 @@ type ShellSession = {
   label: string;
   spec: CompletionCommandSpec;
   args: Map<string, string | boolean>;
+  inheritedKeys: Set<string>;
   pending: PendingValuePrompt | null;
+};
+
+type LoadedSourceContext = {
+  source: "local-file" | "local-repo" | "github";
+  urdfPath: string;
+  localPath?: string;
+  githubRef?: string;
+  repositoryUrdfPath?: string;
 };
 
 type ShellState = {
@@ -42,6 +51,7 @@ type ShellState = {
   rootTask: RootTaskName | null;
   candidatePicker: CandidatePickerState | null;
   xacroRetry: ((pythonExecutable?: string) => AutoAutomationResult) | null;
+  loadedSource: LoadedSourceContext | null;
   lastUrdfPath?: string;
 };
 
@@ -662,10 +672,11 @@ const printRootQuickStart = () => {
   process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
 };
 
-const printRootOptions = (state: Pick<ShellState, "lastUrdfPath">) => {
-  if (state.lastUrdfPath) {
+const printRootOptions = (state: Pick<ShellState, "lastUrdfPath" | "loadedSource">) => {
+  const readySourceLabel = getReadySourceLabel(state);
+  if (readySourceLabel) {
     printSectionTitle("ready");
-    process.stdout.write(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(state.lastUrdfPath)}`)}\n`);
+    process.stdout.write(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(readySourceLabel)}`)}\n`);
 
     printSectionTitle("next");
     printCommandList(getLoadedRootCommandList());
@@ -958,6 +969,26 @@ const getSessionOptionEntries = (session: ShellSession): readonly SessionOptionE
     });
 };
 
+const shouldHideVisibleSessionOption = (session: ShellSession, key: string): boolean => {
+  if (session.inheritedKeys.has(key) && SOURCE_OPTION_KEYS.has(key)) {
+    return true;
+  }
+
+  if (session.command === "inspect-repo" || session.command === "repair-mesh-refs") {
+    if (session.args.has("local")) {
+      return key === "github" || key === "path" || key === "ref" || key === "token";
+    }
+    if (session.args.has("github")) {
+      return key === "local";
+    }
+  }
+
+  return false;
+};
+
+const getVisibleSessionOptionEntries = (session: ShellSession): readonly SessionOptionEntry[] =>
+  getSessionOptionEntries(session).filter((entry) => !shouldHideVisibleSessionOption(session, entry.key));
+
 const formatSlashSequence = (session: ShellSession, keys: readonly string[]): string =>
   keys.map((key) => getSlashDisplayName(session, key)).join(" + ");
 
@@ -1068,7 +1099,7 @@ const printSessionPreview = (session: ShellSession) => {
 };
 
 const printSessionOptions = (session: ShellSession) => {
-  const entries = getSessionOptionEntries(session);
+  const entries = getVisibleSessionOptionEntries(session);
   const requiredEntries = entries.filter((entry) => entry.priority === "required");
   const commonEntries = entries.filter((entry) => entry.priority === "common");
   const advancedEntries = entries.filter((entry) => entry.priority === "advanced");
@@ -1133,6 +1164,7 @@ const clearMutuallyExclusiveArgs = (session: ShellSession, key: string) => {
     for (const sibling of group) {
       if (sibling !== key) {
         session.args.delete(sibling);
+        session.inheritedKeys.delete(sibling);
       }
     }
   }
@@ -1442,6 +1474,7 @@ const setSessionValue = (
 
   clearMutuallyExclusiveArgs(session, key);
   session.args.set(key, value);
+  session.inheritedKeys.delete(key);
   pushFeedback(feedback, "success", `[set] --${key} ${quoteForPreview(value)}`);
   return true;
 };
@@ -1449,11 +1482,13 @@ const setSessionValue = (
 const toggleSessionFlag = (session: ShellSession, key: string, feedback?: ShellFeedback[]) => {
   if (session.args.get(key) === true) {
     session.args.delete(key);
+    session.inheritedKeys.delete(key);
     pushFeedback(feedback, "warning", `[unset] --${key}`);
     return;
   }
 
   session.args.set(key, true);
+  session.inheritedKeys.delete(key);
   pushFeedback(feedback, "success", `[on] --${key}`);
 };
 
@@ -1464,16 +1499,73 @@ const printLastUrdf = (state: ShellState) => {
   process.stdout.write(`${SHELL_THEME.muted(getLastUrdfMessage(state))}\n`);
 };
 
+const getReadySourceLabel = (state: Pick<ShellState, "loadedSource" | "lastUrdfPath">): string | null =>
+  state.loadedSource?.githubRef || state.loadedSource?.localPath || state.loadedSource?.urdfPath || state.lastUrdfPath || null;
+
+const rememberDirectUrdfSource = (state: ShellState, urdfPath: string) => {
+  state.loadedSource = {
+    source: "local-file",
+    urdfPath,
+    localPath: urdfPath,
+  };
+};
+
+const rememberLoadedSource = (
+  state: ShellState,
+  payload: LoadSourceResult & { outPath: string | null },
+  options: {
+    githubRef?: string;
+  } = {}
+) => {
+  const normalizedGitHubRef =
+    typeof options.githubRef === "string" && options.githubRef.trim().length > 0
+      ? options.githubRef.trim()
+      : payload.repositoryUrl;
+
+  if (payload.source === "github") {
+    state.loadedSource = {
+      source: "github",
+      urdfPath: payload.outPath || state.lastUrdfPath || "",
+      githubRef: normalizedGitHubRef,
+      repositoryUrdfPath: payload.entryPath,
+    };
+    return;
+  }
+
+  if (payload.source === "local-repo") {
+    const localPath = payload.inspectedPath;
+    const originalUrdfPath =
+      payload.entryFormat === "urdf" ? path.join(localPath, payload.entryPath) : payload.outPath || state.lastUrdfPath || "";
+    state.loadedSource = {
+      source: "local-repo",
+      urdfPath: originalUrdfPath,
+      localPath,
+      repositoryUrdfPath: payload.entryPath,
+    };
+    return;
+  }
+
+  state.loadedSource = {
+    source: "local-file",
+    urdfPath: payload.entryFormat === "urdf" ? payload.inspectedPath : payload.outPath || state.lastUrdfPath || "",
+    localPath: payload.inspectedPath,
+  };
+};
+
 const updateRememberedUrdfPath = (state: ShellState, session: ShellSession) => {
   const directUrdfPath = session.args.get("urdf");
   if (typeof directUrdfPath === "string" && directUrdfPath.trim().length > 0) {
     state.lastUrdfPath = directUrdfPath;
+    if (session.command !== "load-source") {
+      rememberDirectUrdfSource(state, directUrdfPath);
+    }
     return;
   }
 
   const outPath = session.args.get("out");
   if (typeof outPath === "string" && URDF_OUTPUT_COMMANDS.has(session.command)) {
     state.lastUrdfPath = outPath;
+    rememberDirectUrdfSource(state, outPath);
   }
 };
 
@@ -2123,6 +2215,9 @@ const executeLoadSourceChecks = (
   clearXacroRetry(state);
 
   state.lastUrdfPath = loadPayload.outPath;
+  rememberLoadedSource(state, loadPayload, {
+    githubRef: typeof execArgs.get("github") === "string" ? String(execArgs.get("github")) : undefined,
+  });
 
   const validationExecution = executeCliCommand(
     "validate",
@@ -2414,6 +2509,7 @@ const runDirectInputAutomation = (
     }
 
     state.lastUrdfPath = urdfPath;
+    rememberDirectUrdfSource(state, urdfPath);
 
     const validationExecution = executeCliCommand("validate", new Map([["urdf", urdfPath]]));
     const healthExecution = executeCliCommand("health-check", new Map([["urdf", urdfPath]]));
@@ -2556,6 +2652,7 @@ const buildAutoPreviewPanel = (
     const urdfPath = String(previewArgs.get("urdf") || "");
     if (payload && urdfPath) {
       state.lastUrdfPath = urdfPath;
+      rememberDirectUrdfSource(state, urdfPath);
       return summarizeHealthPreview(payload, urdfPath);
     }
     return buildPreviewErrorPanel("health", execution);
@@ -2575,6 +2672,7 @@ const buildAutoPreviewPanel = (
     const urdfPath = String(previewArgs.get("urdf") || "");
     if (payload && urdfPath) {
       state.lastUrdfPath = urdfPath;
+      rememberDirectUrdfSource(state, urdfPath);
       return summarizeAnalysisPreview(payload, urdfPath);
     }
     return buildPreviewErrorPanel("preview", execution);
@@ -2677,13 +2775,16 @@ const tryCreateLoadedRootQuickSession = (
   state: ShellState,
   command: SupportedCommandName
 ): ShellSession | null => {
-  if (!state.lastUrdfPath || !AUTO_RUN_ROOT_URDF_COMMANDS.has(command)) {
+  if (!AUTO_RUN_READY_COMMANDS.has(command)) {
     return null;
   }
 
   const session = createSession(command, state, command);
   return getRequirementStatus(session).ready ? session : null;
 };
+
+const shouldAutoRunSession = (session: ShellSession): boolean =>
+  AUTO_RUN_READY_COMMANDS.has(session.command) && getRequirementStatus(session).ready;
 
 const getRootIdleMessage = (state: Pick<ShellState, "lastUrdfPath">): string =>
   state.lastUrdfPath
@@ -2772,12 +2873,63 @@ const createSession = (
     label,
     spec: COMMAND_COMPLETION_SPEC_BY_NAME[command],
     args: new Map<string, string | boolean>(),
+    inheritedKeys: new Set<string>(),
     pending: null,
   };
 
-  if (state.lastUrdfPath && getOptionSpecByKey(session, "urdf")) {
+  const inheritedValues: Array<[string, string]> = [];
+  const source = state.loadedSource;
+
+  const canInheritLocalSource =
+    source?.localPath &&
+    getOptionSpecByKey(session, "local") &&
+    (session.command === "inspect-repo" ||
+      session.command === "repair-mesh-refs" ||
+      (session.command === "xacro-to-urdf" && source?.source === "local-repo"));
+  if (canInheritLocalSource && source?.localPath) {
+    session.args.set("local", source.localPath);
+    session.inheritedKeys.add("local");
+    inheritedValues.push(["local", source.localPath]);
+  }
+
+  const canInheritGitHubSource =
+    source?.githubRef &&
+    getOptionSpecByKey(session, "github") &&
+    (session.command === "inspect-repo" ||
+      session.command === "repair-mesh-refs" ||
+      session.command === "xacro-to-urdf");
+  if (canInheritGitHubSource && source?.githubRef) {
+    session.args.set("github", source.githubRef);
+    session.inheritedKeys.add("github");
+    inheritedValues.push(["github", source.githubRef]);
+  }
+
+  if (source?.urdfPath && getOptionSpecByKey(session, "urdf")) {
+    session.args.set("urdf", source.urdfPath);
+    session.inheritedKeys.add("urdf");
+    inheritedValues.push(["urdf", source.urdfPath]);
+  } else if (state.lastUrdfPath && getOptionSpecByKey(session, "urdf")) {
     session.args.set("urdf", state.lastUrdfPath);
-    pushFeedback(feedback, "info", `using ${state.lastUrdfPath}`);
+    session.inheritedKeys.add("urdf");
+    inheritedValues.push(["urdf", state.lastUrdfPath]);
+  }
+
+  if (
+    source?.repositoryUrdfPath &&
+    command === "repair-mesh-refs" &&
+    getOptionSpecByKey(session, "urdf") &&
+    (session.args.has("local") || session.args.has("github"))
+  ) {
+    session.args.set("urdf", source.repositoryUrdfPath);
+    session.inheritedKeys.add("urdf");
+    inheritedValues.push(["urdf", source.repositoryUrdfPath]);
+  }
+
+  if (inheritedValues.length > 0) {
+    const primaryInherited = inheritedValues[0]?.[1];
+    if (primaryInherited) {
+      pushFeedback(feedback, "info", `using ${primaryInherited}`);
+    }
   }
 
   return session;
@@ -3353,6 +3505,12 @@ const handleRootTaskSlashCommand = (
     const feedback: ShellFeedback[] = [];
     startRootTaskAction(task, action, state, feedback);
     flushFeedback(feedback);
+    if (state.session && shouldAutoRunSession(state.session)) {
+      printSessionCommandExecution(executeSessionCommand(state, state.session), state.session);
+      state.session = null;
+      state.rootTask = null;
+      return;
+    }
     if (state.session?.pending) {
       printPendingValuePrompt(state.session.pending);
       return;
@@ -3658,12 +3816,15 @@ const LOADED_ROOT_MENU_ENTRIES = [
   },
 ];
 
-const AUTO_RUN_ROOT_URDF_COMMANDS = new Set<SupportedCommandName>([
+const AUTO_RUN_READY_COMMANDS = new Set<SupportedCommandName>([
   "analyze",
   "validate",
   "health-check",
   "guess-orientation",
+  "inspect-repo",
 ]);
+
+const SOURCE_OPTION_KEYS = new Set(["urdf", "local", "github", "xacro", "path"]);
 
 const getLoadedRootCommandList = (): readonly Pick<TtyMenuEntry, "name" | "summary">[] =>
   LOADED_ROOT_MENU_ENTRIES.map(({ name, summary }) => ({ name, summary }));
@@ -3715,12 +3876,12 @@ const getFullRootMenuEntries = (): readonly TtyMenuEntry[] => {
   return entries;
 };
 
-const getRootMenuEntries = (state: Pick<ShellState, "rootTask" | "lastUrdfPath">): readonly TtyMenuEntry[] => {
+const getRootMenuEntries = (state: Pick<ShellState, "rootTask" | "lastUrdfPath" | "loadedSource">): readonly TtyMenuEntry[] => {
   if (state.rootTask) {
     return getRootTaskMenuEntries(state.rootTask);
   }
 
-  if (state.lastUrdfPath) {
+  if (getReadySourceLabel(state)) {
     const seen = new Set<string>();
     const entries: TtyMenuEntry[] = [];
     const addEntry = (entry: TtyMenuEntry) => {
@@ -3746,7 +3907,7 @@ const getRootMenuEntries = (state: Pick<ShellState, "rootTask" | "lastUrdfPath">
 };
 
 const getSessionMenuEntries = (session: ShellSession): readonly TtyMenuEntry[] => {
-  const entries: TtyMenuEntry[] = getSessionOptionEntries(session).map((entry) => ({
+  const entries: TtyMenuEntry[] = getVisibleSessionOptionEntries(session).map((entry) => ({
     name: entry.name,
     summary: entry.summary,
     kind: "option",
@@ -4074,8 +4235,9 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
       );
     }
   } else {
-    if (state.lastUrdfPath) {
-      lines.push(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(state.lastUrdfPath)}`)}`);
+    const readySourceLabel = getReadySourceLabel(state);
+    if (readySourceLabel) {
+      lines.push(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(readySourceLabel)}`)}`);
       lines.push(`  ${SHELL_THEME.muted("use /analyze /fix /convert or paste another source")}`);
     } else {
       lines.push(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file")}`);
@@ -4242,6 +4404,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     rootTask: null,
     candidatePicker: null,
     xacroRetry: null,
+    loadedSource: null,
   };
   let isClosed = false;
 
@@ -4413,6 +4576,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     rootTask: null,
     candidatePicker: null,
     xacroRetry: null,
+    loadedSource: null,
   };
   const view: TtyShellViewState = {
     input: "",
@@ -4671,6 +4835,37 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       const feedback: ShellFeedback[] = [];
       startRootTaskAction(task, action, state, feedback);
       setNoticeFromFeedback(view, feedback);
+      if (state.session && shouldAutoRunSession(state.session)) {
+        const execution = runBusyOperation(getBusyStateForSession(state.session), () =>
+          executeSessionCommand(state, state.session as ShellSession)
+        );
+        const compactFailurePanel =
+          execution.status !== 0 ? getShellExecutionFailurePanel(execution, state.session.command) : null;
+        if (compactFailurePanel) {
+          view.output = compactFailurePanel;
+          view.notice = buildShellFailureNotice(
+            compactFailurePanel,
+            `[${state.session.command}] exited with status ${execution.status}`
+          );
+        } else {
+          const successPanel = getShellExecutionSuccessPanel(state.session, execution);
+          view.output =
+            successPanel ??
+            createOutputPanel(
+              execution.status === 0 ? "result" : "error",
+              buildExecutionPanelText(execution, state.session.command),
+              execution.status === 0 ? "success" : "error"
+            );
+          view.notice =
+            execution.status === 0
+              ? { kind: "success", text: "run complete" }
+              : { kind: "error", text: `[${state.session.command}] exited with status ${execution.status}` };
+        }
+        state.session = null;
+        state.rootTask = null;
+        pushTimelineEntry(view, `/${slashCommand}`);
+        return true;
+      }
       if (state.session?.pending) {
         view.notice = {
           kind: state.session.pending.notes.length > 0 ? "warning" : "info",

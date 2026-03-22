@@ -1292,6 +1292,14 @@ fs.writeFileSync(
   "utf8"
 );
 const escapedMultiCandidateDir = multiCandidateDir.replaceAll(" ", "\\ ");
+const singleRepoDir = path.join(shellDropDir, "single-repo");
+fs.mkdirSync(path.join(singleRepoDir, "robot"), { recursive: true });
+fs.writeFileSync(
+  path.join(singleRepoDir, "robot", "one.urdf"),
+  "<robot name=\"single_repo_robot\"><link name=\"base\"/></robot>",
+  "utf8"
+);
+const escapedSingleRepoDir = singleRepoDir.replaceAll(" ", "\\ ");
 const droppedZipPath = path.join(shellDropDir, "robot bundle.zip");
 const droppedZip = new AdmZip();
 droppedZip.addLocalFile(droppedUrdfPath, "robot_bundle/urdf", "robot.urdf");
@@ -1386,6 +1394,58 @@ if (
   loadedOrientationTranscript.includes("\"signals\"")
 ) {
   throw new Error("ilu shell loaded orientation shortcut smoke test failed");
+}
+
+const loadedCheckTaskHealthTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedUrdfPath}\n/check\n/health\n/exit\n`,
+});
+if (
+  !loadedCheckTaskHealthTranscript.includes("looks healthy") ||
+  !loadedCheckTaskHealthTranscript.includes(droppedUrdfPath) ||
+  loadedCheckTaskHealthTranscript.includes("/urdf              URDF file path.") ||
+  loadedCheckTaskHealthTranscript.includes("[ready] /run")
+) {
+  throw new Error("ilu shell loaded check helper smoke test failed");
+}
+
+const loadedConvertTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedUrdfPath}\n/convert\n/mjcf\n/exit\n`,
+});
+if (
+  !loadedConvertTaskTranscript.includes("/out               Write the output to a file.") ||
+  loadedConvertTaskTranscript.includes("/urdf              URDF file path.")
+) {
+  throw new Error("ilu shell loaded convert helper smoke test failed");
+}
+
+const loadedFixTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedUrdfPath}\n/fix\n/mesh-paths\n/exit\n`,
+});
+if (
+  !loadedFixTaskTranscript.includes("/package           Set --package (name).") ||
+  loadedFixTaskTranscript.includes("/urdf              URDF file path.")
+) {
+  throw new Error("ilu shell loaded fix helper smoke test failed");
+}
+
+const loadedRepoMeshRefsTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedSingleRepoDir}/robot\n/fix\n/mesh-refs\n/exit\n`,
+});
+if (
+  !loadedRepoMeshRefsTranscript.includes(`using ${singleRepoDir}/robot`) ||
+  !loadedRepoMeshRefsTranscript.includes("/out               Write the output to a file.") ||
+  loadedRepoMeshRefsTranscript.includes("/repo              GitHub repo or URL.") ||
+  loadedRepoMeshRefsTranscript.includes("/local")
+) {
+  throw new Error("ilu shell loaded repo mesh-ref helper smoke test failed");
 }
 
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
