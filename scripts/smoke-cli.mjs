@@ -1361,11 +1361,16 @@ const loadedAnalyzeTranscript = execFileSync(process.execPath, [cliPath, "shell"
   input: `${escapedDroppedUrdfPath}\n/analyze\n/exit\n`,
 });
 if (
-  !loadedAnalyzeTranscript.includes("source") ||
+  !loadedAnalyzeTranscript.includes("investigation") ||
+  !loadedAnalyzeTranscript.includes("validation passed") ||
+  !loadedAnalyzeTranscript.includes("health check passed") ||
+  !loadedAnalyzeTranscript.includes("looks ready") ||
   !loadedAnalyzeTranscript.includes("robot drop_robot") ||
   !loadedAnalyzeTranscript.includes(droppedUrdfPath) ||
   loadedAnalyzeTranscript.includes("ready /run") ||
-  loadedAnalyzeTranscript.includes("\"jointByChildLink\"")
+  loadedAnalyzeTranscript.includes("\"jointByChildLink\"") ||
+  loadedAnalyzeTranscript.includes("PCA up cue") ||
+  loadedAnalyzeTranscript.includes("\"signals\"")
 ) {
   throw new Error("ilu shell loaded analyze shortcut smoke test failed");
 }

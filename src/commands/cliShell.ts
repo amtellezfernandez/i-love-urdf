@@ -1940,6 +1940,145 @@ const summarizeAnalysisPreview = (
   };
 };
 
+const summarizeInvestigateResult = (
+  urdfPath: string,
+  validation: {
+    isValid: boolean;
+    issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
+  },
+  health: {
+    ok: boolean;
+    summary: { errors: number; warnings: number; infos: number };
+    findings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }>;
+  },
+  analysis: {
+    isValid: boolean;
+    error?: string;
+    robotName: string | null;
+    linkNames: string[];
+    rootLinks: string[];
+    meshReferences: string[];
+    sensors?: unknown[];
+    jointHierarchy?: { orderedJoints?: unknown[] };
+  },
+  orientation: {
+    isValid: boolean;
+    likelyUpAxis?: string | null;
+    likelyForwardAxis?: string | null;
+    confidence?: number;
+    report?: { conflicts?: string[] };
+  }
+): AutoPreviewPanel => {
+  const lines = [`source ${quoteForPreview(urdfPath)}`];
+  const jointCount = analysis.jointHierarchy?.orderedJoints?.length ?? 0;
+  const validationErrorCount = validation.issues.filter((issue) => issue.level === "error").length;
+  const validationWarningCount = validation.issues.filter((issue) => issue.level === "warning").length;
+
+  if (!analysis.isValid) {
+    lines.push(analysis.error || "could not analyze this URDF");
+    return {
+      title: "investigation",
+      kind: "error",
+      lines,
+    };
+  }
+
+  lines.push(analysis.robotName ? `robot ${analysis.robotName}` : "robot detected");
+  lines.push(
+    `${formatCount(analysis.linkNames.length, "link")}  ${formatCount(jointCount, "joint")}  ${formatCount(analysis.meshReferences.length, "mesh ref")}`
+  );
+  if ((analysis.sensors?.length ?? 0) > 0) {
+    lines.push(`${formatCount(analysis.sensors?.length ?? 0, "sensor")}`);
+  }
+
+  if (validation.isValid && validation.issues.length === 0) {
+    lines.push("validation passed");
+  } else if (validation.isValid) {
+    lines.push(`validation passed with ${formatCount(validationWarningCount, "warning")}`);
+  } else {
+    lines.push(`validation found ${formatCount(validationErrorCount, "error")} and ${formatCount(validationWarningCount, "warning")}`);
+  }
+
+  if (health.ok && health.summary.warnings === 0) {
+    lines.push("health check passed");
+  } else if (health.ok) {
+    lines.push(`health check passed with ${formatCount(health.summary.warnings, "warning")}`);
+  } else {
+    lines.push(`health check found ${formatCount(health.summary.errors, "error")} and ${formatCount(health.summary.warnings, "warning")}`);
+  }
+
+  if (orientation.isValid && orientation.likelyUpAxis && orientation.likelyForwardAxis) {
+    const confidence =
+      typeof orientation.confidence === "number" && Number.isFinite(orientation.confidence)
+        ? `  ${Math.round(orientation.confidence * 100)}%`
+        : "";
+    lines.push(`orientation likely ${orientation.likelyUpAxis}-up / ${orientation.likelyForwardAxis}-forward${confidence}`);
+  }
+
+  if (analysis.rootLinks.length > 0) {
+    lines.push(
+      analysis.rootLinks.length === 1
+        ? `root ${analysis.rootLinks[0]}`
+        : `${formatCount(analysis.rootLinks.length, "root link")}`
+    );
+  }
+
+  const attentionLines: string[] = [];
+  const needsAttention =
+    !validation.isValid ||
+    health.summary.errors > 0 ||
+    health.summary.warnings > 0 ||
+    analysis.meshReferences.length > 0;
+  for (const issue of validation.issues.slice(0, 2)) {
+    const prefix = issue.context ? `${issue.context}: ` : "";
+    attentionLines.push(`${issue.level} ${prefix}${issue.message}`);
+  }
+
+  for (const finding of health.findings.filter((item) => item.level !== "info").slice(0, 2)) {
+    const prefix = finding.context ? `${finding.context}: ` : "";
+    const line = `${finding.level} ${prefix}${finding.message}`;
+    if (!attentionLines.includes(line)) {
+      attentionLines.push(line);
+    }
+    if (attentionLines.length >= 3) {
+      break;
+    }
+  }
+
+  if (analysis.meshReferences.length > 0) {
+    attentionLines.push(`${formatCount(analysis.meshReferences.length, "mesh ref")} detected`);
+  }
+
+  const orientationConflict = orientation.report?.conflicts?.[0];
+  if (needsAttention && orientationConflict) {
+    attentionLines.push(`note ${orientationConflict}`);
+  }
+
+  if (attentionLines.length === 0) {
+    lines.push("no obvious problems found");
+  } else {
+    for (const line of attentionLines.slice(0, 3)) {
+      lines.push(line);
+    }
+  }
+
+  if (needsAttention) {
+    lines.push("best next step /fix");
+  } else {
+    lines.push("looks ready");
+  }
+  lines.push("then /convert when you need output");
+
+  return {
+    title: "investigation",
+    kind:
+      validation.isValid && health.ok && health.summary.warnings === 0 && attentionLines.length === 0
+        ? "success"
+        : "info",
+    lines,
+  };
+};
+
 const summarizeValidationResult = (
   payload: {
     isValid: boolean;
@@ -2690,7 +2829,110 @@ const executeSessionCommand = (
   stderr: string;
   status: number;
   followUp: string | null;
+  shellPanel?: AutoPreviewPanel;
 } => {
+  if (session.command === "analyze") {
+    const urdfPath = session.args.get("urdf");
+    if (typeof urdfPath === "string" && urdfPath.trim().length > 0) {
+      const validationExecution = executeCliCommand("validate", new Map([["urdf", urdfPath]]));
+      if (validationExecution.status !== 0) {
+        return {
+          preview: validationExecution.preview,
+          stdout: validationExecution.stdout,
+          stderr: validationExecution.stderr,
+          status: validationExecution.status,
+          followUp: null,
+        };
+      }
+
+      const healthExecution = executeCliCommand("health-check", new Map([["urdf", urdfPath]]));
+      if (healthExecution.status !== 0) {
+        return {
+          preview: healthExecution.preview,
+          stdout: healthExecution.stdout,
+          stderr: healthExecution.stderr,
+          status: healthExecution.status,
+          followUp: null,
+        };
+      }
+
+      const orientationExecution = executeCliCommand("guess-orientation", new Map([["urdf", urdfPath]]));
+      if (orientationExecution.status !== 0) {
+        return {
+          preview: orientationExecution.preview,
+          stdout: orientationExecution.stdout,
+          stderr: orientationExecution.stderr,
+          status: orientationExecution.status,
+          followUp: null,
+        };
+      }
+
+      const analysisExecution = executeCliCommand("analyze", session.args);
+      if (analysisExecution.status !== 0) {
+        return {
+          preview: analysisExecution.preview,
+          stdout: analysisExecution.stdout,
+          stderr: analysisExecution.stderr,
+          status: analysisExecution.status,
+          followUp: null,
+        };
+      }
+
+      const validationPayload = parseExecutionJson<{
+        isValid: boolean;
+        issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
+      }>(validationExecution);
+      const healthPayload = parseExecutionJson<{
+        ok: boolean;
+        summary: { errors: number; warnings: number; infos: number };
+        findings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }>;
+      }>(healthExecution);
+      const orientationPayload = parseExecutionJson<{
+        isValid: boolean;
+        likelyUpAxis?: string | null;
+        likelyForwardAxis?: string | null;
+        confidence?: number;
+        report?: { conflicts?: string[] };
+      }>(orientationExecution);
+      const analysisPayload = parseExecutionJson<{
+        isValid: boolean;
+        error?: string;
+        robotName: string | null;
+        linkNames: string[];
+        rootLinks: string[];
+        meshReferences: string[];
+        sensors?: unknown[];
+        jointHierarchy?: { orderedJoints?: unknown[] };
+      }>(analysisExecution);
+
+      if (!validationPayload || !healthPayload || !orientationPayload || !analysisPayload) {
+        return {
+          preview: analysisExecution.preview,
+          stdout: analysisExecution.stdout,
+          stderr: analysisExecution.stderr,
+          status: analysisExecution.status,
+          followUp: null,
+        };
+      }
+
+      updateRememberedUrdfPath(state, session);
+      return {
+        preview: analysisExecution.preview,
+        stdout: "",
+        stderr: "",
+        status: 0,
+        followUp: getFollowUpSuggestionMessage(state, session.command),
+        shellPanel: summarizeInvestigateResult(
+          urdfPath,
+          validationPayload,
+          healthPayload,
+          analysisPayload,
+          orientationPayload
+        ),
+      };
+    }
+  }
+
   const result = executeCliCommand(session.command, session.args);
   const status = result.status;
   if (status === 0) {
@@ -2712,6 +2954,10 @@ const getShellExecutionSuccessPanel = (
 ): AutoPreviewPanel => {
   if (execution.status !== 0) {
     return null;
+  }
+
+  if (execution.shellPanel) {
+    return execution.shellPanel;
   }
 
   switch (session.command) {
@@ -4656,6 +4902,13 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return {
         title: "checking",
         lines: ["running validation...", "running health check..."],
+      };
+    }
+
+    if (session.command === "analyze") {
+      return {
+        title: "investigating",
+        lines: ["running validation...", "checking health...", "reading structure...", "guessing orientation..."],
       };
     }
 
