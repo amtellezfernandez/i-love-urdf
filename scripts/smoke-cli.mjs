@@ -1264,6 +1264,8 @@ const shellHelpOutput = execFileSync(process.execPath, [cliPath, "help", "shell"
 });
 if (
   !shellHelpOutput.includes("ilu shell") ||
+  !shellHelpOutput.includes("owner/repo") ||
+  !shellHelpOutput.includes("./robot.urdf") ||
   !shellHelpOutput.includes("/open") ||
   !shellHelpOutput.includes("/convert") ||
   !shellHelpOutput.includes("/update")
@@ -1279,43 +1281,46 @@ const escapedDroppedUrdfPath = droppedUrdfPath.replaceAll(" ", "\\ ");
 const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: "/open\nANYbotics/anymal_b_simple_description\n/show\n/exit\n",
+  input: "ANYbotics/anymal_b_simple_description\n/exit\n",
 });
 if (
   !shellTranscript.includes("interactive urdf shell") ||
-  !shellTranscript.includes("type / for commands, /update for latest, ctrl+c to quit") ||
+  !shellTranscript.includes("paste owner/repo or drop a local folder/file") ||
   !shellTranscript.includes("start") ||
-  !shellTranscript.includes("/open") ||
+  !shellTranscript.includes("owner/repo") ||
   !shellTranscript.includes("ANYbotics/anymal_b_simple_description") ||
-  !shellTranscript.includes("Open a repo, folder, or file as a working URDF.") ||
   !shellTranscript.includes("[ready] /run") ||
-  !shellTranscript.includes("cmd") ||
-  !shellTranscript.includes("ilu load-source --github ANYbotics/anymal_b_simple_description")
+  !shellTranscript.includes("flow open ANYbotics/anymal_b_simple_description") ||
+  !shellTranscript.includes("preview") ||
+  !shellTranscript.includes("best match") ||
+  !shellTranscript.includes("next /run to load the best match or /entry to override")
 ) {
-  throw new Error("ilu shell guided-helper smoke test failed");
+  throw new Error("ilu shell direct-repo entry smoke test failed");
 }
 
 const localDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/show\n/exit\n`,
+  input: `${escapedDroppedUrdfPath}\n/exit\n`,
 });
 if (
-  !localDropTranscript.includes("ilu load-source --path") ||
+  !localDropTranscript.includes("flow check") ||
   !localDropTranscript.includes(droppedUrdfPath) ||
-  !localDropTranscript.includes("[ready] /run")
+  !localDropTranscript.includes("health") ||
+  !localDropTranscript.includes("looks healthy")
 ) {
-  throw new Error("ilu shell local-drop smoke test failed");
+  throw new Error("ilu shell local-urdf entry smoke test failed");
 }
 
 const checkTaskTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `/check\n${escapedDroppedUrdfPath}\n/show\n/exit\n`,
+  input: `/check\n${escapedDroppedUrdfPath}\n/exit\n`,
 });
 if (
   !checkTaskTranscript.includes("/check") ||
-  !checkTaskTranscript.includes("ilu health-check --urdf") ||
+  !checkTaskTranscript.includes("flow check") ||
+  !checkTaskTranscript.includes("health") ||
   !checkTaskTranscript.includes(droppedUrdfPath)
 ) {
   throw new Error("ilu shell direct-check input smoke test failed");

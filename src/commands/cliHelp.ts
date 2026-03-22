@@ -163,8 +163,8 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
       "Workflow",
       [
         "1. type `ilu`",
-        "2. type `/` to see helpers",
-        "3. follow the next-step prompts and `/run` when ready",
+        "2. paste `owner/repo` or drop a local folder or `.urdf`",
+        "3. use `/` only when you want extra helpers or an explicit flow",
       ],
       theme
     ),
@@ -177,7 +177,7 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
     "",
     formatBlock(
       "Shell",
-      ["ilu", "ilu shell", "Type / for task flows like /open, /inspect, /check, /convert, and /fix. You can also paste owner/repo or drop a local path directly. Use /show to inspect the current flow, /update for latest, and Ctrl+C to quit."],
+      ["ilu", "ilu shell", "Paste owner/repo or drop a local path directly to start. Use / when you want extra helpers like /check, /convert, /fix, /open, or /inspect. Use /show to inspect the current flow, /update for latest, and Ctrl+C to quit."],
       theme
     ),
     "",

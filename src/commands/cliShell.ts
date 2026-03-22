@@ -88,6 +88,11 @@ type RootTaskDefinition = {
   summary: string;
 };
 
+type RootStartEntry = {
+  label: string;
+  summary: string;
+};
+
 type RootTaskActionDefinition = {
   name: string;
   summary: string;
@@ -122,6 +127,17 @@ type FreeformRootPlan = {
   slashName: string;
   value: string;
 };
+
+type AppliedFreeformInput = {
+  session: ShellSession;
+  key: string;
+};
+
+type AutoPreviewPanel = {
+  title: string;
+  lines: readonly string[];
+  kind: Exclude<ShellFeedbackKind, "warning">;
+} | null;
 
 type SessionOptionPriority = "required" | "common" | "advanced";
 
@@ -195,6 +211,33 @@ const createTheme = (enabled: boolean): ShellTheme => ({
 
 const SHELL_THEME = createTheme(resolveColorSupport());
 const SHELL_BRAND = "i<3urdf";
+
+const ROOT_START_ENTRIES = [
+  {
+    label: "owner/repo",
+    summary: "Preview a GitHub repo immediately.",
+  },
+  {
+    label: "./robot.urdf",
+    summary: "Run a quick health preview on a local URDF.",
+  },
+  {
+    label: "./robot-description/",
+    summary: "Preview a local repo or folder.",
+  },
+  {
+    label: "/check",
+    summary: "More checks and orientation tools.",
+  },
+  {
+    label: "/convert",
+    summary: "Convert XACRO and URDF files.",
+  },
+  {
+    label: "/fix",
+    summary: "Repair paths, refs, and axes.",
+  },
+] as const satisfies readonly RootStartEntry[];
 
 const SHELL_BUILTIN_COMMANDS = [
   { name: "help", summary: "Show slash commands for the current context." },
@@ -431,7 +474,8 @@ const SESSION_SLASH_ALIASES: Partial<Record<SupportedCommandName, Readonly<Recor
 };
 
 const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
-const ROOT_GUIDANCE = "type / for commands, /update for latest, ctrl+c to quit";
+const ROOT_GUIDANCE =
+  "paste owner/repo or drop a local folder/file. type / for extra helpers, /update for latest, ctrl+c to quit";
 let cachedGitHubAuthState: boolean | undefined;
 
 const formatRootPrompt = (state?: Pick<ShellState, "rootTask">): string =>
@@ -440,8 +484,6 @@ const formatSessionPrompt = (session: ShellSession): string =>
   session.pending ? `/${session.pending.slashName}> ` : `/${session.label}> `;
 
 const quoteForPreview = (value: string): string => (/\s/.test(value) ? JSON.stringify(value) : value);
-
-const getRootQuickStartEntries = (): readonly { name: RootTaskName; summary: string }[] => ROOT_TASKS;
 
 const buildCommandPreview = (command: string, args: Map<string, string | boolean>): string => {
   const serializedArgs = Array.from(args.entries()).flatMap(([key, value]) => {
@@ -493,6 +535,15 @@ const clamp = (value: number, minimum: number, maximum: number): number =>
 
 const formatInlineValue = (value: string): string => (value.length > 0 ? ` ${quoteForPreview(value)}` : "");
 
+const formatRootStartEntryLine = (entry: RootStartEntry): string =>
+  `  ${SHELL_THEME.command(entry.label.padEnd(24))}${SHELL_THEME.muted(entry.summary)}`;
+
+const printRootStartEntries = () => {
+  for (const entry of ROOT_START_ENTRIES) {
+    process.stdout.write(`${formatRootStartEntryLine(entry)}\n`);
+  }
+};
+
 const createOutputPanel = (
   title: string,
   content: string,
@@ -511,6 +562,24 @@ const createOutputPanel = (
     lines: lines.slice(-10),
     kind,
   };
+};
+
+const printOutputPanel = (panel: AutoPreviewPanel | ShellOutputPanel) => {
+  if (!panel) {
+    return;
+  }
+
+  printSectionTitle(panel.title);
+  const render =
+    panel.kind === "error"
+      ? SHELL_THEME.error
+      : panel.kind === "success"
+        ? SHELL_THEME.success
+        : SHELL_THEME.muted;
+
+  for (const line of panel.lines) {
+    process.stdout.write(`  ${render(line)}\n`);
+  }
 };
 
 const hasGitHubAuthConfigured = (): boolean => {
@@ -550,12 +619,15 @@ const printRootQuickStart = () => {
   process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
   process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
   printSectionTitle("start");
-  printCommandList(getRootQuickStartEntries());
+  printRootStartEntries();
 };
 
 const printRootOptions = () => {
   printSectionTitle("start");
-  printCommandList(getRootQuickStartEntries());
+  printRootStartEntries();
+
+  printSectionTitle("helpers");
+  printCommandList(ROOT_TASKS);
 
   printSectionTitle("system");
   printCommandList(SHELL_BUILTIN_COMMANDS);
@@ -611,6 +683,46 @@ const getRootTaskSummary = (task: RootTaskName): string =>
 
 const getRootTaskActionDefinitions = (task: RootTaskName): readonly RootTaskActionDefinition[] =>
   ROOT_TASK_ACTIONS[task];
+
+const getSessionSourceValue = (
+  session: ShellSession,
+  keys: readonly string[]
+): string | null => {
+  for (const key of keys) {
+    const value = session.args.get(key);
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
+};
+
+const buildSessionHeadline = (session: ShellSession): string => {
+  switch (session.label) {
+    case "open": {
+      const source = getSessionSourceValue(session, ["github", "path"]);
+      return source ? `open ${quoteForPreview(source)}` : "open a repo, folder, or file";
+    }
+    case "inspect": {
+      const source = getSessionSourceValue(session, ["github", "local", "urdf"]);
+      return source ? `inspect ${quoteForPreview(source)}` : "inspect a repo or URDF";
+    }
+    case "check": {
+      const source = getSessionSourceValue(session, ["urdf"]);
+      return source ? `check ${quoteForPreview(source)}` : "check a URDF";
+    }
+    case "convert": {
+      const source = getSessionSourceValue(session, ["xacro", "urdf", "github", "local"]);
+      return source ? `convert ${quoteForPreview(source)}` : "convert a source";
+    }
+    case "fix": {
+      const source = getSessionSourceValue(session, ["urdf", "github", "local"]);
+      return source ? `fix ${quoteForPreview(source)}` : "fix a URDF or repo";
+    }
+    default:
+      return getShellCommandSummary(session.command);
+  }
+};
 
 const findRootTaskAction = (
   task: RootTaskName,
@@ -797,12 +909,14 @@ const getSessionOptionEntries = (session: ShellSession): readonly SessionOptionE
 const formatSlashSequence = (session: ShellSession, keys: readonly string[]): string =>
   keys.map((key) => getSlashDisplayName(session, key)).join(" + ");
 
-const formatStatusTag = (label: "next" | "ready" | "cmd"): string => {
+const formatStatusTag = (label: "next" | "ready" | "flow" | "cmd"): string => {
   switch (label) {
     case "next":
       return SHELL_THEME.accent(`[${label}]`);
     case "ready":
       return SHELL_THEME.success(`[${label}]`);
+    case "flow":
+      return SHELL_THEME.muted(label);
     case "cmd":
       return SHELL_THEME.muted(label);
   }
@@ -872,9 +986,7 @@ const printSessionStatus = (session: ShellSession) => {
       ? `${formatStatusTag("ready")} ${SHELL_THEME.command("/run")}\n`
       : `${formatStatusTag("next")} ${requirementStatus.nextSteps.map((step) => SHELL_THEME.command(formatSlashSequence(session, step))).join(SHELL_THEME.muted(" or "))}\n`
   );
-  process.stdout.write(
-    `${formatStatusTag("cmd")} ${SHELL_THEME.command(buildCommandPreview(session.command, session.args))}\n`
-  );
+  process.stdout.write(`${formatStatusTag("flow")} ${SHELL_THEME.command(buildSessionHeadline(session))}\n`);
 };
 
 const printSessionPreview = (session: ShellSession) => {
@@ -1331,20 +1443,19 @@ const printFollowUpSuggestions = (state: ShellState, command: SupportedCommandNa
   }
 };
 
-const executeSessionCommand = (
-  state: ShellState,
-  session: ShellSession
+const executeCliCommand = (
+  command: SupportedCommandName,
+  args: Map<string, string | boolean>
 ): {
   preview: string;
   stdout: string;
   stderr: string;
   status: number;
-  followUp: string | null;
 } => {
-  const preview = buildCommandPreview(session.command, session.args);
+  const preview = buildCommandPreview(command, args);
+  const argv = [CLI_ENTRY_PATH, command];
 
-  const argv = [CLI_ENTRY_PATH, session.command];
-  for (const [key, value] of session.args.entries()) {
+  for (const [key, value] of args.entries()) {
     if (value === true) {
       argv.push(`--${key}`);
       continue;
@@ -1358,16 +1469,345 @@ const executeSessionCommand = (
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  const status = result.status ?? 1;
+  return {
+    preview,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    status: result.status ?? 1,
+  };
+};
+
+const parseExecutionJson = <T>(execution: {
+  status: number;
+  stdout: string;
+}): T | null => {
+  if (execution.status !== 0) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(execution.stdout) as T;
+  } catch {
+    return null;
+  }
+};
+
+const formatCount = (count: number, singular: string, plural = `${singular}s`): string =>
+  `${count} ${count === 1 ? singular : plural}`;
+
+const buildPreviewErrorPanel = (
+  title: string,
+  execution: {
+    stderr: string;
+    stdout: string;
+    status: number;
+  }
+): AutoPreviewPanel => {
+  const errorLines = (execution.stderr || execution.stdout)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    title,
+    kind: "error",
+    lines: errorLines.length > 0 ? errorLines.slice(0, 6) : [`preview failed with status ${execution.status}`],
+  };
+};
+
+const summarizeRepositoryPreview = (
+  session: ShellSession,
+  payload: {
+    owner?: string;
+    repo?: string;
+    repositoryUrl?: string;
+    inspectedPath?: string;
+    candidateCount: number;
+    primaryCandidatePath: string | null;
+    candidates: Array<{
+      path: string;
+      inspectionMode?: "urdf" | "xacro-source";
+      unresolvedMeshReferenceCount?: number;
+      xacroArgs?: Array<{ name: string }>;
+    }>;
+  }
+): AutoPreviewPanel => {
+  const sourceLabel =
+    payload.repositoryUrl ??
+    (payload.owner && payload.repo ? `${payload.owner}/${payload.repo}` : payload.inspectedPath ?? "source");
+  const lines = [`source ${sourceLabel}`];
+
+  if (payload.candidateCount === 0) {
+    lines.push("no URDF or XACRO entrypoints found");
+    lines.push(session.label === "open" ? "use /entry if you already know the target path" : "use /open and /entry if you want to force a target path");
+    return {
+      title: "preview",
+      kind: "info",
+      lines,
+    };
+  }
+
+  lines.push(`found ${formatCount(payload.candidateCount, "candidate")}`);
+  if (payload.primaryCandidatePath) {
+    lines.push(`best match ${payload.primaryCandidatePath}`);
+  }
+
+  for (const [index, candidate] of payload.candidates.slice(0, 3).entries()) {
+    const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
+    if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
+      details.push(`${candidate.unresolvedMeshReferenceCount} missing mesh refs`);
+    }
+    if ((candidate.xacroArgs?.length ?? 0) > 0) {
+      details.push(`${candidate.xacroArgs?.length} xacro args`);
+    }
+    lines.push(`${index + 1}. ${candidate.path}${details.length > 0 ? `  ${details.join("  ")}` : ""}`);
+  }
+
+  if (payload.candidateCount > 3) {
+    lines.push(`+${payload.candidateCount - 3} more`);
+  }
+
+  lines.push(
+    session.label === "open"
+      ? "next /run to load the best match or /entry to override"
+      : "next /open to load it, or /path to narrow the repo"
+  );
+
+  return {
+    title: "preview",
+    kind: "info",
+    lines,
+  };
+};
+
+const summarizeHealthPreview = (
+  payload: {
+    ok: boolean;
+    summary: { errors: number; warnings: number; infos: number };
+    findings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }>;
+    orientationGuess?: {
+      likelyUpAxis?: string | null;
+      likelyForwardAxis?: string | null;
+    };
+  },
+  urdfPath: string
+): AutoPreviewPanel => {
+  const lines = [`source ${quoteForPreview(urdfPath)}`];
+  lines.push(
+    payload.ok
+      ? "looks healthy"
+      : `${formatCount(payload.summary.errors, "error")}, ${formatCount(payload.summary.warnings, "warning")}, ${formatCount(payload.summary.infos, "info")}`
+  );
+
+  if (payload.orientationGuess?.likelyUpAxis && payload.orientationGuess?.likelyForwardAxis) {
+    lines.push(
+      `orientation likely ${payload.orientationGuess.likelyUpAxis}-up / ${payload.orientationGuess.likelyForwardAxis}-forward`
+    );
+  }
+
+  for (const finding of payload.findings.slice(0, 2)) {
+    const prefix = finding.context ? `${finding.context}: ` : "";
+    lines.push(`${finding.level} ${prefix}${finding.message}`);
+  }
+
+  if (payload.findings.length > 2) {
+    lines.push(`+${payload.findings.length - 2} more findings`);
+  }
+
+  lines.push("next /fix or /convert if you want changes");
+
+  return {
+    title: "health",
+    kind: payload.ok ? "success" : "info",
+    lines,
+  };
+};
+
+const summarizeAnalysisPreview = (
+  payload: {
+    isValid: boolean;
+    error?: string;
+    robotName: string | null;
+    linkNames: string[];
+    rootLinks: string[];
+    meshReferences: string[];
+    sensors?: unknown[];
+    jointHierarchy?: { orderedJoints?: unknown[] };
+  },
+  urdfPath: string
+): AutoPreviewPanel => {
+  const jointCount = payload.jointHierarchy?.orderedJoints?.length ?? 0;
+  const lines = [`source ${quoteForPreview(urdfPath)}`];
+
+  if (!payload.isValid) {
+    lines.push(payload.error || "could not analyze this URDF");
+    return {
+      title: "preview",
+      kind: "error",
+      lines,
+    };
+  }
+
+  lines.push(payload.robotName ? `robot ${payload.robotName}` : "robot detected");
+  lines.push(
+    `${formatCount(payload.linkNames.length, "link")}  ${formatCount(jointCount, "joint")}  ${formatCount(payload.meshReferences.length, "mesh ref")}`
+  );
+  if ((payload.sensors?.length ?? 0) > 0) {
+    lines.push(`${formatCount(payload.sensors?.length ?? 0, "sensor")}`);
+  }
+  if (payload.rootLinks.length > 0) {
+    lines.push(
+      payload.rootLinks.length === 1
+        ? `root ${payload.rootLinks[0]}`
+        : `${formatCount(payload.rootLinks.length, "root link")}`
+    );
+  }
+  lines.push("next /check or /fix if you want deeper review");
+
+  return {
+    title: "preview",
+    kind: "info",
+    lines,
+  };
+};
+
+const buildAutoPreviewPanel = (
+  state: ShellState,
+  session: ShellSession,
+  changedKey: string
+): AutoPreviewPanel => {
+  let previewCommand: SupportedCommandName | null = null;
+  const previewArgs = new Map<string, string | boolean>();
+
+  if (session.command === "load-source" && (changedKey === "github" || changedKey === "path")) {
+    const github = session.args.get("github");
+    const sourcePath = session.args.get("path");
+
+    if (typeof github === "string" && github.trim().length > 0) {
+      previewCommand = "inspect-repo";
+      previewArgs.set("github", github);
+    } else if (typeof sourcePath === "string" && sourcePath.trim().length > 0) {
+      const localPath = detectLocalPathDrop(sourcePath);
+      if (localPath?.isDirectory) {
+        previewCommand = "inspect-repo";
+        previewArgs.set("local", sourcePath);
+      } else if (localPath?.isUrdfFile) {
+        previewCommand = "health-check";
+        previewArgs.set("urdf", sourcePath);
+      }
+    }
+  } else if (
+    session.command === "inspect-repo" &&
+    (changedKey === "github" || changedKey === "local")
+  ) {
+    const github = session.args.get("github");
+    const local = session.args.get("local");
+    if (typeof github === "string" && github.trim().length > 0) {
+      previewCommand = "inspect-repo";
+      previewArgs.set("github", github);
+    } else if (typeof local === "string" && local.trim().length > 0) {
+      previewCommand = "inspect-repo";
+      previewArgs.set("local", local);
+    }
+  } else if (
+    (session.command === "health-check" || session.command === "analyze") &&
+    changedKey === "urdf"
+  ) {
+    const urdfPath = session.args.get("urdf");
+    if (typeof urdfPath === "string" && urdfPath.trim().length > 0) {
+      previewCommand = session.command;
+      previewArgs.set("urdf", urdfPath);
+    }
+  }
+
+  if (!previewCommand) {
+    return null;
+  }
+
+  const execution = executeCliCommand(previewCommand, previewArgs);
+  if (execution.status !== 0) {
+    return buildPreviewErrorPanel("preview", execution);
+  }
+
+  if (previewCommand === "inspect-repo") {
+    const payload = parseExecutionJson<{
+      owner?: string;
+      repo?: string;
+      repositoryUrl?: string;
+      inspectedPath?: string;
+      candidateCount: number;
+      primaryCandidatePath: string | null;
+      candidates: Array<{
+        path: string;
+        inspectionMode?: "urdf" | "xacro-source";
+        unresolvedMeshReferenceCount?: number;
+        xacroArgs?: Array<{ name: string }>;
+      }>;
+    }>(execution);
+    return payload ? summarizeRepositoryPreview(session, payload) : buildPreviewErrorPanel("preview", execution);
+  }
+
+  if (previewCommand === "health-check") {
+    const payload = parseExecutionJson<{
+      ok: boolean;
+      summary: { errors: number; warnings: number; infos: number };
+      findings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }>;
+      orientationGuess?: {
+        likelyUpAxis?: string | null;
+        likelyForwardAxis?: string | null;
+      };
+    }>(execution);
+    const urdfPath = String(previewArgs.get("urdf") || "");
+    if (payload && urdfPath) {
+      state.lastUrdfPath = urdfPath;
+      return summarizeHealthPreview(payload, urdfPath);
+    }
+    return buildPreviewErrorPanel("health", execution);
+  }
+
+  if (previewCommand === "analyze") {
+    const payload = parseExecutionJson<{
+      isValid: boolean;
+      error?: string;
+      robotName: string | null;
+      linkNames: string[];
+      rootLinks: string[];
+      meshReferences: string[];
+      sensors?: unknown[];
+      jointHierarchy?: { orderedJoints?: unknown[] };
+    }>(execution);
+    const urdfPath = String(previewArgs.get("urdf") || "");
+    if (payload && urdfPath) {
+      state.lastUrdfPath = urdfPath;
+      return summarizeAnalysisPreview(payload, urdfPath);
+    }
+    return buildPreviewErrorPanel("preview", execution);
+  }
+
+  return null;
+};
+
+const executeSessionCommand = (
+  state: ShellState,
+  session: ShellSession
+): {
+  preview: string;
+  stdout: string;
+  stderr: string;
+  status: number;
+  followUp: string | null;
+} => {
+  const result = executeCliCommand(session.command, session.args);
+  const status = result.status;
   if (status === 0) {
     updateRememberedUrdfPath(state, session);
   }
 
   return {
-    preview,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-    status,
+    preview: result.preview,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    status: result.status,
     followUp: status === 0 ? getFollowUpSuggestionMessage(state, session.command) : null,
   };
 };
@@ -1639,6 +2079,28 @@ const inferFreeformRootPlan = (state: ShellState, rawValue: string): FreeformRoo
         key: "github",
         slashName: "repo",
         value: githubValue,
+      };
+    }
+
+    if (localPath?.isUrdfFile) {
+      return {
+        rootTask: "check",
+        command: "health-check",
+        label: "check",
+        key: "urdf",
+        slashName: "file",
+        value: localPath.inputPath,
+      };
+    }
+
+    if (localPath?.isXacroFile) {
+      return {
+        rootTask: "convert",
+        command: "xacro-to-urdf",
+        label: "convert",
+        key: "xacro",
+        slashName: "file",
+        value: localPath.inputPath,
       };
     }
 
@@ -2049,33 +2511,43 @@ const applyFreeformInputToSession = (
   session: ShellSession,
   rawValue: string,
   feedback?: ShellFeedback[]
-): boolean => {
+): AppliedFreeformInput | null => {
   const target = inferFreeformSessionTarget(session, rawValue);
   if (!target) {
-    return false;
+    return null;
   }
 
-  return setSessionValue(session, target.key, target.value, feedback);
+  if (!setSessionValue(session, target.key, target.value, feedback)) {
+    return null;
+  }
+
+  return {
+    session,
+    key: target.key,
+  };
 };
 
 const applyFreeformInputToRootState = (
   state: ShellState,
   rawValue: string,
   feedback?: ShellFeedback[]
-): boolean => {
+): AppliedFreeformInput | null => {
   const plan = inferFreeformRootPlan(state, rawValue);
   if (!plan) {
-    return false;
+    return null;
   }
 
   state.rootTask = plan.rootTask;
   state.session = createSession(plan.command, state, plan.label, feedback);
   if (!state.session || !setSessionValue(state.session, plan.key, plan.value, feedback)) {
     state.session = null;
-    return false;
+    return null;
   }
 
-  return true;
+  return {
+    session: state.session,
+    key: plan.key,
+  };
 };
 
 const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
@@ -2333,7 +2805,7 @@ const getPromptPlaceholder = (state: ShellState): string => {
   if (!state.session && state.rootTask) {
     switch (state.rootTask) {
       case "open":
-        return "paste owner/repo or drop a local folder or .urdf";
+        return "paste owner/repo or drop a local folder, .urdf, or .xacro";
       case "inspect":
         return "paste owner/repo or drop a local folder or .urdf";
       case "check":
@@ -2346,7 +2818,7 @@ const getPromptPlaceholder = (state: ShellState): string => {
   }
 
   if (!state.session) {
-    return "type /, drop a local path, or paste owner/repo";
+    return "paste owner/repo, drop a folder or .urdf, or type /";
   }
 
   const requirementStatus = getRequirementStatus(state.session);
@@ -2372,8 +2844,8 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     state.session
       ? SHELL_THEME.muted(`helper /${state.session.label}  arrows move  tab completes  enter selects  ctrl+c exits`)
       : state.rootTask
-        ? SHELL_THEME.muted(`task /${state.rootTask}  paste repo or drop local path  tab completes  ctrl+c exits`)
-        : SHELL_THEME.muted("press /, paste owner/repo, or drop a local path  tab completes  ctrl+c exits")
+        ? SHELL_THEME.muted(`task /${state.rootTask}  paste a source or type /  tab completes  ctrl+c exits`)
+        : SHELL_THEME.muted("paste owner/repo or drop a local path  / shows helpers  tab completes  ctrl+c exits")
   );
 
   if (view.notice) {
@@ -2399,7 +2871,7 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
             requirementStatus.nextSteps.map((step) => formatSlashSequence(state.session as ShellSession, step)).join(" or ")
           )}`
     );
-    lines.push(`  ${SHELL_THEME.muted("cmd")} ${SHELL_THEME.command(buildCommandPreview(state.session.command, state.session.args))}`);
+    lines.push(`  ${SHELL_THEME.muted("flow")} ${SHELL_THEME.command(buildSessionHeadline(state.session))}`);
     if (state.session.pending) {
       lines.push(`  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command(state.session.pending.title)}`);
     }
@@ -2411,10 +2883,8 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
       );
     }
   } else {
-    for (const entry of getRootQuickStartEntries()) {
-      lines.push(
-        `  ${SHELL_THEME.command(`/${entry.name}`.padEnd(18))}${SHELL_THEME.muted(entry.summary)}`
-      );
+    for (const entry of ROOT_START_ENTRIES) {
+      lines.push(formatRootStartEntryLine(entry));
     }
   }
 
@@ -2624,18 +3094,20 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       }
     } else if (session) {
       const feedback: ShellFeedback[] = [];
-      if (applyFreeformInputToSession(session, line, feedback)) {
-        flushFeedback(feedback);
+      const applied = applyFreeformInputToSession(session, line, feedback);
+      if (applied) {
         printSessionStatus(session);
+        printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
       } else {
         flushFeedback(feedback);
         process.stdout.write(`${SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
       }
     } else {
       const feedback: ShellFeedback[] = [];
-      if (applyFreeformInputToRootState(state, line, feedback) && state.session) {
-        flushFeedback(feedback);
+      const applied = applyFreeformInputToRootState(state, line, feedback);
+      if (applied && state.session) {
         printSessionStatus(state.session);
+        printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
       } else {
         flushFeedback(feedback);
         process.stdout.write(`${SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
@@ -3026,9 +3498,21 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if (state.session) {
       const feedback: ShellFeedback[] = [];
-      if (applyFreeformInputToSession(state.session, view.input, feedback)) {
-        setNoticeFromFeedback(view, feedback);
-        view.output = null;
+      const applied = applyFreeformInputToSession(state.session, view.input, feedback);
+      if (applied) {
+        const preview = buildAutoPreviewPanel(state, applied.session, applied.key);
+        view.notice = preview
+          ? {
+              kind: preview.kind === "error" ? "error" : "info",
+              text:
+                preview.kind === "error"
+                  ? "preview failed"
+                  : preview.title === "health"
+                    ? "health preview ready"
+                    : "preview ready",
+            }
+          : { kind: "info", text: buildSessionHeadline(applied.session) };
+        view.output = preview;
         pushTimelineEntry(view, view.input.trim());
         setInput("");
         return;
@@ -3036,9 +3520,21 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       setNoticeFromFeedback(view, feedback);
     } else {
       const feedback: ShellFeedback[] = [];
-      if (applyFreeformInputToRootState(state, view.input, feedback) && state.session) {
-        setNoticeFromFeedback(view, feedback);
-        view.output = null;
+      const applied = applyFreeformInputToRootState(state, view.input, feedback);
+      if (applied && state.session) {
+        const preview = buildAutoPreviewPanel(state, applied.session, applied.key);
+        view.notice = preview
+          ? {
+              kind: preview.kind === "error" ? "error" : "info",
+              text:
+                preview.kind === "error"
+                  ? "preview failed"
+                  : preview.title === "health"
+                    ? "health preview ready"
+                    : "preview ready",
+            }
+          : { kind: "info", text: buildSessionHeadline(applied.session) };
+        view.output = preview;
         pushTimelineEntry(view, view.input.trim());
         setInput("");
         return;
@@ -3179,26 +3675,27 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
 export const renderShellHelp = (): string => {
   return [
-    "Start the i<3urdf interactive shell with an inline picker.",
+    "Start the i<3urdf interactive shell.",
     "",
     "Usage",
     "  ilu",
     "  ilu shell",
     "",
     "Inside the shell",
-    "  /                  Open the picker under the prompt",
+    "  owner/repo         Preview a GitHub repo immediately",
+    "  ./robot.urdf       Run a quick health preview on a local URDF",
+    "  ./robot-folder/    Preview a local repo or folder",
+    "  /                  Open extra helpers under the prompt",
     "  up/down            Move through picker options",
     "  tab                Complete the selected option or path",
     "  enter              Select the highlighted option",
     "  ctrl+c             Exit immediately",
     "  esc                Close the picker or cancel a pending value",
-    "  owner/repo         Start an open flow from a GitHub repo",
-    "  /abs/path          Open a dropped or pasted local path directly",
-    "  /open              Open a repo, folder, or file as a working URDF",
-    "  /inspect           Preview a repo or URDF before choosing the next step",
     "  /check             Run health, validation, and orientation checks",
     "  /convert           Convert XACRO and URDF files into other formats",
     "  /fix               Repair mesh paths, mesh refs, and axis issues",
+    "  /open              Explicitly load a repo, folder, or file as a working URDF",
+    "  /inspect           Explicitly inspect a repo or URDF without loading it",
     "  /update            Install the latest ilu release",
     "  /show              Show the assembled command and next step",
     "  /run               Execute the assembled command",

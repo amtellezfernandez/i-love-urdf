@@ -9,14 +9,13 @@ ilu
 
 Inside `ilu`:
 
-- type `/` to open the command picker
-- paste `owner/repo` to open from GitHub immediately
+- paste `owner/repo` to preview a GitHub repo immediately
 - drag and drop a local folder or `.urdf` into the shell
+- type `/` only when you want extra helpers
 - use arrow keys to move
 - press `Tab` to complete the selected option
 - press `Enter` to select
 - press `Ctrl+C` to exit
-- start with `/open`, `/inspect`, `/check`, `/convert`, or `/fix`
 
 Update:
 
