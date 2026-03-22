@@ -48,6 +48,7 @@ const createTheme = (enabled) => ({
     enabled,
     brand: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
     command: (text) => paint(enabled, text, ANSI.bold, ANSI.magenta),
+    icon: (text) => paint(enabled, text, ANSI.gray),
     muted: (text) => paint(enabled, text, ANSI.dim),
     section: (text) => paint(enabled, text, ANSI.dim, ANSI.magenta),
     success: (text) => paint(enabled, text, ANSI.bold, ANSI.green),
@@ -64,9 +65,8 @@ const SHELL_BUILTIN_COMMANDS = [
     { name: "update", summary: "Install the latest ilu release." },
     { name: "clear", summary: "Clear the terminal." },
     { name: "last", summary: "Show the last remembered URDF path." },
-    { name: "exit", summary: "Exit the interactive shell." },
-    { name: "quit", summary: "Exit the interactive shell." },
 ];
+const HIDDEN_SHELL_COMMAND_NAMES = ["exit", "quit"];
 const SESSION_BUILTIN_COMMANDS = [
     { name: "show", summary: "Show the current command, values, and next step." },
     { name: "run", summary: "Run the current command." },
@@ -339,14 +339,40 @@ const createOutputPanel = (title, content, kind = "info") => {
         kind,
     };
 };
+const getPanelLineIcon = (line) => {
+    const normalized = stripAnsi(line).trim().toLowerCase();
+    if (normalized === "looks ready" ||
+        normalized === "no obvious problems found" ||
+        normalized.startsWith("validation passed") ||
+        normalized.startsWith("health check passed")) {
+        return "✓";
+    }
+    if (normalized.startsWith("best next step") ||
+        normalized.startsWith("then /") ||
+        normalized.startsWith("next /")) {
+        return "→";
+    }
+    if (normalized.startsWith("validation found") ||
+        normalized.startsWith("health check found") ||
+        normalized.startsWith("error ")) {
+        return "!";
+    }
+    if (normalized.startsWith("warning ")) {
+        return "!";
+    }
+    return "•";
+};
+const renderPanelLine = (line, kind) => {
+    const renderText = kind === "error" ? SHELL_THEME.error : SHELL_THEME.muted;
+    return `${SHELL_THEME.icon(getPanelLineIcon(line))} ${renderText(line)}`;
+};
 const printOutputPanel = (panel) => {
     if (!panel) {
         return;
     }
     printSectionTitle(panel.title);
-    const render = panel.kind === "error" ? SHELL_THEME.error : SHELL_THEME.muted;
     for (const line of panel.lines) {
-        process.stdout.write(`  ${render(line)}\n`);
+        process.stdout.write(`  ${renderPanelLine(line, panel.kind)}\n`);
     }
 };
 const clearCandidatePicker = (state) => {
@@ -2185,6 +2211,7 @@ const listAvailableSlashCommands = (state) => {
             ...new Set([
                 ...SESSION_BUILTIN_COMMANDS.map((entry) => entry.name),
                 ...SESSION_SYSTEM_MENU_ENTRIES.map((entry) => entry.name),
+                ...HIDDEN_SHELL_COMMAND_NAMES,
                 ...getSessionOptionEntries(state.session).map((entry) => entry.name),
             ]),
         ];
@@ -2196,6 +2223,7 @@ const listAvailableSlashCommands = (state) => {
                 "back",
                 "help",
                 ...SHELL_BUILTIN_COMMANDS.filter((entry) => entry.name !== "help").map((entry) => entry.name),
+                ...HIDDEN_SHELL_COMMAND_NAMES,
             ]),
         ];
     }
@@ -2203,6 +2231,7 @@ const listAvailableSlashCommands = (state) => {
         ...new Set([
             ...(state.lastUrdfPath ? LOADED_ROOT_MENU_ENTRIES.map((entry) => entry.name) : ROOT_TASKS.map((entry) => entry.name)),
             ...SHELL_BUILTIN_COMMANDS.map((entry) => entry.name),
+            ...HIDDEN_SHELL_COMMAND_NAMES,
             ...ROOT_TASKS.map((entry) => entry.name),
             ...commandCatalog_1.CLI_HELP_SECTIONS.flatMap((section) => section.commands),
         ]),
@@ -2861,8 +2890,6 @@ const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
 const SESSION_SYSTEM_MENU_ENTRIES = [
     { name: "last", summary: "Show the last remembered URDF path.", kind: "system" },
     { name: "clear", summary: "Clear the current shell view.", kind: "system" },
-    { name: "exit", summary: "Exit the interactive shell.", kind: "system" },
-    { name: "quit", summary: "Exit the interactive shell.", kind: "system" },
 ];
 const LOADED_ROOT_MENU_ENTRIES = [
     {
@@ -3116,13 +3143,14 @@ const renderMenuEntry = (entry, selected, width) => {
                 ? "set"
                 : entry.kind === "action"
                     ? "act"
-                    : "sys";
+                    : "";
     const label = `/${entry.name}`;
     const left = `${selected ? ">" : " "} ${truncateText(label, 24).padEnd(24)} `;
-    const availableSummaryWidth = Math.max(12, width - left.length - badge.length - 3);
+    const badgeSuffix = badge ? ` ${badge}` : "";
+    const availableSummaryWidth = Math.max(12, width - left.length - badgeSuffix.length - 1);
     const summary = truncateText(entry.summary, availableSummaryWidth);
-    const line = `${left}${summary} ${badge}`;
-    return selected ? SHELL_THEME.selected(line) : `${SHELL_THEME.command(left)}${SHELL_THEME.muted(`${summary} ${badge}`)}`;
+    const line = `${left}${summary}${badgeSuffix}`;
+    return selected ? SHELL_THEME.selected(line) : `${SHELL_THEME.command(left)}${SHELL_THEME.muted(`${summary}${badgeSuffix}`)}`;
 };
 const getPromptPlaceholder = (state) => {
     if (state.candidatePicker) {
@@ -3235,9 +3263,8 @@ const renderTtyShell = (state, view) => {
     if (view.output) {
         lines.push("");
         lines.push(SHELL_THEME.section(view.output.title));
-        const renderOutputLine = view.output.kind === "error" ? SHELL_THEME.error : SHELL_THEME.muted;
         for (const line of view.output.lines) {
-            lines.push(`  ${renderOutputLine(truncateText(line, columns - 4))}`);
+            lines.push(`  ${renderPanelLine(truncateText(line, columns - 6), view.output.kind)}`);
         }
     }
     lines.push("");
@@ -4339,7 +4366,6 @@ const renderShellHelp = () => {
         "  /show              Show the assembled command and next step",
         "  /run               Execute an explicit helper flow when one is pending",
         "  /back              Return to the root helper menu",
-        "  /exit              Quit the shell",
     ].join("\n");
 };
 exports.renderShellHelp = renderShellHelp;

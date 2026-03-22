@@ -1270,7 +1270,8 @@ if (
   !shellHelpOutput.includes("!xacro") ||
   !shellHelpOutput.includes("/open") ||
   !shellHelpOutput.includes("/convert") ||
-  !shellHelpOutput.includes("/update")
+  !shellHelpOutput.includes("/update") ||
+  shellHelpOutput.includes("/exit")
 ) {
   throw new Error("ilu shell help smoke test failed");
 }
@@ -1350,7 +1351,9 @@ if (
   !loadedFollowUpMenuTranscript.includes("/fix") ||
   !loadedFollowUpMenuTranscript.includes("/convert") ||
   !loadedFollowUpMenuTranscript.includes("/check") ||
-  loadedFollowUpMenuTranscript.includes("paste owner/repo or drop a local folder/file first")
+  loadedFollowUpMenuTranscript.includes("paste owner/repo or drop a local folder/file first") ||
+  loadedFollowUpMenuTranscript.includes("/exit") ||
+  loadedFollowUpMenuTranscript.includes("/quit")
 ) {
   throw new Error("ilu shell loaded follow-up menu smoke test failed");
 }
