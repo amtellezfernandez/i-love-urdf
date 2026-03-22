@@ -132,7 +132,7 @@ const renderHelp = (options = {}) => {
         "",
         formatBlock("GitHub Auth", ["gh auth login", "gh auth status"], theme),
         "",
-        formatBlock("Shell", ["ilu", "ilu shell", "Type / for task flows like /open, /inspect, /check, /convert, and /fix. Use /show to inspect the current flow, /update for latest, and Ctrl+C to quit."], theme),
+        formatBlock("Shell", ["ilu", "ilu shell", "Type / for task flows like /open, /inspect, /check, /convert, and /fix. You can also paste owner/repo or drop a local path directly. Use /show to inspect the current flow, /update for latest, and Ctrl+C to quit."], theme),
         "",
         formatBlock("Completion", ["ilu completion bash", "ilu completion zsh", "ilu completion fish"], theme),
         "",

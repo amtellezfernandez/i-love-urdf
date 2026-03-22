@@ -100,6 +100,29 @@ type RootTaskActionDefinition = {
   };
 };
 
+type LocalPathDrop = {
+  inputPath: string;
+  absolutePath: string;
+  isDirectory: boolean;
+  isUrdfFile: boolean;
+  isXacroFile: boolean;
+};
+
+type FreeformSessionTarget = {
+  key: string;
+  slashName: string;
+  value: string;
+};
+
+type FreeformRootPlan = {
+  rootTask: RootTaskName;
+  command: SupportedCommandName;
+  label: string;
+  key: string;
+  slashName: string;
+  value: string;
+};
+
 type SessionOptionPriority = "required" | "common" | "advanced";
 
 type SessionOptionEntry = {
@@ -951,8 +974,115 @@ const clearMutuallyExclusiveArgs = (session: ShellSession, key: string) => {
   }
 };
 
-const validateOptionValue = (key: string, rawValue: string): string | null => {
-  const trimmed = rawValue.trim();
+const decodeShellEscapes = (value: string): string => {
+  let decoded = "";
+  let escaping = false;
+
+  for (const character of value) {
+    if (escaping) {
+      decoded += character;
+      escaping = false;
+      continue;
+    }
+
+    if (character === "\\") {
+      escaping = true;
+      continue;
+    }
+
+    decoded += character;
+  }
+
+  return escaping ? `${decoded}\\` : decoded;
+};
+
+const stripMatchingQuotes = (value: string): string => {
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1);
+  }
+
+  return value;
+};
+
+const normalizeShellInput = (rawValue: string): string => decodeShellEscapes(stripMatchingQuotes(rawValue.trim()));
+
+const normalizeFilesystemInput = (rawValue: string): string => {
+  const normalized = normalizeShellInput(rawValue);
+  if (normalized.startsWith("~")) {
+    return path.join(process.env.HOME ?? "", normalized.slice(1));
+  }
+  return normalized;
+};
+
+const looksLikeFilesystemSeed = (rawValue: string): boolean => {
+  const normalized = normalizeFilesystemInput(rawValue);
+  return (
+    normalized.startsWith("/") ||
+    normalized.startsWith("./") ||
+    normalized.startsWith("../") ||
+    normalized.startsWith("~/") ||
+    normalized.includes(path.sep)
+  );
+};
+
+const detectLocalPathDrop = (rawValue: string): LocalPathDrop | null => {
+  const inputPath = normalizeFilesystemInput(rawValue);
+  if (!inputPath) {
+    return null;
+  }
+
+  const absolutePath = path.resolve(inputPath);
+  try {
+    const stats = fs.statSync(absolutePath);
+    const lowerPath = absolutePath.toLowerCase();
+    return {
+      inputPath,
+      absolutePath,
+      isDirectory: stats.isDirectory(),
+      isUrdfFile: stats.isFile() && lowerPath.endsWith(".urdf"),
+      isXacroFile: stats.isFile() && (lowerPath.endsWith(".xacro") || lowerPath.endsWith(".urdf.xacro")),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const detectGitHubReferenceInput = (rawValue: string): string | null => {
+  const normalized = normalizeShellInput(rawValue);
+  if (
+    !normalized ||
+    normalized.startsWith("/") ||
+    normalized.startsWith("./") ||
+    normalized.startsWith("../") ||
+    normalized.startsWith("~/") ||
+    detectLocalPathDrop(rawValue) ||
+    /^[A-Za-z]:[\\/]/.test(normalized)
+  ) {
+    return null;
+  }
+
+  return parseGitHubRepositoryReference(normalized) ? normalized : null;
+};
+
+const isLocalFilesystemKey = (session: ShellSession, key: string): boolean => {
+  if (["local", "urdf", "xacro", "left", "right", "out", "root", "python", "wheel"].includes(key)) {
+    return true;
+  }
+
+  if (key !== "path") {
+    return false;
+  }
+
+  return session.command === "load-source" || session.command === "urdf-to-usd";
+};
+
+const validateOptionValue = (session: ShellSession, key: string, rawValue: string): string | null => {
+  const trimmed =
+    key === "github"
+      ? normalizeShellInput(rawValue)
+      : isLocalFilesystemKey(session, key)
+        ? normalizeFilesystemInput(rawValue)
+        : rawValue.trim();
   if (!trimmed) {
     return null;
   }
@@ -1121,7 +1251,7 @@ const setSessionValue = (
   rawValue: string,
   feedback?: ShellFeedback[]
 ): boolean => {
-  const value = validateOptionValue(key, rawValue);
+  const value = validateOptionValue(session, key, rawValue);
   if (!value) {
     if (key === "github") {
       pushFeedback(feedback, "error", "Expected owner/repo or a GitHub repository URL.");
@@ -1362,7 +1492,7 @@ const createCompleter = (state: ShellState) => {
   return (line: string): [string[], string] => {
     const trimmed = line.trimStart();
 
-    if (state.session?.pending && !trimmed.startsWith("/")) {
+    if (state.session?.pending && !shouldTreatAsSlashInput(trimmed, state)) {
       if (!state.session.pending.expectsPath) {
         return [[], line];
       }
@@ -1370,7 +1500,7 @@ const createCompleter = (state: ShellState) => {
       return [completePathFragment(trimmed), line];
     }
 
-    if (!trimmed.startsWith("/")) {
+    if (!shouldTreatAsSlashInput(trimmed, state)) {
       return [[], line];
     }
 
@@ -1412,6 +1542,254 @@ const openPendingForSession = (
     return;
   }
   session.pending = getPendingValuePrompt(session, pending.key, pending.slashName);
+};
+
+const inferFreeformSessionTarget = (
+  session: ShellSession,
+  rawValue: string
+): FreeformSessionTarget | null => {
+  const githubValue = detectGitHubReferenceInput(rawValue);
+  if (
+    githubValue &&
+    getOptionSpecByKey(session, "github") &&
+    !session.args.has("github") &&
+    !session.args.has("path") &&
+    !session.args.has("local")
+  ) {
+    return {
+      key: "github",
+      slashName: "repo",
+      value: githubValue,
+    };
+  }
+
+  const localPath = detectLocalPathDrop(rawValue);
+  if (!localPath) {
+    return null;
+  }
+
+  if (session.command === "load-source" && !session.args.has("path") && !session.args.has("github")) {
+    return {
+      key: "path",
+      slashName: localPath.isDirectory ? "local" : "file",
+      value: localPath.inputPath,
+    };
+  }
+
+  if (session.command === "inspect-repo" && localPath.isDirectory && !session.args.has("local") && !session.args.has("github")) {
+    return {
+      key: "local",
+      slashName: "local",
+      value: localPath.inputPath,
+    };
+  }
+
+  if (session.command === "repair-mesh-refs" && !session.args.has("local") && !session.args.has("github")) {
+    return {
+      key: "local",
+      slashName: "local",
+      value: localPath.inputPath,
+    };
+  }
+
+  if (session.command === "xacro-to-urdf") {
+    if (localPath.isXacroFile && !session.args.has("xacro")) {
+      return {
+        key: "xacro",
+        slashName: "file",
+        value: localPath.inputPath,
+      };
+    }
+
+    if (localPath.isDirectory && !session.args.has("local") && !session.args.has("github")) {
+      return {
+        key: "local",
+        slashName: "local",
+        value: localPath.inputPath,
+      };
+    }
+  }
+
+  if (
+    localPath.isUrdfFile &&
+    getOptionSpecByKey(session, "urdf") &&
+    !session.args.has("urdf")
+  ) {
+    return {
+      key: "urdf",
+      slashName: "file",
+      value: localPath.inputPath,
+    };
+  }
+
+  return null;
+};
+
+const inferFreeformRootPlan = (state: ShellState, rawValue: string): FreeformRootPlan | null => {
+  const githubValue = detectGitHubReferenceInput(rawValue);
+  const localPath = detectLocalPathDrop(rawValue);
+  const task = state.rootTask;
+
+  if (!task) {
+    if (githubValue) {
+      return {
+        rootTask: "open",
+        command: "load-source",
+        label: "open",
+        key: "github",
+        slashName: "repo",
+        value: githubValue,
+      };
+    }
+
+    if (localPath) {
+      return {
+        rootTask: "open",
+        command: "load-source",
+        label: "open",
+        key: "path",
+        slashName: localPath.isDirectory ? "local" : "file",
+        value: localPath.inputPath,
+      };
+    }
+
+    return null;
+  }
+
+  if (task === "open") {
+    if (githubValue) {
+      return {
+        rootTask: "open",
+        command: "load-source",
+        label: "open",
+        key: "github",
+        slashName: "repo",
+        value: githubValue,
+      };
+    }
+
+    if (localPath) {
+      return {
+        rootTask: "open",
+        command: "load-source",
+        label: "open",
+        key: "path",
+        slashName: localPath.isDirectory ? "local" : "file",
+        value: localPath.inputPath,
+      };
+    }
+  }
+
+  if (task === "inspect") {
+    if (githubValue) {
+      return {
+        rootTask: "inspect",
+        command: "inspect-repo",
+        label: "inspect",
+        key: "github",
+        slashName: "repo",
+        value: githubValue,
+      };
+    }
+
+    if (localPath?.isDirectory) {
+      return {
+        rootTask: "inspect",
+        command: "inspect-repo",
+        label: "inspect",
+        key: "local",
+        slashName: "local",
+        value: localPath.inputPath,
+      };
+    }
+
+    if (localPath?.isUrdfFile) {
+      return {
+        rootTask: "inspect",
+        command: "analyze",
+        label: "inspect",
+        key: "urdf",
+        slashName: "file",
+        value: localPath.inputPath,
+      };
+    }
+  }
+
+  if (task === "check" && localPath?.isUrdfFile) {
+    return {
+      rootTask: "check",
+      command: "health-check",
+      label: "check",
+      key: "urdf",
+      slashName: "file",
+      value: localPath.inputPath,
+    };
+  }
+
+  if (task === "convert" && localPath?.isXacroFile) {
+    return {
+      rootTask: "convert",
+      command: "xacro-to-urdf",
+      label: "convert",
+      key: "xacro",
+      slashName: "file",
+      value: localPath.inputPath,
+    };
+  }
+
+  if (task === "fix") {
+    if (githubValue) {
+      return {
+        rootTask: "fix",
+        command: "repair-mesh-refs",
+        label: "fix",
+        key: "github",
+        slashName: "repo",
+        value: githubValue,
+      };
+    }
+
+    if (localPath?.isDirectory) {
+      return {
+        rootTask: "fix",
+        command: "repair-mesh-refs",
+        label: "fix",
+        key: "local",
+        slashName: "local",
+        value: localPath.inputPath,
+      };
+    }
+
+    if (localPath?.isUrdfFile) {
+      return {
+        rootTask: "fix",
+        command: "fix-mesh-paths",
+        label: "fix",
+        key: "urdf",
+        slashName: "file",
+        value: localPath.inputPath,
+      };
+    }
+  }
+
+  return null;
+};
+
+const shouldTreatAsSlashInput = (rawValue: string, state: ShellState): boolean => {
+  const trimmed = rawValue.trim();
+  if (!trimmed.startsWith("/")) {
+    return false;
+  }
+
+  if (detectLocalPathDrop(trimmed)) {
+    return false;
+  }
+
+  if (state.session?.pending?.expectsPath && looksLikeFilesystemSeed(trimmed)) {
+    return false;
+  }
+
+  return true;
 };
 
 const startRootTaskAction = (
@@ -1667,6 +2045,39 @@ const handlePendingValue = (input: string, state: ShellState) => {
   printPendingValuePrompt(session.pending);
 };
 
+const applyFreeformInputToSession = (
+  session: ShellSession,
+  rawValue: string,
+  feedback?: ShellFeedback[]
+): boolean => {
+  const target = inferFreeformSessionTarget(session, rawValue);
+  if (!target) {
+    return false;
+  }
+
+  return setSessionValue(session, target.key, target.value, feedback);
+};
+
+const applyFreeformInputToRootState = (
+  state: ShellState,
+  rawValue: string,
+  feedback?: ShellFeedback[]
+): boolean => {
+  const plan = inferFreeformRootPlan(state, rawValue);
+  if (!plan) {
+    return false;
+  }
+
+  state.rootTask = plan.rootTask;
+  state.session = createSession(plan.command, state, plan.label, feedback);
+  if (!state.session || !setSessionValue(state.session, plan.key, plan.value, feedback)) {
+    state.session = null;
+    return false;
+  }
+
+  return true;
+};
+
 const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
   ...entry,
   kind: "system" as const,
@@ -1768,6 +2179,10 @@ const filterMenuEntries = (entries: readonly TtyMenuEntry[], query: string): rea
 };
 
 const getSlashMenuEntries = (state: ShellState, input: string): readonly TtyMenuEntry[] => {
+  if (!shouldTreatAsSlashInput(input.trimStart(), state)) {
+    return [];
+  }
+
   const parsed = parseSlashInput(input.trimStart());
   if (!parsed || parsed.inlineValue) {
     return [];
@@ -1916,11 +2331,22 @@ const getPromptPlaceholder = (state: ShellState): string => {
   }
 
   if (!state.session && state.rootTask) {
-    return `choose a ${state.rootTask} action`;
+    switch (state.rootTask) {
+      case "open":
+        return "paste owner/repo or drop a local folder or .urdf";
+      case "inspect":
+        return "paste owner/repo or drop a local folder or .urdf";
+      case "check":
+        return "drop a local .urdf or use /health /validate /orientation";
+      case "convert":
+        return "drop a local .xacro or use /xacro /mjcf /usd";
+      case "fix":
+        return "paste owner/repo or drop a local folder or .urdf";
+    }
   }
 
   if (!state.session) {
-    return "type / to open commands";
+    return "type /, drop a local path, or paste owner/repo";
   }
 
   const requirementStatus = getRequirementStatus(state.session);
@@ -1946,8 +2372,8 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     state.session
       ? SHELL_THEME.muted(`helper /${state.session.label}  arrows move  tab completes  enter selects  ctrl+c exits`)
       : state.rootTask
-        ? SHELL_THEME.muted(`task /${state.rootTask}  arrows move  tab completes  enter selects  ctrl+c exits`)
-        : SHELL_THEME.muted("press / to open commands  arrows move  tab completes  enter selects  ctrl+c exits")
+        ? SHELL_THEME.muted(`task /${state.rootTask}  paste repo or drop local path  tab completes  ctrl+c exits`)
+        : SHELL_THEME.muted("press /, paste owner/repo, or drop a local path  tab completes  ctrl+c exits")
   );
 
   if (view.notice) {
@@ -2064,8 +2490,21 @@ const completeTtyPathInput = (
   nextInput: string;
   notice: ShellFeedback | null;
 } | null => {
-  if (state.session?.pending && !input.startsWith("/") && state.session.pending.expectsPath) {
-    const matches = completePathFragment(input.trim());
+  if (state.session?.pending && state.session.pending.expectsPath) {
+    const matches = completePathFragment(normalizeFilesystemInput(input));
+    if (matches.length === 1) {
+      return { nextInput: matches[0] ?? input, notice: null };
+    }
+    if (matches.length > 1) {
+      return {
+        nextInput: input,
+        notice: { kind: "info", text: matches.slice(0, 3).join("  ") },
+      };
+    }
+  }
+
+  if (!state.session?.pending && looksLikeFilesystemSeed(input)) {
+    const matches = completePathFragment(normalizeFilesystemInput(input));
     if (matches.length === 1) {
       return { nextInput: matches[0] ?? input, notice: null };
     }
@@ -2160,10 +2599,11 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
   for await (const line of rl) {
     const trimmed = line.trim();
     const session = state.session;
+    const isSlashInput = shouldTreatAsSlashInput(line, state);
 
-    if (session?.pending && !trimmed.startsWith("/")) {
+    if (session?.pending && !isSlashInput) {
       handlePendingValue(line, state);
-    } else if (trimmed.startsWith("/")) {
+    } else if (isSlashInput) {
       const parsed = parseSlashInput(trimmed);
       if (parsed) {
         if (session) {
@@ -2182,10 +2622,24 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       } else {
         process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
       }
-    } else if (session?.pending) {
-      handlePendingValue(line, state);
+    } else if (session) {
+      const feedback: ShellFeedback[] = [];
+      if (applyFreeformInputToSession(session, line, feedback)) {
+        flushFeedback(feedback);
+        printSessionStatus(session);
+      } else {
+        flushFeedback(feedback);
+        process.stdout.write(`${SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
+      }
     } else {
-      process.stdout.write(`${SHELL_THEME.muted("type / for commands")}\n`);
+      const feedback: ShellFeedback[] = [];
+      if (applyFreeformInputToRootState(state, line, feedback) && state.session) {
+        flushFeedback(feedback);
+        printSessionStatus(state.session);
+      } else {
+        flushFeedback(feedback);
+        process.stdout.write(`${SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
+      }
     }
 
     if (isClosed) {
@@ -2520,13 +2974,14 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
   const handleEnter = () => {
     const trimmed = view.input.trim();
-    if (state.session?.pending && !trimmed.startsWith("/")) {
+    const isSlashInput = shouldTreatAsSlashInput(view.input, state);
+    if (state.session?.pending && !isSlashInput) {
       handlePendingInput();
       setInput("");
       return;
     }
 
-    if (trimmed.startsWith("/")) {
+    if (isSlashInput) {
       const parsed = parseSlashInput(trimmed);
       if (!parsed) {
         return;
@@ -2569,7 +3024,29 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return;
     }
 
-    view.notice = { kind: "info", text: "type / to open commands" };
+    if (state.session) {
+      const feedback: ShellFeedback[] = [];
+      if (applyFreeformInputToSession(state.session, view.input, feedback)) {
+        setNoticeFromFeedback(view, feedback);
+        view.output = null;
+        pushTimelineEntry(view, view.input.trim());
+        setInput("");
+        return;
+      }
+      setNoticeFromFeedback(view, feedback);
+    } else {
+      const feedback: ShellFeedback[] = [];
+      if (applyFreeformInputToRootState(state, view.input, feedback) && state.session) {
+        setNoticeFromFeedback(view, feedback);
+        view.output = null;
+        pushTimelineEntry(view, view.input.trim());
+        setInput("");
+        return;
+      }
+      setNoticeFromFeedback(view, feedback);
+    }
+
+    view.notice = { kind: "info", text: "type /, drop a local path, or paste owner/repo" };
     setInput("");
   };
 
@@ -2715,14 +3192,14 @@ export const renderShellHelp = (): string => {
     "  enter              Select the highlighted option",
     "  ctrl+c             Exit immediately",
     "  esc                Close the picker or cancel a pending value",
+    "  owner/repo         Start an open flow from a GitHub repo",
+    "  /abs/path          Open a dropped or pasted local path directly",
     "  /open              Open a repo, folder, or file as a working URDF",
     "  /inspect           Preview a repo or URDF before choosing the next step",
     "  /check             Run health, validation, and orientation checks",
     "  /convert           Convert XACRO and URDF files into other formats",
     "  /fix               Repair mesh paths, mesh refs, and axis issues",
     "  /update            Install the latest ilu release",
-    "  /repo              Set a GitHub repo or URL when the helper supports it",
-    "  /local             Set a local path when the helper supports it",
     "  /show              Show the assembled command and next step",
     "  /run               Execute the assembled command",
     "  /back              Return to the root helper menu",

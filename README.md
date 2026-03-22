@@ -10,13 +10,13 @@ ilu
 Inside `ilu`:
 
 - type `/` to open the command picker
+- paste `owner/repo` to open from GitHub immediately
+- drag and drop a local folder or `.urdf` into the shell
 - use arrow keys to move
 - press `Tab` to complete the selected option
 - press `Enter` to select
 - press `Ctrl+C` to exit
 - start with `/open`, `/inspect`, `/check`, `/convert`, or `/fix`
-
-`/repo` accepts `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`, and `git@github.com:owner/repo.git`.
 
 Update:
 
