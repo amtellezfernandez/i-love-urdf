@@ -1277,7 +1277,7 @@ const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
 });
 if (
   !shellTranscript.includes("interactive urdf shell") ||
-  !shellTranscript.includes("type / for commands, /update for latest, /exit to quit") ||
+  !shellTranscript.includes("type / for commands, /update for latest, ctrl+c to quit") ||
   !shellTranscript.includes("start") ||
   !shellTranscript.includes("/repo") ||
   !shellTranscript.includes("input") ||

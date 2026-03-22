@@ -14,10 +14,13 @@ const ANSI = {
     reset: "\u001b[0m",
     bold: "\u001b[1m",
     dim: "\u001b[2m",
+    reverse: "\u001b[7m",
     gray: "\u001b[90m",
-    cyan: "\u001b[36m",
+    magenta: "\u001b[35m",
+    brightMagenta: "\u001b[95m",
     green: "\u001b[32m",
     yellow: "\u001b[33m",
+    red: "\u001b[31m",
 };
 const paint = (enabled, text, ...codes) => {
     if (!enabled || text.length === 0) {
@@ -40,15 +43,18 @@ const resolveColorSupport = () => {
 };
 const createTheme = (enabled) => ({
     enabled,
-    brand: (text) => paint(enabled, text, ANSI.bold),
-    command: (text) => paint(enabled, text, ANSI.bold, ANSI.cyan),
+    brand: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
+    command: (text) => paint(enabled, text, ANSI.bold, ANSI.magenta),
     muted: (text) => paint(enabled, text, ANSI.dim),
-    section: (text) => paint(enabled, text, ANSI.dim, ANSI.gray),
+    section: (text) => paint(enabled, text, ANSI.dim, ANSI.magenta),
     success: (text) => paint(enabled, text, ANSI.bold, ANSI.green),
-    accent: (text) => paint(enabled, text, ANSI.bold, ANSI.cyan),
+    accent: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
     warning: (text) => paint(enabled, text, ANSI.bold, ANSI.yellow),
+    error: (text) => paint(enabled, text, ANSI.bold, ANSI.red),
+    selected: (text) => paint(enabled, text, ANSI.bold, ANSI.reverse, ANSI.brightMagenta),
 });
 const SHELL_THEME = createTheme(resolveColorSupport());
+const SHELL_BRAND = "i<3urdf";
 const SHELL_BUILTIN_COMMANDS = [
     { name: "help", summary: "Show slash commands for the current context." },
     { name: "update", summary: "Install the latest ilu release." },
@@ -153,7 +159,7 @@ const SESSION_SLASH_ALIASES = {
     },
 };
 const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
-const ROOT_GUIDANCE = "type / for commands, /update for latest, /exit to quit";
+const ROOT_GUIDANCE = "type / for commands, /update for latest, ctrl+c to quit";
 const formatRootPrompt = () => "/> ";
 const formatSessionPrompt = (session) => session.pending ? `/${session.pending.slashName}> ` : `/${session.command}> `;
 const quoteForPreview = (value) => (/\s/.test(value) ? JSON.stringify(value) : value);
@@ -169,6 +175,42 @@ const buildCommandPreview = (command, args) => {
     });
     return `ilu ${[command, ...serializedArgs].join(" ")}`.trim();
 };
+const pushFeedback = (feedback, kind, text) => {
+    feedback?.push({ kind, text });
+};
+const writeFeedback = (entry) => {
+    const stream = entry.kind === "error" ? process.stderr : process.stdout;
+    const render = entry.kind === "success"
+        ? SHELL_THEME.success
+        : entry.kind === "warning"
+            ? SHELL_THEME.warning
+            : entry.kind === "error"
+                ? SHELL_THEME.error
+                : SHELL_THEME.muted;
+    stream.write(`${render(entry.text)}\n`);
+};
+const flushFeedback = (feedback) => {
+    for (const entry of feedback) {
+        writeFeedback(entry);
+    }
+};
+const stripAnsi = (value) => value.replace(/\u001b\[[0-9;]*m/g, "");
+const clamp = (value, minimum, maximum) => Math.min(Math.max(value, minimum), maximum);
+const formatInlineValue = (value) => (value.length > 0 ? ` ${quoteForPreview(value)}` : "");
+const createOutputPanel = (title, content, kind = "info") => {
+    const lines = content
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter((line, index, entries) => line.length > 0 || index < entries.length - 1);
+    if (lines.length === 0) {
+        return null;
+    }
+    return {
+        title,
+        lines: lines.slice(-10),
+        kind,
+    };
+};
 const printSectionTitle = (title) => {
     process.stdout.write(`\n${SHELL_THEME.section(title)}\n`);
 };
@@ -183,8 +225,8 @@ const printCommandList = (entries, prefix = "/", includeSummary = true) => {
     }
 };
 const printRootQuickStart = () => {
-    process.stdout.write(`${SHELL_THEME.brand("ilu")}\n`);
-    process.stdout.write(`${SHELL_THEME.muted("interactive urdf shell")}\n`);
+    process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)}\n`);
+    process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
     process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
     printSectionTitle("start");
     printCommandList(ROOT_QUICK_START_COMMANDS.map((commandName) => ({
@@ -600,37 +642,34 @@ const printPendingValuePrompt = (pending) => {
     }
 };
 const isPathLikeOption = (session, key) => getOptionSpecByKey(session, key)?.isFilesystemPath === true;
-const setSessionValue = (session, key, rawValue) => {
+const setSessionValue = (session, key, rawValue, feedback) => {
     const value = validateOptionValue(key, rawValue);
     if (!value) {
         if (key === "github") {
-            process.stderr.write("Expected owner/repo or a GitHub repository URL.\n");
+            pushFeedback(feedback, "error", "Expected owner/repo or a GitHub repository URL.");
         }
         else {
-            process.stderr.write(`Invalid value for --${key}.\n`);
+            pushFeedback(feedback, "error", `Invalid value for --${key}.`);
         }
         return false;
     }
     clearMutuallyExclusiveArgs(session, key);
     session.args.set(key, value);
-    process.stdout.write(`${SHELL_THEME.success("[set]")} ${SHELL_THEME.command(`--${key}`)} ${quoteForPreview(value)}\n`);
+    pushFeedback(feedback, "success", `[set] --${key} ${quoteForPreview(value)}`);
     return true;
 };
-const toggleSessionFlag = (session, key) => {
+const toggleSessionFlag = (session, key, feedback) => {
     if (session.args.get(key) === true) {
         session.args.delete(key);
-        process.stdout.write(`${SHELL_THEME.warning("[unset]")} ${SHELL_THEME.command(`--${key}`)}\n`);
+        pushFeedback(feedback, "warning", `[unset] --${key}`);
         return;
     }
     session.args.set(key, true);
-    process.stdout.write(`${SHELL_THEME.success("[on]")} ${SHELL_THEME.command(`--${key}`)}\n`);
+    pushFeedback(feedback, "success", `[on] --${key}`);
 };
+const getLastUrdfMessage = (state) => state.lastUrdfPath ? `last ${state.lastUrdfPath}` : "no remembered URDF yet";
 const printLastUrdf = (state) => {
-    if (!state.lastUrdfPath) {
-        process.stdout.write(`${SHELL_THEME.muted("no remembered URDF yet")}\n`);
-        return;
-    }
-    process.stdout.write(`${SHELL_THEME.muted("last")} ${state.lastUrdfPath}\n`);
+    process.stdout.write(`${SHELL_THEME.muted(getLastUrdfMessage(state))}\n`);
 };
 const updateRememberedUrdfPath = (state, session) => {
     const directUrdfPath = session.args.get("urdf");
@@ -643,22 +682,34 @@ const updateRememberedUrdfPath = (state, session) => {
         state.lastUrdfPath = outPath;
     }
 };
-const printFollowUpSuggestions = (state, command) => {
+const getFollowUpSuggestionMessage = (state, command) => {
     if ((command === "load-source" || command === "xacro-to-urdf") && state.lastUrdfPath) {
-        process.stdout.write(`${SHELL_THEME.accent("[next]")} ${SHELL_THEME.command("/health-check")} ${SHELL_THEME.muted("/validate /analyze /guess-orientation")}\n${SHELL_THEME.muted("using")} ${state.lastUrdfPath}\n`);
-        return;
+        return `[next] /health-check /validate /analyze /guess-orientation\nusing ${state.lastUrdfPath}`;
     }
     if (command === "inspect-repo") {
-        process.stdout.write(`${SHELL_THEME.accent("[next]")} ${SHELL_THEME.command("/load-source")} ${SHELL_THEME.muted("or")} ${SHELL_THEME.command("/repair-mesh-refs")}\n`);
-        return;
+        return "[next] /load-source or /repair-mesh-refs";
     }
     if (state.lastUrdfPath) {
-        process.stdout.write(`${SHELL_THEME.muted("remembered")} ${state.lastUrdfPath}\n`);
+        return `remembered ${state.lastUrdfPath}`;
+    }
+    return null;
+};
+const printFollowUpSuggestions = (state, command) => {
+    const message = getFollowUpSuggestionMessage(state, command);
+    if (!message) {
+        return;
+    }
+    for (const line of message.split("\n")) {
+        if (line.startsWith("[next]")) {
+            process.stdout.write(`${SHELL_THEME.accent(line)}\n`);
+        }
+        else {
+            process.stdout.write(`${SHELL_THEME.muted(line)}\n`);
+        }
     }
 };
 const executeSessionCommand = (state, session) => {
     const preview = buildCommandPreview(session.command, session.args);
-    process.stdout.write(`\n${formatStatusTag("cmd")} ${SHELL_THEME.command(preview)}\n`);
     const argv = [CLI_ENTRY_PATH, session.command];
     for (const [key, value] of session.args.entries()) {
         if (value === true) {
@@ -671,20 +722,42 @@ const executeSessionCommand = (state, session) => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
     });
-    if (result.stdout) {
-        process.stdout.write(result.stdout);
+    const status = result.status ?? 1;
+    if (status === 0) {
+        updateRememberedUrdfPath(state, session);
     }
-    if (result.stderr) {
-        process.stderr.write(result.stderr);
+    return {
+        preview,
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+        status,
+        followUp: status === 0 ? getFollowUpSuggestionMessage(state, session.command) : null,
+    };
+};
+const printSessionCommandExecution = (execution, command) => {
+    process.stdout.write(`\n${formatStatusTag("cmd")} ${SHELL_THEME.command(execution.preview)}\n`);
+    if (execution.stdout) {
+        process.stdout.write(execution.stdout);
     }
-    if (result.status !== 0) {
-        process.stderr.write(`[${session.command}] exited with status ${result.status ?? 1}\n`);
+    if (execution.stderr) {
+        process.stderr.write(execution.stderr);
+    }
+    if (execution.status !== 0) {
+        process.stderr.write(`[${command}] exited with status ${execution.status}\n`);
         return;
     }
-    updateRememberedUrdfPath(state, session);
-    printFollowUpSuggestions(state, session.command);
+    if (execution.followUp) {
+        for (const line of execution.followUp.split("\n")) {
+            if (line.startsWith("[next]")) {
+                process.stdout.write(`${SHELL_THEME.accent(line)}\n`);
+            }
+            else {
+                process.stdout.write(`${SHELL_THEME.muted(line)}\n`);
+            }
+        }
+    }
 };
-const createSession = (command, state) => {
+const createSession = (command, state, feedback) => {
     const session = {
         command,
         spec: cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME[command],
@@ -693,7 +766,7 @@ const createSession = (command, state) => {
     };
     if (state.lastUrdfPath && getOptionSpecByKey(session, "urdf")) {
         session.args.set("urdf", state.lastUrdfPath);
-        process.stdout.write(`${SHELL_THEME.muted("using")} ${state.lastUrdfPath}\n`);
+        pushFeedback(feedback, "info", `using ${state.lastUrdfPath}`);
     }
     return session;
 };
@@ -713,6 +786,7 @@ const listAvailableSlashCommands = (state) => {
     return [
         ...new Set([
             ...SESSION_BUILTIN_COMMANDS.map((entry) => entry.name),
+            ...SESSION_SYSTEM_MENU_ENTRIES.map((entry) => entry.name),
             ...getSessionOptionEntries(state.session).map((entry) => entry.name),
         ]),
     ];
@@ -797,7 +871,9 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         process.stdout.write(`${ROOT_GUIDANCE}\n`);
         return;
     }
-    state.session = createSession(slashCommand, state);
+    const feedback = [];
+    state.session = createSession(slashCommand, state, feedback);
+    flushFeedback(feedback);
     printSessionOptions(state.session);
 };
 const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
@@ -815,7 +891,9 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         return;
     }
     if (slashCommand === "reset") {
-        state.session = createSession(session.command, state);
+        const feedback = [];
+        state.session = createSession(session.command, state, feedback);
+        flushFeedback(feedback);
         printSessionOptions(state.session);
         return;
     }
@@ -829,7 +907,7 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
             process.stderr.write(`${SHELL_THEME.warning("[missing]")} ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
             return;
         }
-        executeSessionCommand(state, session);
+        printSessionCommandExecution(executeSessionCommand(state, session), session.command);
         return;
     }
     if (slashCommand === "last") {
@@ -853,15 +931,21 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         return;
     }
     if (!target.option.valueHint) {
-        toggleSessionFlag(session, target.key);
+        const feedback = [];
+        toggleSessionFlag(session, target.key, feedback);
+        flushFeedback(feedback);
         printSessionStatus(session);
         return;
     }
     if (inlineValue) {
-        if (setSessionValue(session, target.key, inlineValue)) {
+        const feedback = [];
+        if (setSessionValue(session, target.key, inlineValue, feedback)) {
             session.pending = null;
+            flushFeedback(feedback);
             printSessionStatus(session);
+            return;
         }
+        flushFeedback(feedback);
         return;
     }
     session.pending = getPendingValuePrompt(session, target.key, slashCommand);
@@ -872,35 +956,322 @@ const handlePendingValue = (input, state) => {
     if (!session?.pending) {
         return;
     }
-    if (setSessionValue(session, session.pending.key, input)) {
+    const feedback = [];
+    if (setSessionValue(session, session.pending.key, input, feedback)) {
         session.pending = null;
+        flushFeedback(feedback);
         printSessionStatus(session);
         return;
     }
+    flushFeedback(feedback);
     printPendingValuePrompt(session.pending);
 };
-const renderShellHelp = () => {
-    return [
-        "Start the interactive slash-command shell.",
-        "",
-        "Usage",
-        "  ilu",
-        "  ilu shell",
-        "",
-        "Inside the shell",
-        "  /                  Show all helpers",
-        "  /update            Install the latest ilu release",
-        "  /load-source       Start a guided load-source flow",
-        "  /repo              Set a GitHub repo or URL when the helper supports it",
-        "  /local             Set a local path when the helper supports it",
-        "  /show              Show the assembled command and next step",
-        "  /run               Execute the assembled command",
-        "  /back              Return to the root helper menu",
-        "  /exit              Quit the shell",
-    ].join("\n");
+const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
+    ...entry,
+    kind: "system",
+}));
+const SESSION_SYSTEM_MENU_ENTRIES = [
+    { name: "last", summary: "Show the last remembered URDF path.", kind: "system" },
+    { name: "clear", summary: "Clear the current shell view.", kind: "system" },
+    { name: "exit", summary: "Exit the interactive shell.", kind: "system" },
+    { name: "quit", summary: "Exit the interactive shell.", kind: "system" },
+];
+const getRootMenuEntries = () => {
+    const seen = new Set();
+    const entries = [];
+    const addEntry = (entry) => {
+        if (seen.has(entry.name)) {
+            return;
+        }
+        seen.add(entry.name);
+        entries.push(entry);
+    };
+    for (const commandName of ROOT_QUICK_START_COMMANDS) {
+        addEntry({
+            name: commandName,
+            summary: getShellCommandSummary(commandName),
+            kind: "flow",
+        });
+    }
+    for (const entry of ROOT_SYSTEM_MENU_ENTRIES) {
+        addEntry(entry);
+    }
+    for (const section of commandCatalog_1.CLI_HELP_SECTIONS) {
+        for (const commandName of section.commands) {
+            addEntry({
+                name: commandName,
+                summary: getShellCommandSummary(commandName),
+                kind: "flow",
+            });
+        }
+    }
+    return entries;
 };
-exports.renderShellHelp = renderShellHelp;
-const runInteractiveShell = async (options = {}) => {
+const getSessionMenuEntries = (session) => {
+    const entries = getSessionOptionEntries(session).map((entry) => ({
+        name: entry.name,
+        summary: entry.summary,
+        kind: "option",
+    }));
+    for (const entry of SESSION_BUILTIN_COMMANDS) {
+        entries.push({
+            name: entry.name,
+            summary: entry.summary,
+            kind: "action",
+        });
+    }
+    for (const entry of SESSION_SYSTEM_MENU_ENTRIES) {
+        entries.push(entry);
+    }
+    return entries;
+};
+const filterMenuEntries = (entries, query) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) {
+        return entries;
+    }
+    const startsWithMatches = entries.filter((entry) => entry.name.startsWith(normalizedQuery));
+    if (startsWithMatches.length > 0) {
+        return startsWithMatches;
+    }
+    const includesMatches = entries.filter((entry) => entry.name.includes(normalizedQuery));
+    return includesMatches.length > 0 ? includesMatches : entries;
+};
+const getSlashMenuEntries = (state, input) => {
+    const parsed = parseSlashInput(input.trimStart());
+    if (!parsed || parsed.inlineValue) {
+        return [];
+    }
+    return filterMenuEntries(state.session ? getSessionMenuEntries(state.session) : getRootMenuEntries(), parsed.slashCommand);
+};
+const pushTimelineEntry = (view, text) => {
+    view.timeline = [...view.timeline.slice(-7), { text }];
+};
+const setNoticeFromFeedback = (view, feedback) => {
+    if (feedback.length === 0) {
+        view.notice = null;
+        return;
+    }
+    view.notice = {
+        kind: feedback[feedback.length - 1]?.kind ?? "info",
+        text: feedback.map((entry) => entry.text).join("  "),
+    };
+};
+const truncateText = (value, width) => {
+    if (width <= 0) {
+        return "";
+    }
+    if (value.length <= width) {
+        return value;
+    }
+    if (width <= 3) {
+        return value.slice(0, width);
+    }
+    return `${value.slice(0, width - 3)}...`;
+};
+const getMenuWindow = (entries, selectedIndex, maxVisible) => {
+    if (entries.length === 0) {
+        return { selectedIndex: 0, start: 0, visible: [] };
+    }
+    const normalizedSelectedIndex = clamp(selectedIndex, 0, entries.length - 1);
+    const visibleCount = clamp(maxVisible, 1, entries.length);
+    const start = clamp(normalizedSelectedIndex - Math.floor(visibleCount / 2), 0, Math.max(entries.length - visibleCount, 0));
+    return {
+        selectedIndex: normalizedSelectedIndex,
+        start,
+        visible: entries.slice(start, start + visibleCount),
+    };
+};
+const buildSessionPreviewText = (session) => {
+    const lines = [buildCommandPreview(session.command, session.args)];
+    if (session.args.size > 0) {
+        for (const [key, value] of session.args.entries()) {
+            lines.push(`${getSlashDisplayName(session, key)}${formatInlineValue(value === true ? "enabled" : String(value))}`);
+        }
+    }
+    const requirementStatus = getRequirementStatus(session);
+    lines.push(requirementStatus.ready
+        ? "ready /run"
+        : `next ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}`);
+    return lines.join("\n");
+};
+const buildExecutionPanelText = (execution, command) => {
+    const chunks = [execution.preview];
+    if (execution.stdout.trim().length > 0) {
+        chunks.push(execution.stdout.trimEnd());
+    }
+    if (execution.stderr.trim().length > 0) {
+        chunks.push(execution.stderr.trimEnd());
+    }
+    if (execution.status !== 0) {
+        chunks.push(`[${command}] exited with status ${execution.status}`);
+    }
+    if (execution.followUp) {
+        chunks.push(execution.followUp);
+    }
+    return chunks.join("\n");
+};
+const renderNotice = (notice) => {
+    const text = notice.text;
+    switch (notice.kind) {
+        case "success":
+            return SHELL_THEME.success(text);
+        case "warning":
+            return SHELL_THEME.warning(text);
+        case "error":
+            return SHELL_THEME.error(text);
+        case "info":
+            return SHELL_THEME.muted(text);
+    }
+};
+const renderMenuEntry = (entry, selected, width) => {
+    const badge = entry.kind === "flow" ? "cmd" : entry.kind === "option" ? "set" : entry.kind === "action" ? "act" : "sys";
+    const label = `/${entry.name}`;
+    const left = `${selected ? ">" : " "} ${truncateText(label, 24).padEnd(24)} `;
+    const availableSummaryWidth = Math.max(12, width - left.length - badge.length - 3);
+    const summary = truncateText(entry.summary, availableSummaryWidth);
+    const line = `${left}${summary} ${badge}`;
+    return selected ? SHELL_THEME.selected(line) : `${SHELL_THEME.command(left)}${SHELL_THEME.muted(`${summary} ${badge}`)}`;
+};
+const getPromptPlaceholder = (state) => {
+    if (state.session?.pending) {
+        return state.session.pending.examples[0] ?? state.session.pending.title;
+    }
+    if (!state.session) {
+        return "type / to open commands";
+    }
+    const requirementStatus = getRequirementStatus(state.session);
+    if (requirementStatus.ready) {
+        return "type /run";
+    }
+    return requirementStatus.nextSteps
+        .map((step) => formatSlashSequence(state.session, step))
+        .join(" or ");
+};
+const renderTtyShell = (state, view) => {
+    const columns = process.stdout.columns ?? 100;
+    const rows = process.stdout.rows ?? 24;
+    const menuEntries = getSlashMenuEntries(state, view.input);
+    const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
+    view.menuIndex = menuWindow.selectedIndex;
+    const lines = [];
+    lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
+    lines.push(state.session
+        ? SHELL_THEME.muted(`helper /${state.session.command}  arrows move  enter selects  ctrl+c exits`)
+        : SHELL_THEME.muted("press / to open commands  arrows move  enter selects  ctrl+c exits"));
+    if (view.notice) {
+        lines.push(renderNotice(view.notice));
+    }
+    if (view.timeline.length > 0) {
+        lines.push("");
+        lines.push(SHELL_THEME.section("recent"));
+        for (const entry of view.timeline.slice(-6)) {
+            lines.push(`  ${SHELL_THEME.command(entry.text)}`);
+        }
+    }
+    lines.push("");
+    lines.push(SHELL_THEME.section(state.session ? "current" : "start"));
+    if (state.session) {
+        const requirementStatus = getRequirementStatus(state.session);
+        lines.push(requirementStatus.ready
+            ? `  ${SHELL_THEME.success("ready")} ${SHELL_THEME.command("/run")}`
+            : `  ${SHELL_THEME.accent("next")} ${SHELL_THEME.command(requirementStatus.nextSteps.map((step) => formatSlashSequence(state.session, step)).join(" or "))}`);
+        lines.push(`  ${SHELL_THEME.muted("cmd")} ${SHELL_THEME.command(buildCommandPreview(state.session.command, state.session.args))}`);
+        if (state.session.pending) {
+            lines.push(`  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command(state.session.pending.title)}`);
+        }
+    }
+    else {
+        for (const commandName of ROOT_QUICK_START_COMMANDS) {
+            lines.push(`  ${SHELL_THEME.command(`/${commandName}`.padEnd(18))}${SHELL_THEME.muted(getShellCommandSummary(commandName))}`);
+        }
+    }
+    if (view.output) {
+        lines.push("");
+        lines.push(SHELL_THEME.section(view.output.title));
+        const renderOutputLine = view.output.kind === "error"
+            ? SHELL_THEME.error
+            : view.output.kind === "success"
+                ? SHELL_THEME.success
+                : SHELL_THEME.muted;
+        for (const line of view.output.lines) {
+            lines.push(`  ${renderOutputLine(truncateText(line, columns - 4))}`);
+        }
+    }
+    lines.push("");
+    const promptLabel = state.session ? formatSessionPrompt(state.session).trimEnd() : formatRootPrompt().trimEnd();
+    const promptLineIndex = lines.length;
+    const placeholder = view.input.length === 0 ? getPromptPlaceholder(state) : "";
+    lines.push(`${SHELL_THEME.command(promptLabel)} ${view.input}${placeholder ? SHELL_THEME.muted(placeholder) : ""}`);
+    if (state.session?.pending && state.session.pending.examples.length > 0 && !view.input.startsWith("/")) {
+        lines.push(SHELL_THEME.section("examples"));
+        for (const example of state.session.pending.examples.slice(0, 2)) {
+            lines.push(`  ${SHELL_THEME.muted(example)}`);
+        }
+    }
+    else if (view.input.startsWith("/")) {
+        lines.push(SHELL_THEME.section("picker"));
+        if (menuEntries.length === 0) {
+            lines.push(`  ${SHELL_THEME.warning("no matches")}`);
+        }
+        else {
+            if (menuWindow.start > 0) {
+                lines.push(`  ${SHELL_THEME.muted("...")}`);
+            }
+            for (const [index, entry] of menuWindow.visible.entries()) {
+                lines.push(renderMenuEntry(entry, menuWindow.start + index === menuWindow.selectedIndex, columns - 2));
+            }
+            if (menuWindow.start + menuWindow.visible.length < menuEntries.length) {
+                lines.push(`  ${SHELL_THEME.muted("...")}`);
+            }
+        }
+    }
+    process.stdout.write("\u001b[2J\u001b[H");
+    process.stdout.write(lines.join("\n"));
+    const linesBelowPrompt = lines.length - promptLineIndex - 1;
+    if (linesBelowPrompt > 0) {
+        process.stdout.write(`\u001b[${linesBelowPrompt}A`);
+    }
+    process.stdout.write("\r");
+    process.stdout.write(`\u001b[${stripAnsi(`${promptLabel} ${view.input}`).length}C`);
+};
+const completeTtyPathInput = (input, state) => {
+    if (state.session?.pending && !input.startsWith("/") && state.session.pending.expectsPath) {
+        const matches = completePathFragment(input.trim());
+        if (matches.length === 1) {
+            return { nextInput: matches[0] ?? input, notice: null };
+        }
+        if (matches.length > 1) {
+            return {
+                nextInput: input,
+                notice: { kind: "info", text: matches.slice(0, 3).join("  ") },
+            };
+        }
+    }
+    const parsed = parseSlashInput(input);
+    if (!parsed?.inlineValue || !state.session) {
+        return null;
+    }
+    const target = resolveSessionSlashTarget(state.session, parsed.slashCommand);
+    if (!target || target.key === "github" || !isPathLikeOption(state.session, target.key)) {
+        return null;
+    }
+    const matches = completePathFragment(parsed.inlineValue);
+    if (matches.length === 1) {
+        return {
+            nextInput: `/${parsed.slashCommand} ${matches[0]}`,
+            notice: null,
+        };
+    }
+    if (matches.length > 1) {
+        return {
+            nextInput: input,
+            notice: { kind: "info", text: matches.slice(0, 3).map((match) => `/${parsed.slashCommand} ${match}`).join("  ") },
+        };
+    }
+    return null;
+};
+const runLineInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
     };
@@ -913,6 +1284,10 @@ const runInteractiveShell = async (options = {}) => {
     });
     rl.on("close", () => {
         isClosed = true;
+    });
+    rl.on("SIGINT", () => {
+        process.stdout.write("\n");
+        rl.close();
     });
     const close = () => rl.close();
     printRootQuickStart();
@@ -961,5 +1336,382 @@ const runInteractiveShell = async (options = {}) => {
         rl.setPrompt(state.session ? formatSessionPrompt(state.session) : formatRootPrompt());
         rl.prompt();
     }
+};
+const runTtyInteractiveShell = async (options = {}) => {
+    const state = {
+        session: null,
+    };
+    const view = {
+        input: "",
+        timeline: [],
+        menuIndex: 0,
+        notice: null,
+        output: null,
+    };
+    let closed = false;
+    const close = () => {
+        closed = true;
+    };
+    const setInput = (nextInput) => {
+        view.input = nextInput;
+        const menuEntries = getSlashMenuEntries(state, view.input);
+        view.menuIndex = menuEntries.length === 0 ? 0 : clamp(view.menuIndex, 0, menuEntries.length - 1);
+    };
+    const openSession = (command) => {
+        const feedback = [];
+        state.session = createSession(command, state, feedback);
+        setNoticeFromFeedback(view, feedback);
+        view.output = null;
+        pushTimelineEntry(view, `/${command}`);
+    };
+    const handleRootAction = (slashCommand) => {
+        if (!slashCommand || slashCommand === "help") {
+            setInput("/");
+            return true;
+        }
+        if (slashCommand === "exit" || slashCommand === "quit") {
+            close();
+            return true;
+        }
+        if (slashCommand === "clear") {
+            view.timeline = [];
+            view.notice = null;
+            view.output = null;
+            return true;
+        }
+        if (slashCommand === "last") {
+            view.notice = { kind: "info", text: getLastUrdfMessage(state) };
+            pushTimelineEntry(view, "/last");
+            return true;
+        }
+        if (slashCommand === "update") {
+            try {
+                (0, cliUpdate_1.runUpdateCommand)();
+                view.notice = { kind: "success", text: "ilu is up to date." };
+            }
+            catch (error) {
+                view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
+            }
+            pushTimelineEntry(view, "/update");
+            return true;
+        }
+        if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
+            view.notice = { kind: "error", text: `Unknown slash command: /${slashCommand}` };
+            return true;
+        }
+        openSession(slashCommand);
+        return true;
+    };
+    const handleSessionAction = (slashCommand, inlineValue) => {
+        const session = state.session;
+        if (!session) {
+            return false;
+        }
+        if (!slashCommand || slashCommand === "help") {
+            setInput("/");
+            return true;
+        }
+        if (slashCommand === "back") {
+            state.session = null;
+            view.notice = { kind: "info", text: "back to root" };
+            view.output = null;
+            pushTimelineEntry(view, "/back");
+            return true;
+        }
+        if (slashCommand === "reset") {
+            const feedback = [];
+            state.session = createSession(session.command, state, feedback);
+            setNoticeFromFeedback(view, feedback);
+            view.output = null;
+            pushTimelineEntry(view, "/reset");
+            return true;
+        }
+        if (slashCommand === "show") {
+            view.output = createOutputPanel("current", buildSessionPreviewText(session));
+            view.notice = { kind: "info", text: "showing current helper state" };
+            pushTimelineEntry(view, "/show");
+            return true;
+        }
+        if (slashCommand === "run") {
+            const requirementStatus = getRequirementStatus(session);
+            if (!requirementStatus.ready) {
+                view.notice = {
+                    kind: "error",
+                    text: `[missing] ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}`,
+                };
+                return true;
+            }
+            const execution = executeSessionCommand(state, session);
+            view.output = createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, session.command), execution.status === 0 ? "success" : "error");
+            view.notice =
+                execution.status === 0
+                    ? { kind: "success", text: "run complete" }
+                    : { kind: "error", text: `[${session.command}] exited with status ${execution.status}` };
+            pushTimelineEntry(view, "/run");
+            return true;
+        }
+        if (slashCommand === "last") {
+            view.notice = { kind: "info", text: getLastUrdfMessage(state) };
+            pushTimelineEntry(view, "/last");
+            return true;
+        }
+        if (slashCommand === "update") {
+            try {
+                (0, cliUpdate_1.runUpdateCommand)();
+                view.notice = { kind: "success", text: "ilu is up to date." };
+            }
+            catch (error) {
+                view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
+            }
+            pushTimelineEntry(view, "/update");
+            return true;
+        }
+        if (slashCommand === "clear") {
+            view.timeline = [];
+            view.notice = null;
+            view.output = null;
+            return true;
+        }
+        if (slashCommand === "exit" || slashCommand === "quit") {
+            close();
+            return true;
+        }
+        const target = resolveSessionSlashTarget(session, slashCommand);
+        if (!target) {
+            view.notice = { kind: "error", text: `Unknown helper command: /${slashCommand}` };
+            return true;
+        }
+        if (!target.option.valueHint) {
+            const feedback = [];
+            toggleSessionFlag(session, target.key, feedback);
+            setNoticeFromFeedback(view, feedback);
+            view.output = null;
+            pushTimelineEntry(view, `/${slashCommand} ${session.args.get(target.key) === true ? "on" : "off"}`);
+            return true;
+        }
+        if (inlineValue) {
+            const feedback = [];
+            if (setSessionValue(session, target.key, inlineValue, feedback)) {
+                session.pending = null;
+                setNoticeFromFeedback(view, feedback);
+                view.output = null;
+                pushTimelineEntry(view, `/${slashCommand}${formatInlineValue(inlineValue)}`);
+                return true;
+            }
+            setNoticeFromFeedback(view, feedback);
+            return true;
+        }
+        session.pending = getPendingValuePrompt(session, target.key, slashCommand);
+        view.notice = {
+            kind: "info",
+            text: session.pending.examples[0] !== undefined
+                ? `${session.pending.title}: ${session.pending.examples[0]}`
+                : session.pending.title,
+        };
+        view.output = null;
+        return true;
+    };
+    const handlePendingInput = () => {
+        const session = state.session;
+        if (!session?.pending) {
+            return;
+        }
+        const feedback = [];
+        if (setSessionValue(session, session.pending.key, view.input, feedback)) {
+            pushTimelineEntry(view, `/${session.pending.slashName}${formatInlineValue(view.input)}`);
+            session.pending = null;
+            setNoticeFromFeedback(view, feedback);
+            view.output = null;
+            return;
+        }
+        setNoticeFromFeedback(view, feedback);
+    };
+    const handleEnter = () => {
+        const trimmed = view.input.trim();
+        if (state.session?.pending && !trimmed.startsWith("/")) {
+            handlePendingInput();
+            setInput("");
+            return;
+        }
+        if (trimmed.startsWith("/")) {
+            const parsed = parseSlashInput(trimmed);
+            if (!parsed) {
+                return;
+            }
+            if (!parsed.inlineValue) {
+                const menuEntries = getSlashMenuEntries(state, trimmed);
+                if (menuEntries.length > 0) {
+                    const selected = menuEntries[clamp(view.menuIndex, 0, menuEntries.length - 1)];
+                    if (selected) {
+                        if (state.session) {
+                            handleSessionAction(selected.name, "");
+                        }
+                        else {
+                            handleRootAction(selected.name);
+                        }
+                        setInput("");
+                        return;
+                    }
+                }
+            }
+            if (state.session) {
+                handleSessionAction(parsed.slashCommand, parsed.inlineValue);
+            }
+            else {
+                handleRootAction(parsed.slashCommand);
+            }
+            setInput("");
+            return;
+        }
+        if (trimmed.length === 0) {
+            view.notice = {
+                kind: "info",
+                text: state.session ? getPromptPlaceholder(state) : ROOT_GUIDANCE,
+            };
+            return;
+        }
+        view.notice = { kind: "info", text: "type / to open commands" };
+        setInput("");
+    };
+    const render = () => {
+        renderTtyShell(state, view);
+    };
+    if (options.initialSlashCommand) {
+        const parsed = parseSlashInput(options.initialSlashCommand);
+        if (parsed) {
+            handleRootAction(parsed.slashCommand);
+        }
+    }
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    const onResize = () => {
+        render();
+    };
+    const onKeypress = (input, key) => {
+        if (closed) {
+            return;
+        }
+        if ((key.ctrl && key.name === "c") || input === "\u0003") {
+            close();
+            return;
+        }
+        if (key.name === "return" || key.name === "enter") {
+            handleEnter();
+            render();
+            return;
+        }
+        if (key.name === "up" || (key.shift && key.name === "tab")) {
+            const menuEntries = getSlashMenuEntries(state, view.input);
+            if (menuEntries.length > 0) {
+                view.menuIndex = clamp(view.menuIndex - 1, 0, menuEntries.length - 1);
+                render();
+            }
+            return;
+        }
+        if (key.name === "down") {
+            const menuEntries = getSlashMenuEntries(state, view.input);
+            if (menuEntries.length > 0) {
+                view.menuIndex = clamp(view.menuIndex + 1, 0, menuEntries.length - 1);
+                render();
+            }
+            return;
+        }
+        if (key.name === "tab") {
+            const menuEntries = getSlashMenuEntries(state, view.input);
+            if (menuEntries.length > 0) {
+                view.menuIndex = clamp(view.menuIndex + 1, 0, menuEntries.length - 1);
+                render();
+                return;
+            }
+            const pathCompletion = completeTtyPathInput(view.input, state);
+            if (pathCompletion) {
+                setInput(pathCompletion.nextInput);
+                view.notice = pathCompletion.notice;
+                render();
+            }
+            return;
+        }
+        if (key.name === "escape") {
+            if (view.input.startsWith("/")) {
+                setInput("");
+                render();
+                return;
+            }
+            if (state.session?.pending) {
+                state.session.pending = null;
+                view.notice = { kind: "info", text: "input cancelled" };
+                render();
+            }
+            return;
+        }
+        if (key.name === "backspace") {
+            if (view.input.length > 0) {
+                setInput(view.input.slice(0, -1));
+                render();
+            }
+            return;
+        }
+        if (key.ctrl && key.name === "u") {
+            setInput("");
+            render();
+            return;
+        }
+        if (input && !key.ctrl && !key.meta) {
+            setInput(`${view.input}${input}`);
+            if (view.input.startsWith("/")) {
+                view.menuIndex = 0;
+            }
+            view.notice = null;
+            render();
+        }
+    };
+    process.stdout.on("resize", onResize);
+    process.stdin.on("keypress", onKeypress);
+    render();
+    try {
+        while (!closed) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+    }
+    finally {
+        process.stdout.off("resize", onResize);
+        process.stdin.off("keypress", onKeypress);
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdout.write("\u001b[2J\u001b[H\n");
+    }
+};
+const renderShellHelp = () => {
+    return [
+        "Start the i<3urdf interactive shell with an inline picker.",
+        "",
+        "Usage",
+        "  ilu",
+        "  ilu shell",
+        "",
+        "Inside the shell",
+        "  /                  Open the picker under the prompt",
+        "  up/down/tab        Move through picker options",
+        "  enter              Select the highlighted option",
+        "  ctrl+c             Exit immediately",
+        "  esc                Close the picker or cancel a pending value",
+        "  /update            Install the latest ilu release",
+        "  /load-source       Start a guided load-source flow",
+        "  /repo              Set a GitHub repo or URL when the helper supports it",
+        "  /local             Set a local path when the helper supports it",
+        "  /show              Show the assembled command and next step",
+        "  /run               Execute the assembled command",
+        "  /back              Return to the root helper menu",
+        "  /exit              Quit the shell",
+    ].join("\n");
+};
+exports.renderShellHelp = renderShellHelp;
+const runInteractiveShell = async (options = {}) => {
+    if (process.stdin.isTTY === true && process.stdout.isTTY === true) {
+        await runTtyInteractiveShell(options);
+        return;
+    }
+    await runLineInteractiveShell(options);
 };
 exports.runInteractiveShell = runInteractiveShell;
