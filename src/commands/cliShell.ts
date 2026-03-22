@@ -167,18 +167,29 @@ const SESSION_BUILTIN_COMMANDS = [
   { name: "back", summary: "Return to the root slash-command menu." },
 ];
 
-const ROOT_QUICK_START_COMMANDS = [
+const ROOT_COLD_START_COMMANDS = [
   "load-source",
   "inspect-repo",
+  "xacro-to-urdf",
+  "repair-mesh-refs",
+] as const satisfies readonly SupportedCommandName[];
+
+const ROOT_URDF_READY_COMMANDS = [
   "health-check",
   "analyze",
+  "validate",
+  "guess-orientation",
 ] as const satisfies readonly SupportedCommandName[];
 
 const COMMAND_SUMMARY_OVERRIDES: Partial<Record<SupportedCommandName, string>> = {
   "load-source": "Load from GitHub, a local repo, or a local file.",
   "inspect-repo": "Inspect a repo before choosing the right entrypoint.",
+  "xacro-to-urdf": "Expand a XACRO file, repo, or GitHub source into URDF.",
+  "repair-mesh-refs": "Repair broken mesh references in a local or GitHub repo.",
   "health-check": "Check structure, axes, and orientation risks.",
   analyze: "Inspect structure, morphology, and mesh references.",
+  validate: "Check whether the current URDF is structurally valid.",
+  "guess-orientation": "Guess the likely up-axis and forward axis.",
 };
 
 const URDF_OUTPUT_COMMANDS = new Set<SupportedCommandName>([
@@ -270,6 +281,18 @@ const formatSessionPrompt = (session: ShellSession): string =>
   session.pending ? `/${session.pending.slashName}> ` : `/${session.command}> `;
 
 const quoteForPreview = (value: string): string => (/\s/.test(value) ? JSON.stringify(value) : value);
+
+const getRootQuickStartCommands = (
+  state: Pick<ShellState, "lastUrdfPath">
+): readonly SupportedCommandName[] => (state.lastUrdfPath ? ROOT_URDF_READY_COMMANDS : ROOT_COLD_START_COMMANDS);
+
+const getRootQuickStartEntries = (
+  state: Pick<ShellState, "lastUrdfPath">
+): readonly { name: SupportedCommandName; summary: string }[] =>
+  getRootQuickStartCommands(state).map((commandName) => ({
+    name: commandName,
+    summary: getShellCommandSummary(commandName),
+  }));
 
 const buildCommandPreview = (command: string, args: Map<string, string | boolean>): string => {
   const serializedArgs = Array.from(args.entries()).flatMap(([key, value]) => {
@@ -363,27 +386,17 @@ const printCommandList = (
   }
 };
 
-const printRootQuickStart = () => {
+const printRootQuickStart = (state: Pick<ShellState, "lastUrdfPath">) => {
   process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)}\n`);
   process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
   process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
   printSectionTitle("start");
-  printCommandList(
-    ROOT_QUICK_START_COMMANDS.map((commandName) => ({
-      name: commandName,
-      summary: getShellCommandSummary(commandName),
-    }))
-  );
+  printCommandList(getRootQuickStartEntries(state));
 };
 
-const printRootOptions = () => {
+const printRootOptions = (state: Pick<ShellState, "lastUrdfPath">) => {
   printSectionTitle("start");
-  printCommandList(
-    ROOT_QUICK_START_COMMANDS.map((commandName) => ({
-      name: commandName,
-      summary: getShellCommandSummary(commandName),
-    }))
-  );
+  printCommandList(getRootQuickStartEntries(state));
 
   printSectionTitle("system");
   printCommandList(SHELL_BUILTIN_COMMANDS);
@@ -1203,7 +1216,7 @@ const handleRootSlashCommand = (
   close: () => void
 ) => {
   if (!slashCommand || slashCommand === "help") {
-    printRootOptions();
+    printRootOptions(state);
     return;
   }
 
@@ -1365,7 +1378,7 @@ const SESSION_SYSTEM_MENU_ENTRIES = [
   { name: "quit", summary: "Exit the interactive shell.", kind: "system" as const },
 ];
 
-const getRootMenuEntries = (): readonly TtyMenuEntry[] => {
+const getRootMenuEntries = (state: Pick<ShellState, "lastUrdfPath">): readonly TtyMenuEntry[] => {
   const seen = new Set<string>();
   const entries: TtyMenuEntry[] = [];
   const addEntry = (entry: TtyMenuEntry) => {
@@ -1376,7 +1389,7 @@ const getRootMenuEntries = (): readonly TtyMenuEntry[] => {
     entries.push(entry);
   };
 
-  for (const commandName of ROOT_QUICK_START_COMMANDS) {
+  for (const commandName of getRootQuickStartCommands(state)) {
     addEntry({
       name: commandName,
       summary: getShellCommandSummary(commandName),
@@ -1445,7 +1458,7 @@ const getSlashMenuEntries = (state: ShellState, input: string): readonly TtyMenu
   }
 
   return filterMenuEntries(
-    state.session ? getSessionMenuEntries(state.session) : getRootMenuEntries(),
+    state.session ? getSessionMenuEntries(state.session) : getRootMenuEntries(state),
     parsed.slashCommand
   );
 };
@@ -1635,7 +1648,7 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
       lines.push(`  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command(state.session.pending.title)}`);
     }
   } else {
-    for (const commandName of ROOT_QUICK_START_COMMANDS) {
+    for (const commandName of getRootQuickStartCommands(state)) {
       lines.push(
         `  ${SHELL_THEME.command(`/${commandName}`.padEnd(18))}${SHELL_THEME.muted(
           getShellCommandSummary(commandName)
@@ -1767,7 +1780,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
 
   const close = () => rl.close();
 
-  printRootQuickStart();
+  printRootQuickStart(state);
 
   if (options.initialSlashCommand) {
     const parsed = parseSlashInput(options.initialSlashCommand);

@@ -1279,6 +1279,8 @@ if (
   !shellTranscript.includes("interactive urdf shell") ||
   !shellTranscript.includes("type / for commands, /update for latest, ctrl+c to quit") ||
   !shellTranscript.includes("start") ||
+  !shellTranscript.includes("/xacro-to-urdf") ||
+  !shellTranscript.includes("/repair-mesh-refs") ||
   !shellTranscript.includes("/repo") ||
   !shellTranscript.includes("input") ||
   !shellTranscript.includes("[next] /repo or /local") ||
