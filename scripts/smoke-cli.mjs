@@ -1387,17 +1387,40 @@ if (
   throw new Error("ilu shell xacro workflow guidance smoke test failed");
 }
 
-const xacroSetupTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
-  cwd: fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-xacro-")),
+const xacroRetryCwd = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-xacro-"));
+const xacroRetrySourceDir = path.join(xacroRetryCwd, "xacro-source");
+const xacroRetryPythonVenv = path.join(xacroRetryCwd, "python-without-xacro");
+execFileSync("python3", ["-m", "venv", xacroRetryPythonVenv], {
+  cwd: xacroRetryCwd,
+  stdio: "ignore",
+});
+const xacroRetryPython = path.join(xacroRetryPythonVenv, "bin", "python3");
+fs.mkdirSync(xacroRetrySourceDir, { recursive: true });
+fs.writeFileSync(
+  path.join(xacroRetrySourceDir, "robot.urdf.xacro"),
+  [
+    "<robot xmlns:xacro=\"http://www.ros.org/wiki/xacro\" name=\"xacro_retry_robot\">",
+    "  <link name=\"base\"/>",
+    "</robot>",
+  ].join("\n"),
+  "utf8"
+);
+const xacroRetryTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: xacroRetryCwd,
   encoding: "utf8",
-  input: "!xacro\n/exit\n",
+  env: {
+    ...process.env,
+    I_LOVE_URDF_XACRO_PYTHON: xacroRetryPython,
+    I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON: "python3",
+  },
+  input: `${xacroRetrySourceDir}\n!xacro\n/exit\n`,
 });
 if (
-  !xacroSetupTranscript.includes("xacro") ||
-  (!xacroSetupTranscript.includes("xacro runtime ready") &&
-    !xacroSetupTranscript.includes("xacro runtime installed"))
+  !xacroRetryTranscript.includes("run !xacro") ||
+  !xacroRetryTranscript.includes("validation and health check passed") ||
+  !xacroRetryTranscript.includes("loaded robot.urdf.xacro")
 ) {
-  throw new Error("ilu shell xacro setup shortcut smoke test failed");
+  throw new Error("ilu shell xacro setup retry smoke test failed");
 }
 
 let invalidCommandOutput = "";

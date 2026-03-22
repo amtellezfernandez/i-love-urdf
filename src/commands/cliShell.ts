@@ -41,6 +41,7 @@ type ShellState = {
   session: ShellSession | null;
   rootTask: RootTaskName | null;
   candidatePicker: CandidatePickerState | null;
+  xacroRetry: ((pythonExecutable?: string) => AutoAutomationResult) | null;
   lastUrdfPath?: string;
 };
 
@@ -180,6 +181,7 @@ type ShellBangCommandName = "xacro";
 type ShellBangCommandResult = {
   panel: AutoPreviewPanel;
   notice: ShellFeedback;
+  clearSession?: boolean;
 };
 
 type SessionOptionPriority = "required" | "common" | "advanced";
@@ -590,6 +592,10 @@ const printOutputPanel = (panel: AutoPreviewPanel | ShellOutputPanel) => {
 
 const clearCandidatePicker = (state: ShellState) => {
   state.candidatePicker = null;
+};
+
+const clearXacroRetry = (state: ShellState) => {
+  state.xacroRetry = null;
 };
 
 const getCandidateDetails = (candidate: RepositoryPreviewCandidate): string[] => {
@@ -1565,7 +1571,7 @@ const summarizeXacroRuntimePanel = (
   };
 };
 
-const runXacroBangCommand = (): ShellBangCommandResult => {
+const runXacroBangCommand = (state: ShellState): ShellBangCommandResult => {
   const probeExecution = executeCliCommand("probe-xacro-runtime", new Map());
   const probePayload = parseExecutionJson<{
     available: boolean;
@@ -1575,6 +1581,16 @@ const runXacroBangCommand = (): ShellBangCommandResult => {
   }>(probeExecution);
 
   if (probePayload?.available) {
+    const pendingRetry = state.xacroRetry;
+    if (pendingRetry) {
+      clearXacroRetry(state);
+      const retryResult = pendingRetry(probePayload.pythonExecutable);
+      return {
+        panel: retryResult.panel,
+        notice: retryResult.notice ?? { kind: "success", text: "retried automatically" },
+        clearSession: retryResult.clearSession,
+      };
+    }
     return {
       panel: summarizeXacroRuntimePanel(probePayload, "xacro runtime ready"),
       notice: { kind: "success", text: "xacro runtime ready" },
@@ -1591,6 +1607,16 @@ const runXacroBangCommand = (): ShellBangCommandResult => {
   }>(setupExecution);
 
   if (setupPayload?.available) {
+    const pendingRetry = state.xacroRetry;
+    if (pendingRetry) {
+      clearXacroRetry(state);
+      const retryResult = pendingRetry(setupPayload.pythonExecutable);
+      return {
+        panel: retryResult.panel,
+        notice: retryResult.notice ?? { kind: "success", text: "retried automatically" },
+        clearSession: retryResult.clearSession,
+      };
+    }
     return {
       panel: summarizeXacroRuntimePanel(setupPayload, "xacro runtime installed"),
       notice: { kind: "success", text: "xacro runtime installed" },
@@ -1977,12 +2003,30 @@ const executeLoadSourceChecks = (
   const loadPayload = parseExecutionJson<LoadSourceResult & { outPath: string | null }>(loadExecution);
   if (!loadPayload || !loadPayload.outPath) {
     const panel = buildPreviewErrorPanel("error", loadExecution);
+    if (panel?.title === "xacro") {
+      const retryArgs = cloneArgsMap(execArgs);
+      const retryOptions = {
+        extractedArchivePath: options.extractedArchivePath,
+        requestedEntryPath: options.requestedEntryPath,
+      };
+      state.xacroRetry = (pythonExecutable) => {
+        const nextRetryArgs = cloneArgsMap(retryArgs);
+        if (pythonExecutable && !nextRetryArgs.has("python")) {
+          nextRetryArgs.set("python", pythonExecutable);
+        }
+        return executeLoadSourceChecks(state, nextRetryArgs, retryOptions);
+      };
+    } else {
+      clearXacroRetry(state);
+    }
     return {
       panel,
       notice: buildShellFailureNotice(panel, "could not load source"),
       clearSession: false,
     };
   }
+
+  clearXacroRetry(state);
 
   state.lastUrdfPath = loadPayload.outPath;
 
@@ -2014,6 +2058,7 @@ const executeLoadSourceChecks = (
       "error",
       !validationPayload ? validationExecution : healthExecution
     );
+    clearXacroRetry(state);
     return {
       panel,
       notice: buildShellFailureNotice(panel, "validation failed to run"),
@@ -2974,6 +3019,7 @@ const startRootTaskAction = (
 ) => {
   state.rootTask = task;
   clearCandidatePicker(state);
+  clearXacroRetry(state);
   state.session = createSession(action.command, state, action.sessionLabel, feedback);
   if (state.session) {
     openPendingForSession(state.session, action.openPending);
@@ -3019,6 +3065,7 @@ const handleRootSlashCommand = (
 
   if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
     clearCandidatePicker(state);
+    clearXacroRetry(state);
     state.rootTask = slashCommand as RootTaskName;
     printRootTaskOptions(state.rootTask);
     return;
@@ -3032,6 +3079,7 @@ const handleRootSlashCommand = (
 
   state.rootTask = null;
   clearCandidatePicker(state);
+  clearXacroRetry(state);
   const feedback: ShellFeedback[] = [];
   state.session = createSession(slashCommand as SupportedCommandName, state, slashCommand, feedback);
   flushFeedback(feedback);
@@ -3056,6 +3104,7 @@ const handleRootTaskSlashCommand = (
 
   if (slashCommand === "back") {
     clearCandidatePicker(state);
+    clearXacroRetry(state);
     state.rootTask = null;
     process.stdout.write(`${SHELL_THEME.muted("back to tasks")}\n`);
     return;
@@ -3090,6 +3139,7 @@ const handleRootTaskSlashCommand = (
 
   if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
     clearCandidatePicker(state);
+    clearXacroRetry(state);
     state.rootTask = slashCommand as RootTaskName;
     printRootTaskOptions(state.rootTask);
     return;
@@ -3118,6 +3168,7 @@ const handleRootTaskSlashCommand = (
   const feedback: ShellFeedback[] = [];
   state.rootTask = null;
   clearCandidatePicker(state);
+  clearXacroRetry(state);
   state.session = createSession(slashCommand as SupportedCommandName, state, slashCommand, feedback);
   flushFeedback(feedback);
   printSessionOptions(state.session);
@@ -3140,6 +3191,7 @@ const handleSessionSlashCommand = (
 
   if (slashCommand === "back") {
     clearCandidatePicker(state);
+    clearXacroRetry(state);
     state.session = null;
     process.stdout.write(
       `${SHELL_THEME.muted(state.rootTask ? `back to /${state.rootTask}` : "back to tasks")}\n`
@@ -3150,6 +3202,7 @@ const handleSessionSlashCommand = (
   if (slashCommand === "reset") {
     const feedback: ShellFeedback[] = [];
     clearCandidatePicker(state);
+    clearXacroRetry(state);
     state.session = createSession(session.command, state, session.label, feedback);
     flushFeedback(feedback);
     printSessionOptions(state.session);
@@ -3886,6 +3939,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     session: null,
     rootTask: null,
     candidatePicker: null,
+    xacroRetry: null,
   };
   let isClosed = false;
 
@@ -3926,9 +3980,13 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     if (bangCommand) {
       if (bangCommand === "xacro") {
         process.stdout.write(`${SHELL_THEME.muted("setting up xacro runtime...")}\n`);
-        const result = runXacroBangCommand();
+        const result = runXacroBangCommand(state);
         writeFeedback(result.notice);
         printOutputPanel(result.panel);
+        if (result.clearSession) {
+          state.session = null;
+          state.rootTask = null;
+        }
       }
     } else if (state.candidatePicker && !isSlashInput) {
       const selectedPath = resolveCandidateSelectionInput(state, line);
@@ -4052,6 +4110,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     session: null,
     rootTask: null,
     candidatePicker: null,
+    xacroRetry: null,
   };
   const view: TtyShellViewState = {
     input: "",
@@ -4078,6 +4137,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     const feedback: ShellFeedback[] = [];
     state.rootTask = null;
     clearCandidatePicker(state);
+    clearXacroRetry(state);
     state.session = createSession(command, state, command, feedback);
     setNoticeFromFeedback(view, feedback);
     view.output = null;
@@ -4088,6 +4148,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     state.rootTask = task;
     state.session = null;
     clearCandidatePicker(state);
+    clearXacroRetry(state);
     view.output = null;
     view.notice = { kind: "info", text: getRootTaskSummary(task) };
     pushTimelineEntry(view, `/${task}`);
@@ -4218,6 +4279,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     if (slashCommand === "back") {
       state.rootTask = null;
       clearCandidatePicker(state);
+      clearXacroRetry(state);
       view.notice = { kind: "info", text: "back to tasks" };
       view.output = null;
       pushTimelineEntry(view, "/back");
@@ -4311,6 +4373,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if (slashCommand === "back") {
       clearCandidatePicker(state);
+      clearXacroRetry(state);
       state.session = null;
       view.notice = { kind: "info", text: state.rootTask ? `back to /${state.rootTask}` : "back to tasks" };
       view.output = null;
@@ -4321,6 +4384,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     if (slashCommand === "reset") {
       const feedback: ShellFeedback[] = [];
       clearCandidatePicker(state);
+      clearXacroRetry(state);
       state.session = createSession(session.command, state, session.label, feedback);
       setNoticeFromFeedback(view, feedback);
       view.output = null;
@@ -4503,10 +4567,14 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
             title: "xacro",
             lines: ["setting up xacro runtime...", "this can take a moment..."],
           },
-          () => runXacroBangCommand()
+          () => runXacroBangCommand(state)
         );
         view.notice = result.notice;
         view.output = result.panel;
+        if (result.clearSession) {
+          state.session = null;
+          state.rootTask = null;
+        }
       }
       setInput("");
       return;
