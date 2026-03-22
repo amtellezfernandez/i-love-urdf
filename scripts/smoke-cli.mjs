@@ -1330,6 +1330,36 @@ if (
   throw new Error("ilu shell local-urdf entry smoke test failed");
 }
 
+const loadedFollowUpMenuTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedUrdfPath}\n/\n/exit\n`,
+});
+if (
+  !loadedFollowUpMenuTranscript.includes("ready from") ||
+  !loadedFollowUpMenuTranscript.includes(droppedUrdfPath) ||
+  !loadedFollowUpMenuTranscript.includes("/analyze") ||
+  !loadedFollowUpMenuTranscript.includes("/fix") ||
+  !loadedFollowUpMenuTranscript.includes("/convert") ||
+  !loadedFollowUpMenuTranscript.includes("/check") ||
+  loadedFollowUpMenuTranscript.includes("paste owner/repo or drop a local folder/file first")
+) {
+  throw new Error("ilu shell loaded follow-up menu smoke test failed");
+}
+
+const loadedAnalyzeTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${escapedDroppedUrdfPath}\n/analyze\n/exit\n`,
+});
+if (
+  !loadedAnalyzeTranscript.includes("ilu analyze --urdf") ||
+  !loadedAnalyzeTranscript.includes(droppedUrdfPath) ||
+  loadedAnalyzeTranscript.includes("ready /run")
+) {
+  throw new Error("ilu shell loaded analyze shortcut smoke test failed");
+}
+
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",

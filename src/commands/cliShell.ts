@@ -662,7 +662,19 @@ const printRootQuickStart = () => {
   process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
 };
 
-const printRootOptions = () => {
+const printRootOptions = (state: Pick<ShellState, "lastUrdfPath">) => {
+  if (state.lastUrdfPath) {
+    printSectionTitle("ready");
+    process.stdout.write(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(state.lastUrdfPath)}`)}\n`);
+
+    printSectionTitle("next");
+    printCommandList(getLoadedRootCommandList());
+
+    printSectionTitle("system");
+    printCommandList(SHELL_BUILTIN_COMMANDS);
+    return;
+  }
+
   printSectionTitle("start");
   process.stdout.write(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file first")}\n`);
 
@@ -1470,7 +1482,7 @@ const getFollowUpSuggestionMessage = (
   command: SupportedCommandName
 ): string | null => {
   if ((command === "load-source" || command === "xacro-to-urdf") && state.lastUrdfPath) {
-    return `[next] /check /inspect /fix\nusing ${state.lastUrdfPath}`;
+    return `[next] /analyze /fix /convert\nusing ${state.lastUrdfPath}`;
   }
 
   if (command === "inspect-repo") {
@@ -2173,7 +2185,7 @@ const summarizeAutoLoadChecks = (
     lines.push(`${finding.level} ${prefix}${finding.message}`);
   }
 
-  lines.push("next /fix /convert /inspect or paste another source");
+  lines.push("next /analyze /fix /convert or paste another source");
 
   return {
     title: "loaded",
@@ -2230,7 +2242,7 @@ const summarizeDirectUrdfChecks = (
     lines.push(`${finding.level} ${prefix}${finding.message}`);
   }
 
-  lines.push("next /fix /convert /inspect or paste another source");
+  lines.push("next /analyze /fix /convert or paste another source");
 
   return {
     title: "checks",
@@ -2514,6 +2526,23 @@ const executeSessionCommand = (
   };
 };
 
+const tryCreateLoadedRootQuickSession = (
+  state: ShellState,
+  command: SupportedCommandName
+): ShellSession | null => {
+  if (!state.lastUrdfPath || !AUTO_RUN_ROOT_URDF_COMMANDS.has(command)) {
+    return null;
+  }
+
+  const session = createSession(command, state, command);
+  return getRequirementStatus(session).ready ? session : null;
+};
+
+const getRootIdleMessage = (state: Pick<ShellState, "lastUrdfPath">): string =>
+  state.lastUrdfPath
+    ? "nothing is pending. use /analyze /fix /convert or paste another source"
+    : "nothing is pending. paste a source or use /check /fix /convert /inspect";
+
 const getShellExecutionFailurePanel = (
   execution: ReturnType<typeof executeSessionCommand>,
   command: SupportedCommandName
@@ -2629,8 +2658,9 @@ const listAvailableSlashCommands = (state: ShellState): string[] => {
 
   return [
     ...new Set([
-      ...ROOT_TASKS.map((entry) => entry.name),
+      ...(state.lastUrdfPath ? LOADED_ROOT_MENU_ENTRIES.map((entry) => entry.name) : ROOT_TASKS.map((entry) => entry.name)),
       ...SHELL_BUILTIN_COMMANDS.map((entry) => entry.name),
+      ...ROOT_TASKS.map((entry) => entry.name),
       ...CLI_HELP_SECTIONS.flatMap((section) => section.commands),
     ]),
   ];
@@ -2991,7 +3021,11 @@ const shouldTreatAsSlashInput = (rawValue: string, state: ShellState): boolean =
       return true;
     }
 
-    if (listRecognizedSlashCommands(state).includes(parsed.slashCommand)) {
+    const recognizedCommands = listRecognizedSlashCommands(state);
+    if (
+      recognizedCommands.includes(parsed.slashCommand) ||
+      recognizedCommands.some((command) => command.startsWith(parsed.slashCommand))
+    ) {
       return true;
     }
   }
@@ -3032,7 +3066,7 @@ const handleRootSlashCommand = (
   close: () => void
 ) => {
   if (!slashCommand || slashCommand === "help") {
-    printRootOptions();
+    printRootOptions(state);
     return;
   }
 
@@ -3057,9 +3091,7 @@ const handleRootSlashCommand = (
   }
 
   if (slashCommand === "run") {
-    process.stdout.write(
-      `${SHELL_THEME.muted("nothing is pending. paste a source or use /check /fix /convert /inspect")}\n`
-    );
+    process.stdout.write(`${SHELL_THEME.muted(getRootIdleMessage(state))}\n`);
     return;
   }
 
@@ -3077,11 +3109,20 @@ const handleRootSlashCommand = (
     return;
   }
 
+  const command = slashCommand as SupportedCommandName;
+  const quickSession = tryCreateLoadedRootQuickSession(state, command);
+  if (quickSession) {
+    clearCandidatePicker(state);
+    clearXacroRetry(state);
+    printSessionCommandExecution(executeSessionCommand(state, quickSession), quickSession.command);
+    return;
+  }
+
   state.rootTask = null;
   clearCandidatePicker(state);
   clearXacroRetry(state);
   const feedback: ShellFeedback[] = [];
-  state.session = createSession(slashCommand as SupportedCommandName, state, slashCommand, feedback);
+  state.session = createSession(command, state, slashCommand, feedback);
   flushFeedback(feedback);
   printSessionOptions(state.session);
 };
@@ -3422,6 +3463,49 @@ const SESSION_SYSTEM_MENU_ENTRIES = [
   { name: "quit", summary: "Exit the interactive shell.", kind: "system" as const },
 ];
 
+const LOADED_ROOT_MENU_ENTRIES = [
+  {
+    name: "analyze",
+    summary: "Inspect structure, morphology, and mesh references for the loaded URDF.",
+    kind: "flow" as const,
+  },
+  {
+    name: "fix",
+    summary: "Repair paths, refs, and axes for the current source.",
+    kind: "task" as const,
+  },
+  {
+    name: "convert",
+    summary: "Convert the loaded URDF into MJCF or USD.",
+    kind: "task" as const,
+  },
+  {
+    name: "check",
+    summary: "Run more checks or orientation tools on the loaded URDF.",
+    kind: "task" as const,
+  },
+  {
+    name: "inspect",
+    summary: "Preview another repo or URDF before deciding what to do next.",
+    kind: "task" as const,
+  },
+  {
+    name: "open",
+    summary: "Load another repo, folder, or file.",
+    kind: "task" as const,
+  },
+];
+
+const AUTO_RUN_ROOT_URDF_COMMANDS = new Set<SupportedCommandName>([
+  "analyze",
+  "validate",
+  "health-check",
+  "guess-orientation",
+]);
+
+const getLoadedRootCommandList = (): readonly Pick<TtyMenuEntry, "name" | "summary">[] =>
+  LOADED_ROOT_MENU_ENTRIES.map(({ name, summary }) => ({ name, summary }));
+
 const getRootTaskMenuEntries = (task: RootTaskName): readonly TtyMenuEntry[] => [
   ...getRootTaskActionDefinitions(task).map((entry) => ({
     name: entry.name,
@@ -3433,11 +3517,7 @@ const getRootTaskMenuEntries = (task: RootTaskName): readonly TtyMenuEntry[] => 
   ...ROOT_SYSTEM_MENU_ENTRIES.filter((entry) => entry.name !== "help"),
 ];
 
-const getRootMenuEntries = (state: Pick<ShellState, "rootTask">): readonly TtyMenuEntry[] => {
-  if (state.rootTask) {
-    return getRootTaskMenuEntries(state.rootTask);
-  }
-
+const getFullRootMenuEntries = (): readonly TtyMenuEntry[] => {
   const seen = new Set<string>();
   const entries: TtyMenuEntry[] = [];
   const addEntry = (entry: TtyMenuEntry) => {
@@ -3473,6 +3553,36 @@ const getRootMenuEntries = (state: Pick<ShellState, "rootTask">): readonly TtyMe
   return entries;
 };
 
+const getRootMenuEntries = (state: Pick<ShellState, "rootTask" | "lastUrdfPath">): readonly TtyMenuEntry[] => {
+  if (state.rootTask) {
+    return getRootTaskMenuEntries(state.rootTask);
+  }
+
+  if (state.lastUrdfPath) {
+    const seen = new Set<string>();
+    const entries: TtyMenuEntry[] = [];
+    const addEntry = (entry: TtyMenuEntry) => {
+      if (seen.has(entry.name)) {
+        return;
+      }
+      seen.add(entry.name);
+      entries.push(entry);
+    };
+
+    for (const entry of LOADED_ROOT_MENU_ENTRIES) {
+      addEntry(entry);
+    }
+
+    for (const entry of ROOT_SYSTEM_MENU_ENTRIES) {
+      addEntry(entry);
+    }
+
+    return entries;
+  }
+
+  return getFullRootMenuEntries();
+};
+
 const getSessionMenuEntries = (session: ShellSession): readonly TtyMenuEntry[] => {
   const entries: TtyMenuEntry[] = getSessionOptionEntries(session).map((entry) => ({
     name: entry.name,
@@ -3495,20 +3605,33 @@ const getSessionMenuEntries = (session: ShellSession): readonly TtyMenuEntry[] =
   return entries;
 };
 
-const filterMenuEntries = (entries: readonly TtyMenuEntry[], query: string): readonly TtyMenuEntry[] => {
+const matchMenuEntries = (
+  entries: readonly TtyMenuEntry[],
+  query: string
+): {
+  entries: readonly TtyMenuEntry[];
+  matchKind: "all" | "startsWith" | "includes" | "none";
+} => {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
-    return entries;
+    return { entries, matchKind: "all" };
   }
 
   const startsWithMatches = entries.filter((entry) => entry.name.startsWith(normalizedQuery));
   if (startsWithMatches.length > 0) {
-    return startsWithMatches;
+    return { entries: startsWithMatches, matchKind: "startsWith" };
   }
 
   const includesMatches = entries.filter((entry) => entry.name.includes(normalizedQuery));
-  return includesMatches.length > 0 ? includesMatches : entries;
+  if (includesMatches.length > 0) {
+    return { entries: includesMatches, matchKind: "includes" };
+  }
+
+  return { entries, matchKind: "none" };
 };
+
+const filterMenuEntries = (entries: readonly TtyMenuEntry[], query: string): readonly TtyMenuEntry[] =>
+  matchMenuEntries(entries, query).entries;
 
 const getSlashMenuEntries = (state: ShellState, input: string): readonly TtyMenuEntry[] => {
   if (!shouldTreatAsSlashInput(input.trimStart(), state)) {
@@ -3520,10 +3643,27 @@ const getSlashMenuEntries = (state: ShellState, input: string): readonly TtyMenu
     return [];
   }
 
-  return filterMenuEntries(
+  const primaryEntries = matchMenuEntries(
     state.session ? getSessionMenuEntries(state.session) : getRootMenuEntries(state),
     parsed.slashCommand
   );
+  if (
+    state.session ||
+    state.rootTask ||
+    !state.lastUrdfPath ||
+    !parsed.slashCommand ||
+    primaryEntries.matchKind === "startsWith" ||
+    primaryEntries.matchKind === "all"
+  ) {
+    return primaryEntries.entries;
+  }
+
+  const fallbackEntries = matchMenuEntries(getFullRootMenuEntries(), parsed.slashCommand);
+  if (fallbackEntries.matchKind === "startsWith") {
+    return fallbackEntries.entries;
+  }
+
+  return primaryEntries.matchKind !== "none" ? primaryEntries.entries : fallbackEntries.entries;
 };
 
 const pushTimelineEntry = (view: TtyShellViewState, text: string) => {
@@ -3683,7 +3823,7 @@ const getPromptPlaceholder = (state: ShellState): string => {
 
   if (!state.session) {
     if (state.lastUrdfPath) {
-      return "use /fix /convert /inspect /check or paste another source";
+      return "use /analyze /fix /convert or paste another source";
     }
     return "paste owner/repo, drop a folder or .urdf, or type /";
   }
@@ -3774,7 +3914,7 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   } else {
     if (state.lastUrdfPath) {
       lines.push(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(state.lastUrdfPath)}`)}`);
-      lines.push(`  ${SHELL_THEME.muted("use /fix /convert /inspect /check or paste another source")}`);
+      lines.push(`  ${SHELL_THEME.muted("use /analyze /fix /convert or paste another source")}`);
     } else {
       lines.push(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file")}`);
       lines.push(`  ${SHELL_THEME.muted("/ opens extra helpers when you need them")}`);
@@ -4234,7 +4374,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       clearCandidatePicker(state);
       view.notice = {
         kind: "info",
-        text: "nothing is pending. paste a source or use /check /fix /convert /inspect",
+        text: getRootIdleMessage(state),
       };
       pushTimelineEntry(view, "/run");
       return true;
@@ -4261,7 +4401,38 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return true;
     }
 
-    openSession(slashCommand as SupportedCommandName);
+    const command = slashCommand as SupportedCommandName;
+    const quickSession = tryCreateLoadedRootQuickSession(state, command);
+    if (quickSession) {
+      clearCandidatePicker(state);
+      clearXacroRetry(state);
+      const execution = runBusyOperation(getBusyStateForSession(quickSession), () =>
+        executeSessionCommand(state, quickSession)
+      );
+      const compactFailurePanel =
+        execution.status !== 0 ? getShellExecutionFailurePanel(execution, quickSession.command) : null;
+      if (compactFailurePanel) {
+        view.output = compactFailurePanel;
+        view.notice = buildShellFailureNotice(
+          compactFailurePanel,
+          `[${quickSession.command}] exited with status ${execution.status}`
+        );
+      } else {
+        view.output = createOutputPanel(
+          execution.status === 0 ? "result" : "error",
+          buildExecutionPanelText(execution, quickSession.command),
+          execution.status === 0 ? "success" : "error"
+        );
+        view.notice =
+          execution.status === 0
+            ? { kind: "success", text: "run complete" }
+            : { kind: "error", text: `[${quickSession.command}] exited with status ${execution.status}` };
+      }
+      pushTimelineEntry(view, `/${slashCommand}`);
+      return true;
+    }
+
+    openSession(command);
     return true;
   };
 
