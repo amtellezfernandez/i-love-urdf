@@ -1286,8 +1286,6 @@ const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
 if (
   !shellTranscript.includes("interactive urdf shell") ||
   !shellTranscript.includes("paste owner/repo or drop a local folder/file") ||
-  !shellTranscript.includes("start") ||
-  !shellTranscript.includes("owner/repo") ||
   !shellTranscript.includes("ANYbotics/anymal_b_simple_description") ||
   !shellTranscript.includes("[ready] /run") ||
   !shellTranscript.includes("flow open ANYbotics/anymal_b_simple_description") ||

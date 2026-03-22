@@ -88,11 +88,6 @@ type RootTaskDefinition = {
   summary: string;
 };
 
-type RootStartEntry = {
-  label: string;
-  summary: string;
-};
-
 type RootTaskActionDefinition = {
   name: string;
   summary: string;
@@ -211,33 +206,6 @@ const createTheme = (enabled: boolean): ShellTheme => ({
 
 const SHELL_THEME = createTheme(resolveColorSupport());
 const SHELL_BRAND = "i<3urdf";
-
-const ROOT_START_ENTRIES = [
-  {
-    label: "owner/repo",
-    summary: "Preview a GitHub repo immediately.",
-  },
-  {
-    label: "./robot.urdf",
-    summary: "Run a quick health preview on a local URDF.",
-  },
-  {
-    label: "./robot-description/",
-    summary: "Preview a local repo or folder.",
-  },
-  {
-    label: "/check",
-    summary: "More checks and orientation tools.",
-  },
-  {
-    label: "/convert",
-    summary: "Convert XACRO and URDF files.",
-  },
-  {
-    label: "/fix",
-    summary: "Repair paths, refs, and axes.",
-  },
-] as const satisfies readonly RootStartEntry[];
 
 const SHELL_BUILTIN_COMMANDS = [
   { name: "help", summary: "Show slash commands for the current context." },
@@ -535,15 +503,6 @@ const clamp = (value: number, minimum: number, maximum: number): number =>
 
 const formatInlineValue = (value: string): string => (value.length > 0 ? ` ${quoteForPreview(value)}` : "");
 
-const formatRootStartEntryLine = (entry: RootStartEntry): string =>
-  `  ${SHELL_THEME.command(entry.label.padEnd(24))}${SHELL_THEME.muted(entry.summary)}`;
-
-const printRootStartEntries = () => {
-  for (const entry of ROOT_START_ENTRIES) {
-    process.stdout.write(`${formatRootStartEntryLine(entry)}\n`);
-  }
-};
-
 const createOutputPanel = (
   title: string,
   content: string,
@@ -618,13 +577,11 @@ const printRootQuickStart = () => {
   process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)}\n`);
   process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
   process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
-  printSectionTitle("start");
-  printRootStartEntries();
 };
 
 const printRootOptions = () => {
   printSectionTitle("start");
-  printRootStartEntries();
+  process.stdout.write(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file first")}\n`);
 
   printSectionTitle("helpers");
   printCommandList(ROOT_TASKS);
@@ -2883,9 +2840,8 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
       );
     }
   } else {
-    for (const entry of ROOT_START_ENTRIES) {
-      lines.push(formatRootStartEntryLine(entry));
-    }
+    lines.push(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file")}`);
+    lines.push(`  ${SHELL_THEME.muted("/ opens extra helpers when you need them")}`);
   }
 
   if (view.output) {
