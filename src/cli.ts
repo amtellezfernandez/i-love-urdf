@@ -5,6 +5,7 @@ import { isAnalysisCommand, runAnalysisCommand } from "./commands/analysisComman
 import { createCliCommandHelpers, parseArgs } from "./commands/cliArgs";
 import type { CompletionShell } from "./commands/cliCompletion";
 import { isCompletionShell, renderCompletionHelp, renderCompletionScript } from "./commands/cliCompletion";
+import { renderBugReportHelp, runBugReportCommand } from "./commands/cliBugReport";
 import { renderDoctorHelp, runDoctorCommand } from "./commands/cliDoctor";
 import { printHelp } from "./commands/cliHelp";
 import { renderShellHelp, runInteractiveShell } from "./commands/cliShell";
@@ -52,7 +53,22 @@ const run = async () => {
       return;
     }
 
+    if (positionals[0] === "bug-report") {
+      console.log(renderBugReportHelp());
+      return;
+    }
+
     printHelp();
+    return;
+  }
+
+  if (rawCommand === "bug-report") {
+    if (args.has("help")) {
+      console.log(renderBugReportHelp());
+      return;
+    }
+
+    await runBugReportCommand(args);
     return;
   }
 

@@ -1,10 +1,10 @@
 {
-  "name": "i-love-urdf",
-  "version": "0.1.11",
+  "name": "@openai/ilu",
+  "version": "1.0.0",
   "type": "commonjs",
   "packageManager": "pnpm@10.32.1",
   "private": false,
-  "description": "Interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.",
+  "description": "OpenAI Robotics interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
@@ -19,12 +19,13 @@
     "check:performance": "node ./scripts/check-performance.mjs",
     "refresh:global": "node ./scripts/build-package.mjs && npm install -g .",
     "ilu": "node ./scripts/run-cli.mjs",
+    "release:notes": "node ./scripts/generate-release-notes.mjs",
     "release:verify": "node ./scripts/build-package.mjs && npm run check:install && npm run check:browser-entry && npm run test && npm run setup:xacro && npm run ilu -- probe-xacro-runtime && npm run smoke && npm run check:performance",
     "release:verify:full": "npm run release:verify && npm run test:real-repos",
     "setup:xacro": "node ./scripts/run-cli.mjs setup-xacro-runtime",
     "smoke": "node ./scripts/smoke-cli.mjs",
     "test": "node ./scripts/build-package.mjs && node --test",
-    "test:real-repos": "node ./scripts/build-package.mjs && node ./scripts/test-real-repos.mjs",
+    "test:real-repos": "node ./scripts/build-package.mjs && node ./scripts/verify-real-repos.mjs",
     "build:package": "node ./scripts/build-package.mjs"
   },
   "dependencies": {
@@ -36,12 +37,14 @@
   "keywords": [
     "urdf",
     "robotics",
+    "openai",
     "cli",
     "interactive",
     "xacro",
     "mjcf",
     "parser"
   ],
+  "author": "OpenAI Robotics",
   "repository": {
     "type": "git",
     "url": "https://github.com/amtellezfernandez/i-love-urdf.git"
@@ -51,6 +54,9 @@
   },
   "homepage": "https://github.com/amtellezfernandez/i-love-urdf",
   "license": "SEE LICENSE IN LICENSE",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": "^20.19.6 || ^22.0.0 || ^24.0.0",
     "pnpm": ">=10.32.1 <11"

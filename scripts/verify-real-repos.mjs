@@ -87,9 +87,13 @@ const requireValidUrdf = (urdfPath, label) => {
   assert(result.isValid === true, `${label} did not validate as URDF`);
 };
 
-const requireHealthCheckPass = (urdfPath, label) => {
-  runCli(["health-check", "--urdf", urdfPath, "--strict"]);
-  log(`${label}: health-check --strict passed`);
+const requireHealthCheckPass = (urdfPath, label, { strict = true } = {}) => {
+  const args = ["health-check", "--urdf", urdfPath];
+  if (strict) {
+    args.push("--strict");
+  }
+  runCli(args);
+  log(`${label}: health-check${strict ? " --strict" : ""} passed`);
 };
 
 const findCandidate = (summary, targetPath) =>
@@ -217,5 +221,125 @@ runCli([
   urUrdfPath,
 ]);
 requireValidUrdf(urUrdfPath, "Universal Robots ur_mocked");
+
+const turtlebotRepo = cloneRepo({
+  name: "turtlebot3",
+  url: "https://github.com/ROBOTIS-GIT/turtlebot3.git",
+  branch: "main",
+});
+const turtlebotInspection = runCliJson([
+  "inspect-repo",
+  "--local",
+  turtlebotRepo,
+  "--max-candidates",
+  "32",
+]);
+assert(
+  turtlebotInspection.primaryCandidatePath ===
+    "turtlebot3_description/urdf/turtlebot3_burger.urdf",
+  "TurtleBot3 primary candidate changed"
+);
+const turtlebotUrdfPath = path.join(tempRoot, "turtlebot3_burger.urdf");
+runCli(["load-source", "--path", turtlebotRepo, "--out", turtlebotUrdfPath]);
+requireValidUrdf(turtlebotUrdfPath, "TurtleBot3 burger");
+requireHealthCheckPass(turtlebotUrdfPath, "TurtleBot3 burger");
+
+const openManipulatorRepo = cloneRepo({
+  name: "open_manipulator",
+  url: "https://github.com/ROBOTIS-GIT/open_manipulator.git",
+});
+const openManipulatorEntryPath =
+  "open_manipulator_description/urdf/omx_f/omx_f.urdf.xacro";
+const openManipulatorInspection = runCliJson([
+  "inspect-repo",
+  "--local",
+  openManipulatorRepo,
+  "--max-candidates",
+  "64",
+]);
+const openManipulatorCandidate = findCandidate(
+  openManipulatorInspection,
+  openManipulatorEntryPath
+);
+assert(
+  openManipulatorCandidate,
+  `inspect-repo did not find ${openManipulatorEntryPath}`
+);
+const openManipulatorUrdfPath = path.join(tempRoot, "open_manipulator.urdf");
+runCli([
+  "load-source",
+  "--path",
+  openManipulatorRepo,
+  "--entry",
+  openManipulatorEntryPath,
+  "--python",
+  xacroRuntime.pythonExecutable,
+  "--out",
+  openManipulatorUrdfPath,
+]);
+requireValidUrdf(openManipulatorUrdfPath, "OpenManipulator omx_f");
+requireHealthCheckPass(openManipulatorUrdfPath, "OpenManipulator omx_f", {
+  strict: false,
+});
+
+const fanucRepo = cloneRepo({
+  name: "fanuc",
+  url: "https://github.com/ros-industrial/fanuc.git",
+  branch: "noetic-devel",
+});
+const fanucEntryPath = "fanuc_lrmate200i_support/urdf/lrmate200i.xacro";
+const fanucInspection = runCliJson([
+  "inspect-repo",
+  "--local",
+  fanucRepo,
+  "--max-candidates",
+  "64",
+]);
+const fanucCandidate = findCandidate(fanucInspection, fanucEntryPath);
+assert(fanucCandidate, `inspect-repo did not find ${fanucEntryPath}`);
+const fanucUrdfPath = path.join(tempRoot, "fanuc_lrmate200i.urdf");
+runCli([
+  "load-source",
+  "--path",
+  fanucRepo,
+  "--entry",
+  fanucEntryPath,
+  "--python",
+  xacroRuntime.pythonExecutable,
+  "--out",
+  fanucUrdfPath,
+]);
+requireValidUrdf(fanucUrdfPath, "Fanuc LR Mate 200i");
+requireHealthCheckPass(fanucUrdfPath, "Fanuc LR Mate 200i");
+
+const bitbotsRepo = cloneRepo({
+  name: "bitbots_meta",
+  url: "https://github.com/bit-bots/bitbots_meta.git",
+  branch: "main",
+});
+const bitbotsEntryPath = "src/bitbots_robot/wolfgang_description/urdf/robot.urdf";
+const bitbotsInspection = runCliJson([
+  "inspect-repo",
+  "--local",
+  bitbotsRepo,
+  "--max-candidates",
+  "64",
+]);
+assert(
+  bitbotsInspection.primaryCandidatePath === bitbotsEntryPath,
+  "Bit-Bots primary candidate changed"
+);
+const bitbotsUrdfPath = path.join(tempRoot, "wolfgang.urdf");
+runCli([
+  "load-source",
+  "--path",
+  bitbotsRepo,
+  "--entry",
+  bitbotsEntryPath,
+  "--out",
+  bitbotsUrdfPath,
+]);
+requireValidUrdf(bitbotsUrdfPath, "Bit-Bots Wolfgang");
+requireHealthCheckPass(bitbotsUrdfPath, "Bit-Bots Wolfgang", { strict: false });
 
 log("all real-repo checks passed");

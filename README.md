@@ -1,6 +1,6 @@
-# i-love-urdf
+# ILU
 
-Fast interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.
+OpenAI Robotics interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.
 
 ```sh
 npm install -g --install-links=true git+https://github.com/amtellezfernandez/i-love-urdf.git
@@ -14,6 +14,7 @@ Inside `ilu`:
 - if `ilu` finds an obvious safe repair, it offers one and `Enter` accepts it
 - if a newer release is available, `ilu` asks whether you want to update
 - run `ilu doctor` if the machine, auth, or xacro runtime looks wrong
+- run `ilu bug-report --out <dir>` if you need a support bundle with diagnostics and local repro inputs
 - if there are multiple entrypoints, use arrows and `Enter` to pick one
 - press `Tab` to complete the selected slash option
 - run `!xacro` if a source needs the XACRO runtime
@@ -29,7 +30,7 @@ ilu update
 Uninstall:
 
 ```sh
-npm uninstall -g i-love-urdf
+npm uninstall -g @openai/ilu
 ```
 
 Docs:

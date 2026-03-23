@@ -54,6 +54,7 @@ It does not guarantee:
 - XACRO expansion may need `!xacro`
 - very large repos or repos with external ROS package dependencies may still need manual narrowing
 - `ilu doctor` is the first support command when environment, auth, or runtime setup looks wrong
+- `ilu bug-report` is the first repro-bundle command when you need to hand support diagnostics plus a local input snapshot
 
 ## Design goal
 

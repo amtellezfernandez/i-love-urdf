@@ -14,6 +14,12 @@ If you need to attach the result to a bug report, use:
 ilu doctor --json
 ```
 
+If you need a support bundle with local repro inputs:
+
+```sh
+ilu bug-report --out <dir> [--urdf <path>] [--source <path>]
+```
+
 ## GitHub repo failed to load
 
 - public repos should work without setup
@@ -65,5 +71,5 @@ ilu update
 ## Uninstall
 
 ```sh
-npm uninstall -g i-love-urdf
+npm uninstall -g @openai/ilu
 ```

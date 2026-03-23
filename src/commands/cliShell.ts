@@ -8,9 +8,100 @@ import AdmZip = require("adm-zip");
 import { CLI_HELP_SECTIONS, type SupportedCommandName } from "./commandCatalog";
 import {
   COMMAND_COMPLETION_SPEC_BY_NAME,
-  type CompletionCommandSpec,
   type CompletionOptionSpec,
 } from "./cliCompletion";
+import type { CompletionCommandSpec } from "./cliCompletion";
+import {
+  ADVANCED_OPTION_KEYS,
+  CLI_ENTRY_PATH,
+  COMMAND_SUMMARY_OVERRIDES,
+  FLAT_ROOT_SESSION_LABELS,
+  HIDDEN_SHELL_COMMAND_NAMES,
+  MUTUALLY_EXCLUSIVE_OPTION_GROUPS,
+  ROOT_SHELL_COMMANDS,
+  ROOT_TASK_ACTIONS,
+  ROOT_TASKS,
+  ROOT_GUIDANCE,
+  ROOT_READY_COMMAND_NAMES,
+  ROOT_START_COMMAND_NAMES,
+  SESSION_SLASH_ALIASES,
+  SESSION_BUILTIN_COMMANDS,
+  SESSION_OPTION_ORDER,
+  SHELL_BUILTIN_COMMANDS,
+  SHELL_BRAND,
+  SHELL_THEME,
+  URDF_OUTPUT_COMMANDS,
+  XACRO_RUNTIME_NOTICE,
+  buildCommandPreview,
+  clamp,
+  clearCandidatePicker,
+  clearSuggestedAction,
+  clearXacroRetry,
+  dismissUpdatePrompt,
+  flushFeedback,
+  formatInlineValue,
+  formatShellPrompt,
+  formatUpdatePromptLine,
+  hasGitHubAuthConfigured,
+  hasPendingUpdatePrompt,
+  pushFeedback,
+  quoteForPreview,
+  stripAnsi,
+  writeFeedback,
+} from "./cliShellConfig";
+import {
+  appendSuggestedActionLines,
+  collectAttentionLines,
+  detectSuggestedAction,
+  formatAttentionDetail,
+  getCandidateDetails,
+  getHealthStatusLine,
+  getValidationStatusLine,
+} from "./cliShellRecommendations";
+import type {
+  AppliedFreeformInput,
+  AutoAutomationResult,
+  AutoPreviewPanel,
+  CandidatePickerState,
+  FreeformRootPlan,
+  FreeformSessionTarget,
+  Keypress,
+  LocalPathDrop,
+  PendingValuePrompt,
+  RepositoryPreviewCandidate,
+  RepositoryPreviewPayload,
+  RootShellCommandDefinition,
+  RootTaskActionDefinition,
+  RootTaskName,
+  SessionOptionEntry,
+  SessionOptionPriority,
+  ShellBangCommandName,
+  ShellBangCommandResult,
+  ShellContextRow,
+  ShellFeedback,
+  ShellFeedbackKind,
+  ShellOptions,
+  ShellOutputPanel,
+  ShellSession,
+  ShellState,
+  ShellTimelineEntry,
+  SuggestedActionPrompt,
+  TtyMenuEntry,
+  TtyShellViewState,
+} from "./cliShellTypes";
+import {
+  createOutputPanel,
+  getPanelLineIcon,
+  printCandidatePicker,
+  printCommandList,
+  printContextRows,
+  printOutputPanel,
+  printRootQuickStart,
+  printSectionTitle,
+  renderContextRow,
+  renderContextValue,
+  renderPanelLine,
+} from "./cliShellUi";
 import {
   expandHomePath,
   isWindowsAbsolutePath,
@@ -22,919 +113,6 @@ import { readGitHubCliToken } from "../node/githubCliAuth";
 import { fixMeshPaths } from "../mesh/fixMeshPaths";
 import { parseGitHubRepositoryReference } from "../repository/githubRepositoryInspection";
 import type { LoadSourceResult } from "../sources/loadSourceNode";
-
-type ShellOptions = {
-  initialSlashCommand?: string;
-};
-
-type PendingValuePrompt = {
-  key: string;
-  slashName: string;
-  title: string;
-  examples: readonly string[];
-  notes: readonly string[];
-  expectsPath: boolean;
-};
-
-type ShellSession = {
-  command: SupportedCommandName;
-  label: string;
-  spec: CompletionCommandSpec;
-  args: Map<string, string | boolean>;
-  inheritedKeys: Set<string>;
-  pending: PendingValuePrompt | null;
-};
-
-type LoadedSourceContext = {
-  source: "local-file" | "local-repo" | "github";
-  urdfPath: string;
-  localPath?: string;
-  githubRef?: string;
-  repositoryUrdfPath?: string;
-};
-
-type SuggestedActionPrompt = {
-  kind: "repair-mesh-refs" | "fix-mesh-paths";
-  summary: string;
-  recommendedLine: string;
-  prompt: string;
-  acceptLabel: string;
-};
-
-type ShellState = {
-  session: ShellSession | null;
-  rootTask: RootTaskName | null;
-  candidatePicker: CandidatePickerState | null;
-  xacroRetry: ((pythonExecutable?: string) => AutoAutomationResult) | null;
-  loadedSource: LoadedSourceContext | null;
-  updatePrompt: UpdateAvailability | null;
-  suggestedAction: SuggestedActionPrompt | null;
-  lastUrdfPath?: string;
-};
-
-type ShellFeedbackKind = "info" | "success" | "warning" | "error";
-
-type ShellFeedback = {
-  kind: ShellFeedbackKind;
-  text: string;
-};
-
-type ShellTimelineEntry = {
-  role: "user" | "assistant";
-  lines: readonly string[];
-  kind: Exclude<ShellFeedbackKind, "warning"> | "warning";
-};
-
-type ShellContextRowTone = "command" | "muted" | "accent";
-
-type ShellContextRow = {
-  label: string;
-  value: string;
-  tone?: ShellContextRowTone;
-};
-
-type ShellOutputPanel = {
-  title: string;
-  lines: readonly string[];
-  kind: Exclude<ShellFeedbackKind, "warning">;
-} | null;
-
-type TtyMenuEntryKind = "task" | "flow" | "option" | "action" | "system";
-
-type TtyMenuEntry = {
-  name: string;
-  summary: string;
-  kind: TtyMenuEntryKind;
-};
-
-type TtyShellViewState = {
-  input: string;
-  timeline: ShellTimelineEntry[];
-  menuIndex: number;
-  notice: ShellFeedback | null;
-  output: ShellOutputPanel;
-  busy:
-    | {
-        title: string;
-        lines: readonly string[];
-      }
-    | null;
-};
-
-type Keypress = {
-  ctrl?: boolean;
-  meta?: boolean;
-  shift?: boolean;
-  name?: string;
-  sequence?: string;
-};
-
-type RootTaskName = "open" | "inspect" | "check" | "convert" | "fix";
-
-type RootTaskDefinition = {
-  name: RootTaskName;
-  summary: string;
-};
-
-type RootTaskActionDefinition = {
-  name: string;
-  summary: string;
-  command: SupportedCommandName;
-  sessionLabel: string;
-  openPending?: {
-    key: string;
-    slashName: string;
-    onlyIfMissing?: boolean;
-  };
-};
-
-type RootShellCommandDefinition = {
-  name: string;
-  summary: string;
-  command: SupportedCommandName;
-  sessionLabel: string;
-  openPending?: RootTaskActionDefinition["openPending"];
-};
-
-type LocalPathDrop = {
-  inputPath: string;
-  absolutePath: string;
-  isDirectory: boolean;
-  isUrdfFile: boolean;
-  isXacroFile: boolean;
-  isZipFile: boolean;
-};
-
-type FreeformSessionTarget = {
-  key: string;
-  slashName: string;
-  value: string;
-};
-
-type FreeformRootPlan = {
-  rootTask: RootTaskName;
-  command: SupportedCommandName;
-  label: string;
-  key: string;
-  slashName: string;
-  value: string;
-};
-
-type AppliedFreeformInput = {
-  session: ShellSession;
-  key: string;
-};
-
-type AutoPreviewPanel = {
-  title: string;
-  lines: readonly string[];
-  kind: Exclude<ShellFeedbackKind, "warning">;
-} | null;
-
-type AutoAutomationResult = {
-  panel: AutoPreviewPanel;
-  notice: ShellFeedback | null;
-  clearSession: boolean;
-};
-
-type RepositoryPreviewCandidate = {
-  path: string;
-  inspectionMode?: "urdf" | "xacro-source";
-  unresolvedMeshReferenceCount?: number;
-  xacroArgs?: Array<{ name: string }>;
-};
-
-type RepositoryPreviewPayload = {
-  owner?: string;
-  repo?: string;
-  repositoryUrl?: string;
-  inspectedPath?: string;
-  candidateCount: number;
-  primaryCandidatePath: string | null;
-  candidates: RepositoryPreviewCandidate[];
-};
-
-type CandidatePickerState = {
-  candidates: RepositoryPreviewCandidate[];
-  selectedIndex: number;
-  loadArgs: Map<string, string | boolean>;
-  extractedArchivePath?: string;
-};
-
-type ShellBangCommandName = "xacro";
-
-type ShellBangCommandResult = {
-  panel: AutoPreviewPanel;
-  notice: ShellFeedback;
-  clearSession?: boolean;
-};
-
-type SessionOptionPriority = "required" | "common" | "advanced";
-
-type SessionOptionEntry = {
-  key: string;
-  name: string;
-  summary: string;
-  priority: SessionOptionPriority;
-};
-
-type ShellTheme = {
-  enabled: boolean;
-  brand: (text: string) => string;
-  command: (text: string) => string;
-  icon: (text: string) => string;
-  muted: (text: string) => string;
-  section: (text: string) => string;
-  success: (text: string) => string;
-  accent: (text: string) => string;
-  warning: (text: string) => string;
-  error: (text: string) => string;
-  selected: (text: string) => string;
-};
-
-const ANSI = {
-  reset: "\u001b[0m",
-  bold: "\u001b[1m",
-  dim: "\u001b[2m",
-  reverse: "\u001b[7m",
-  gray: "\u001b[90m",
-  magenta: "\u001b[35m",
-  brightMagenta: "\u001b[95m",
-  green: "\u001b[32m",
-  yellow: "\u001b[33m",
-  red: "\u001b[31m",
-} as const;
-
-const paint = (enabled: boolean, text: string, ...codes: readonly string[]): string => {
-  if (!enabled || text.length === 0) {
-    return text;
-  }
-
-  return `${codes.join("")}${text}${ANSI.reset}`;
-};
-
-const resolveColorSupport = (): boolean => {
-  const forceColor = process.env.FORCE_COLOR;
-  if (forceColor !== undefined) {
-    return forceColor !== "0";
-  }
-  if ("NO_COLOR" in process.env) {
-    return false;
-  }
-  if (process.env.TERM === "dumb") {
-    return false;
-  }
-  return Boolean(process.stdout?.isTTY);
-};
-
-const createTheme = (enabled: boolean): ShellTheme => ({
-  enabled,
-  brand: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
-  command: (text) => paint(enabled, text, ANSI.bold, ANSI.magenta),
-  icon: (text) => paint(enabled, text, ANSI.gray),
-  muted: (text) => paint(enabled, text, ANSI.dim),
-  section: (text) => paint(enabled, text, ANSI.dim, ANSI.magenta),
-  success: (text) => paint(enabled, text, ANSI.bold, ANSI.green),
-  accent: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
-  warning: (text) => paint(enabled, text, ANSI.bold, ANSI.yellow),
-  error: (text) => paint(enabled, text, ANSI.bold, ANSI.red),
-  selected: (text) => paint(enabled, text, ANSI.bold, ANSI.reverse, ANSI.brightMagenta),
-});
-
-const SHELL_THEME = createTheme(resolveColorSupport());
-const SHELL_BRAND = "i<3urdf";
-const XACRO_RUNTIME_NOTICE = "xacro runtime not set. run !xacro, then retry";
-
-const SHELL_BUILTIN_COMMANDS = [
-  { name: "help", summary: "Show slash commands for the current context." },
-  { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
-  { name: "update", summary: "Install the latest ilu release." },
-  { name: "clear", summary: "Clear the terminal." },
-  { name: "last", summary: "Show the last remembered URDF path." },
-];
-
-const HIDDEN_SHELL_COMMAND_NAMES = ["exit", "quit"] as const;
-
-const SESSION_BUILTIN_COMMANDS = [
-  { name: "show", summary: "Show the current command, values, and next step." },
-  { name: "run", summary: "Run the current command." },
-  { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
-  { name: "update", summary: "Install the latest ilu release." },
-  { name: "reset", summary: "Clear the current command state." },
-  { name: "back", summary: "Return to the root slash-command menu." },
-];
-
-const ROOT_TASKS = [
-  { name: "open", summary: "Open a repo, folder, or file as a working URDF." },
-  { name: "inspect", summary: "Preview a repo or URDF before deciding what to do next." },
-  { name: "check", summary: "Run health, validation, and orientation checks." },
-  { name: "convert", summary: "Convert XACRO and URDF files into other formats." },
-  { name: "fix", summary: "Repair mesh paths, mesh refs, and basic URDF issues." },
-] as const satisfies readonly RootTaskDefinition[];
-
-const ROOT_SHELL_COMMANDS = [
-  {
-    name: "open",
-    summary: "Load a repo, folder, or file as the current source.",
-    command: "load-source",
-    sessionLabel: "open",
-  },
-  {
-    name: "inspect",
-    summary: "Preview a repo or folder and suggest the best entrypoint.",
-    command: "inspect-repo",
-    sessionLabel: "inspect",
-  },
-  {
-    name: "analyze",
-    summary: "Inspect structure, morphology, and mesh references.",
-    command: "analyze",
-    sessionLabel: "analyze",
-    openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-  },
-  {
-    name: "health",
-    summary: "Check structure, axes, and orientation risks.",
-    command: "health-check",
-    sessionLabel: "health",
-    openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-  },
-  {
-    name: "validate",
-    summary: "Check whether the current URDF is structurally valid.",
-    command: "validate",
-    sessionLabel: "validate",
-    openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-  },
-  {
-    name: "orientation",
-    summary: "Guess the likely up-axis and forward axis.",
-    command: "guess-orientation",
-    sessionLabel: "orientation",
-    openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-  },
-] as const satisfies readonly RootShellCommandDefinition[];
-
-const ROOT_START_COMMAND_NAMES = ["open", "inspect", "analyze", "health", "validate", "orientation"] as const;
-const ROOT_READY_COMMAND_NAMES = ["analyze", "health", "validate", "orientation", "open", "inspect"] as const;
-const FLAT_ROOT_SESSION_LABELS = new Set<string>(ROOT_SHELL_COMMANDS.map((entry) => entry.sessionLabel));
-
-const ROOT_TASK_ACTIONS = {
-  open: [
-    {
-      name: "repo",
-      summary: "Open from GitHub and assemble a working URDF.",
-      command: "load-source",
-      sessionLabel: "open",
-      openPending: { key: "github", slashName: "repo" },
-    },
-    {
-      name: "local",
-      summary: "Open from a local repo or directory.",
-      command: "load-source",
-      sessionLabel: "open",
-      openPending: { key: "path", slashName: "local" },
-    },
-    {
-      name: "file",
-      summary: "Open a local URDF file directly.",
-      command: "load-source",
-      sessionLabel: "open",
-      openPending: { key: "path", slashName: "file" },
-    },
-  ],
-  inspect: [
-    {
-      name: "repo",
-      summary: "Preview a GitHub repo and suggest the right entrypoint.",
-      command: "inspect-repo",
-      sessionLabel: "inspect",
-      openPending: { key: "github", slashName: "repo" },
-    },
-    {
-      name: "local",
-      summary: "Preview a local repo and suggest the right entrypoint.",
-      command: "inspect-repo",
-      sessionLabel: "inspect",
-      openPending: { key: "local", slashName: "local" },
-    },
-    {
-      name: "file",
-      summary: "Inspect a prepared URDF file.",
-      command: "analyze",
-      sessionLabel: "inspect",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-  ],
-  check: [
-    {
-      name: "health",
-      summary: "Run the main URDF health check.",
-      command: "health-check",
-      sessionLabel: "check",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-    {
-      name: "validate",
-      summary: "Validate URDF structure and required tags.",
-      command: "validate",
-      sessionLabel: "check",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-    {
-      name: "orientation",
-      summary: "Guess the likely up-axis and forward axis.",
-      command: "guess-orientation",
-      sessionLabel: "check",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-  ],
-  convert: [
-    {
-      name: "xacro",
-      summary: "Expand a XACRO file, repo, or GitHub source into URDF.",
-      command: "xacro-to-urdf",
-      sessionLabel: "convert",
-      openPending: { key: "xacro", slashName: "xacro" },
-    },
-    {
-      name: "mjcf",
-      summary: "Convert a URDF file into MJCF.",
-      command: "urdf-to-mjcf",
-      sessionLabel: "convert",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-    {
-      name: "usd",
-      summary: "Convert a URDF file into initial USD output.",
-      command: "urdf-to-usd",
-      sessionLabel: "convert",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-  ],
-  fix: [
-    {
-      name: "mesh-paths",
-      summary: "Repair package:// and relative mesh paths in a URDF file.",
-      command: "fix-mesh-paths",
-      sessionLabel: "fix",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-    {
-      name: "mesh-refs",
-      summary: "Repair missing mesh references in a repo-based source.",
-      command: "repair-mesh-refs",
-      sessionLabel: "fix",
-    },
-    {
-      name: "axes",
-      summary: "Normalize non-unit or awkward joint axes in a URDF file.",
-      command: "normalize-axes",
-      sessionLabel: "fix",
-      openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-  ],
-} as const satisfies Record<RootTaskName, readonly RootTaskActionDefinition[]>;
-
-const COMMAND_SUMMARY_OVERRIDES: Partial<Record<SupportedCommandName, string>> = {
-  "load-source": "Load from GitHub, a local repo, or a local file.",
-  "inspect-repo": "Preview a local or GitHub repo and suggest the right URDF or XACRO entrypoint.",
-  "xacro-to-urdf": "Expand a XACRO file, repo, or GitHub source into URDF.",
-  "repair-mesh-refs": "Repair broken mesh references in a local or GitHub repo.",
-  "health-check": "Check structure, axes, and orientation risks.",
-  analyze: "Inspect structure, morphology, and mesh references.",
-  validate: "Check whether the current URDF is structurally valid.",
-  "guess-orientation": "Guess the likely up-axis and forward axis.",
-};
-
-const URDF_OUTPUT_COMMANDS = new Set<SupportedCommandName>([
-  "load-source",
-  "xacro-to-urdf",
-  "repair-mesh-refs",
-  "canonical-order",
-  "pretty-print",
-  "normalize-axes",
-  "snap-axes",
-  "fix-mesh-paths",
-  "mesh-to-assets",
-  "set-joint-axis",
-  "set-joint-type",
-  "set-joint-limits",
-  "set-joint-velocity",
-  "rotate-90",
-  "apply-orientation",
-  "remove-joints",
-  "reassign-joint",
-  "set-material-color",
-  "rename-joint",
-  "rename-link",
-  "canonicalize-joint-frame",
-  "normalize-robot",
-]);
-
-const ADVANCED_OPTION_KEYS = new Set([
-  "args",
-  "concurrency",
-  "limits",
-  "max-candidates",
-  "max-faces",
-  "meshes",
-  "python",
-  "ref",
-  "root",
-  "subdir",
-  "token",
-  "venv",
-  "wheel",
-]);
-
-const SESSION_OPTION_ORDER = {
-  "load-source": ["github", "path", "entry", "out", "ref", "subdir", "args", "python", "wheel", "token", "root"],
-  "inspect-repo": ["github", "local", "path", "ref", "max-candidates", "token", "out"],
-  "repair-mesh-refs": ["github", "local", "urdf", "path", "ref", "token", "out"],
-  "xacro-to-urdf": ["xacro", "github", "local", "entry", "out", "args", "ref", "path", "python", "wheel", "token", "root"],
-  "health-check": ["urdf", "strict"],
-  validate: ["urdf"],
-  analyze: ["urdf"],
-  diff: ["left", "right"],
-} as const satisfies Partial<Record<SupportedCommandName, readonly string[]>>;
-
-const MUTUALLY_EXCLUSIVE_OPTION_GROUPS: Partial<Record<SupportedCommandName, readonly (readonly string[])[]>> = {
-  "load-source": [["path", "github"]],
-  "inspect-repo": [["local", "github"]],
-  "repair-mesh-refs": [["local", "github"]],
-  "xacro-to-urdf": [["local", "github"]],
-  "urdf-to-usd": [["urdf", "path"]],
-};
-
-const SESSION_SLASH_ALIASES: Partial<Record<SupportedCommandName, Readonly<Record<string, string>>>> = {
-  "load-source": {
-    repo: "github",
-    local: "path",
-  },
-  "inspect-repo": {
-    repo: "github",
-    local: "local",
-    subdir: "path",
-  },
-  "repair-mesh-refs": {
-    repo: "github",
-    local: "local",
-    subdir: "path",
-  },
-  "xacro-to-urdf": {
-    repo: "github",
-    local: "local",
-  },
-};
-
-const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
-const ROOT_GUIDANCE =
-  "paste owner/repo or drop a local folder/file. type / for actions, !xacro for xacro setup, /update for latest, ctrl+c to quit";
-let cachedGitHubAuthState: boolean | undefined;
-
-const formatShellPrompt = (_state: ShellState): string => "/> ";
-const hasPendingUpdatePrompt = (state: ShellState): boolean => state.updatePrompt !== null;
-const dismissUpdatePrompt = (state: ShellState) => {
-  state.updatePrompt = null;
-};
-const formatUpdatePromptLine = (update: UpdateAvailability): string =>
-  `update available ${update.currentVersion} -> ${update.latestVersion}  Enter updates now  Esc skips`;
-
-const quoteForPreview = (value: string): string => (/\s/.test(value) ? JSON.stringify(value) : value);
-
-const buildCommandPreview = (command: string, args: Map<string, string | boolean>): string => {
-  const serializedArgs = Array.from(args.entries()).flatMap(([key, value]) => {
-    if (value === false || value === undefined || value === null) {
-      return [];
-    }
-
-    if (value === true) {
-      return [`--${key}`];
-    }
-
-    return [`--${key}`, quoteForPreview(String(value))];
-  });
-
-  return `ilu ${[command, ...serializedArgs].join(" ")}`.trim();
-};
-
-const pushFeedback = (
-  feedback: ShellFeedback[] | undefined,
-  kind: ShellFeedbackKind,
-  text: string
-) => {
-  feedback?.push({ kind, text });
-};
-
-const writeFeedback = (entry: ShellFeedback) => {
-  const stream = entry.kind === "error" ? process.stderr : process.stdout;
-  const render =
-    entry.kind === "success"
-      ? SHELL_THEME.success
-      : entry.kind === "warning"
-        ? SHELL_THEME.warning
-        : entry.kind === "error"
-          ? SHELL_THEME.error
-          : SHELL_THEME.muted;
-  stream.write(`${render(entry.text)}\n`);
-};
-
-const flushFeedback = (feedback: readonly ShellFeedback[]) => {
-  for (const entry of feedback) {
-    writeFeedback(entry);
-  }
-};
-
-const stripAnsi = (value: string): string => value.replace(/\u001b\[[0-9;]*m/g, "");
-
-const clamp = (value: number, minimum: number, maximum: number): number =>
-  Math.min(Math.max(value, minimum), maximum);
-
-const formatInlineValue = (value: string): string => (value.length > 0 ? ` ${quoteForPreview(value)}` : "");
-
-const createOutputPanel = (
-  title: string,
-  content: string,
-  kind: Exclude<ShellFeedbackKind, "warning"> = "info"
-): ShellOutputPanel => {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line, index, entries) => line.length > 0 || index < entries.length - 1);
-  if (lines.length === 0) {
-    return null;
-  }
-
-  return {
-    title,
-    lines: lines.slice(-10),
-    kind,
-  };
-};
-
-const getPanelLineIcon = (line: string): string => {
-  const normalized = stripAnsi(line).trim().toLowerCase();
-  if (
-    normalized === "looks ready" ||
-    normalized === "no obvious problems found" ||
-    normalized.startsWith("repaired ") ||
-    normalized === "working copy ready" ||
-    normalized.startsWith("validation passed") ||
-    normalized.startsWith("health check passed")
-  ) {
-    return "✓";
-  }
-
-  if (
-    normalized.startsWith("best next step") ||
-    normalized.startsWith("recommended:") ||
-    normalized.startsWith("then /") ||
-    normalized.startsWith("next /")
-  ) {
-    return "→";
-  }
-
-  if (
-    normalized.startsWith("validation found") ||
-    normalized.startsWith("health check found") ||
-    normalized.startsWith("error ")
-  ) {
-    return "!";
-  }
-
-  if (normalized.startsWith("warning ")) {
-    return "!";
-  }
-
-  return "•";
-};
-
-const renderPanelLine = (
-  line: string,
-  kind: Exclude<ShellFeedbackKind, "warning">
-): string => {
-  const renderText = kind === "error" ? SHELL_THEME.error : SHELL_THEME.muted;
-  return `${SHELL_THEME.icon(getPanelLineIcon(line))} ${renderText(line)}`;
-};
-
-const printOutputPanel = (panel: AutoPreviewPanel | ShellOutputPanel) => {
-  if (!panel) {
-    return;
-  }
-
-  printSectionTitle(panel.title);
-  for (const line of panel.lines) {
-    process.stdout.write(`  ${renderPanelLine(line, panel.kind)}\n`);
-  }
-};
-
-const clearCandidatePicker = (state: ShellState) => {
-  state.candidatePicker = null;
-};
-
-const clearXacroRetry = (state: ShellState) => {
-  state.xacroRetry = null;
-};
-
-const clearSuggestedAction = (state: ShellState) => {
-  state.suggestedAction = null;
-};
-
-const buildRepairMeshRefsSuggestion = (): SuggestedActionPrompt => ({
-  kind: "repair-mesh-refs",
-  summary: "mesh references need attention",
-  recommendedLine: "recommended: repair mesh references",
-  prompt: "repair mesh references now?  Enter yes  Esc not now",
-  acceptLabel: "repair mesh references",
-});
-
-const buildFixMeshPathsSuggestion = (): SuggestedActionPrompt => ({
-  kind: "fix-mesh-paths",
-  summary: "mesh paths need attention",
-  recommendedLine: "recommended: repair mesh paths",
-  prompt: "repair mesh paths now?  Enter yes  Esc not now",
-  acceptLabel: "repair mesh paths",
-});
-
-const formatAttentionDetail = (message: string, context?: string): string =>
-  context ? `${context}: ${message}` : message;
-
-const appendSuggestedActionLines = (
-  lines: string[],
-  suggestedAction: SuggestedActionPrompt | null,
-  fallbackLine: string
-) => {
-  if (!suggestedAction) {
-    lines.push(fallbackLine);
-    return;
-  }
-
-  if (!lines.includes(suggestedAction.summary)) {
-    lines.push(suggestedAction.summary);
-  }
-  lines.push(suggestedAction.recommendedLine);
-};
-
-const getValidationStatusLine = (payload: {
-  isValid: boolean;
-  issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
-}): string => (payload.isValid && payload.issues.length === 0 ? "validation passed" : "validation needs attention");
-
-const getHealthStatusLine = (payload: {
-  ok: boolean;
-  summary: { errors: number; warnings: number; infos: number };
-}): string =>
-  payload.ok && payload.summary.errors === 0 && payload.summary.warnings === 0
-    ? "health check passed"
-    : "health check needs attention";
-
-const collectAttentionLines = (
-  validationIssues: Array<{ level: "error" | "warning"; message: string; context?: string }> = [],
-  healthFindings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }> = [],
-  limit = 2
-): string[] => {
-  const lines: string[] = [];
-  for (const issue of validationIssues) {
-    const line = formatAttentionDetail(issue.message, issue.context);
-    if (!lines.includes(line)) {
-      lines.push(line);
-    }
-    if (lines.length >= limit) {
-      return lines;
-    }
-  }
-
-  for (const finding of healthFindings) {
-    if (finding.level === "info") {
-      continue;
-    }
-    const line = formatAttentionDetail(finding.message, finding.context);
-    if (!lines.includes(line)) {
-      lines.push(line);
-    }
-    if (lines.length >= limit) {
-      return lines;
-    }
-  }
-
-  return lines;
-};
-
-const detectSuggestedAction = (
-  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
-  options: {
-    selectedCandidate?: RepositoryPreviewCandidate;
-    urdfPath?: string;
-  } = {}
-): SuggestedActionPrompt | null => {
-  const source = state.loadedSource;
-  if (
-    (options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 &&
-    source &&
-    (source.source === "local-repo" || source.source === "github") &&
-    source.repositoryUrdfPath
-  ) {
-    return buildRepairMeshRefsSuggestion();
-  }
-
-  const urdfPath = options.urdfPath ?? source?.urdfPath ?? state.lastUrdfPath;
-  if (!urdfPath || source?.source !== "local-file") {
-    return null;
-  }
-
-  try {
-    const currentUrdf = fs.readFileSync(urdfPath, "utf8");
-    const fixed = fixMeshPaths(currentUrdf);
-    return fixed.corrections.length > 0 ? buildFixMeshPathsSuggestion() : null;
-  } catch {
-    return null;
-  }
-};
-
-const getCandidateDetails = (candidate: RepositoryPreviewCandidate): string[] => {
-  const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
-  if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
-    details.push("mesh refs need attention");
-  }
-  if ((candidate.xacroArgs?.length ?? 0) > 0) {
-    details.push("needs xacro args");
-  }
-  return details;
-};
-
-const printCandidatePicker = (picker: CandidatePickerState) => {
-  printSectionTitle("choose");
-  process.stdout.write(`  ${SHELL_THEME.muted("type a number, press Enter for the highlighted match, or paste a repo entry path")}\n`);
-  for (const [index, candidate] of picker.candidates.slice(0, 9).entries()) {
-    const prefix = index === picker.selectedIndex ? SHELL_THEME.accent(">") : SHELL_THEME.muted(`${index + 1}.`);
-    const details = getCandidateDetails(candidate);
-    process.stdout.write(
-      `  ${prefix} ${SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${SHELL_THEME.muted(details.join("  "))}` : ""}\n`
-    );
-  }
-  if (picker.candidates.length > 9) {
-    process.stdout.write(`  ${SHELL_THEME.muted(`+${picker.candidates.length - 9} more`) }\n`);
-  }
-};
-
-const hasGitHubAuthConfigured = (): boolean => {
-  if (cachedGitHubAuthState !== undefined) {
-    return cachedGitHubAuthState;
-  }
-
-  const envToken = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
-  cachedGitHubAuthState = Boolean(envToken || readGitHubCliToken());
-  return cachedGitHubAuthState;
-};
-
-const printSectionTitle = (title: string) => {
-  process.stdout.write(`\n${SHELL_THEME.section(title)}\n`);
-};
-
-const renderContextValue = (row: ShellContextRow): string => {
-  switch (row.tone) {
-    case "accent":
-      return SHELL_THEME.accent(row.value);
-    case "muted":
-      return SHELL_THEME.muted(row.value);
-    default:
-      return SHELL_THEME.command(row.value);
-  }
-};
-
-const renderContextRow = (row: ShellContextRow): string =>
-  `  ${SHELL_THEME.muted(row.label.padEnd(12))} ${renderContextValue(row)}`;
-
-const printContextRows = (rows: readonly ShellContextRow[]) => {
-  for (const row of rows) {
-    process.stdout.write(`${renderContextRow(row)}\n`);
-  }
-};
-
-const printCommandList = (
-  entries: readonly { name: string; summary: string }[],
-  prefix = "/",
-  includeSummary = true
-) => {
-  for (const entry of entries) {
-    const label = `${prefix}${entry.name}`;
-    if (!includeSummary || !entry.summary) {
-      process.stdout.write(`  ${SHELL_THEME.command(label)}\n`);
-      continue;
-    }
-
-    process.stdout.write(
-      `  ${SHELL_THEME.command(label.padEnd(18))} ${SHELL_THEME.muted(entry.summary)}\n`
-    );
-  }
-};
-
-const printRootQuickStart = () => {
-  process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)}\n`);
-  process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
-  process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
-};
 
 const describeLocalSourceValue = (value: string): string => {
   const localPath = detectLocalPathDrop(value);

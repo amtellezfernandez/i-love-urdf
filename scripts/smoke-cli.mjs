@@ -1279,7 +1279,7 @@ const bashCompletionOutput = execFileSync(process.execPath, [cliPath, "completio
 });
 if (
   !bashCompletionOutput.includes("complete -o bashdefault -o default -F _ilu ilu") ||
-  !bashCompletionOutput.includes("help doctor update shell completion")
+  !bashCompletionOutput.includes("help doctor bug-report update shell completion")
 ) {
   throw new Error("ilu bash completion smoke test failed");
 }
@@ -1297,6 +1297,43 @@ if (
 ) {
   throw new Error("ilu doctor smoke test failed");
 }
+
+const bugReportRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-bug-report-smoke-"));
+const bugReportUrdfPath = path.join(bugReportRoot, "robot.urdf");
+const bugReportSourceDir = path.join(bugReportRoot, "source");
+const bugReportOutDir = path.join(bugReportRoot, "bundle");
+fs.mkdirSync(bugReportSourceDir, { recursive: true });
+fs.writeFileSync(bugReportUrdfPath, '<robot name="bug"><link name="base"/></robot>');
+fs.writeFileSync(path.join(bugReportSourceDir, "robot.urdf"), "<robot/>");
+const bugReportOutput = execFileSync(
+  process.execPath,
+  [
+    cliPath,
+    "bug-report",
+    "--out",
+    bugReportOutDir,
+    "--urdf",
+    bugReportUrdfPath,
+    "--source",
+    bugReportSourceDir,
+  ],
+  {
+    cwd: root,
+    encoding: "utf8",
+  }
+);
+const bugReportJson = JSON.parse(
+  fs.readFileSync(path.join(bugReportOutDir, "report.json"), "utf8")
+);
+if (
+  !bugReportOutput.includes("wrote bug report to") ||
+  bugReportJson.version !== 1 ||
+  !Array.isArray(bugReportJson.attachments) ||
+  bugReportJson.attachments.length < 2
+) {
+  throw new Error("ilu bug-report smoke test failed");
+}
+fs.rmSync(bugReportRoot, { recursive: true, force: true });
 
 const updateDryRunOutput = execFileSync(process.execPath, [cliPath, "update", "--dry-run"], {
   cwd: root,

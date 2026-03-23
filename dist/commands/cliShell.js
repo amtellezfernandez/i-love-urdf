@@ -10,585 +10,26 @@ const process = require("node:process");
 const AdmZip = require("adm-zip");
 const commandCatalog_1 = require("./commandCatalog");
 const cliCompletion_1 = require("./cliCompletion");
+const cliShellConfig_1 = require("./cliShellConfig");
+const cliShellRecommendations_1 = require("./cliShellRecommendations");
+const cliShellUi_1 = require("./cliShellUi");
 const shellPathInput_1 = require("./shellPathInput");
 const cliUpdate_1 = require("./cliUpdate");
 const githubCliAuth_1 = require("../node/githubCliAuth");
 const fixMeshPaths_1 = require("../mesh/fixMeshPaths");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
-const ANSI = {
-    reset: "\u001b[0m",
-    bold: "\u001b[1m",
-    dim: "\u001b[2m",
-    reverse: "\u001b[7m",
-    gray: "\u001b[90m",
-    magenta: "\u001b[35m",
-    brightMagenta: "\u001b[95m",
-    green: "\u001b[32m",
-    yellow: "\u001b[33m",
-    red: "\u001b[31m",
-};
-const paint = (enabled, text, ...codes) => {
-    if (!enabled || text.length === 0) {
-        return text;
-    }
-    return `${codes.join("")}${text}${ANSI.reset}`;
-};
-const resolveColorSupport = () => {
-    const forceColor = process.env.FORCE_COLOR;
-    if (forceColor !== undefined) {
-        return forceColor !== "0";
-    }
-    if ("NO_COLOR" in process.env) {
-        return false;
-    }
-    if (process.env.TERM === "dumb") {
-        return false;
-    }
-    return Boolean(process.stdout?.isTTY);
-};
-const createTheme = (enabled) => ({
-    enabled,
-    brand: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
-    command: (text) => paint(enabled, text, ANSI.bold, ANSI.magenta),
-    icon: (text) => paint(enabled, text, ANSI.gray),
-    muted: (text) => paint(enabled, text, ANSI.dim),
-    section: (text) => paint(enabled, text, ANSI.dim, ANSI.magenta),
-    success: (text) => paint(enabled, text, ANSI.bold, ANSI.green),
-    accent: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
-    warning: (text) => paint(enabled, text, ANSI.bold, ANSI.yellow),
-    error: (text) => paint(enabled, text, ANSI.bold, ANSI.red),
-    selected: (text) => paint(enabled, text, ANSI.bold, ANSI.reverse, ANSI.brightMagenta),
-});
-const SHELL_THEME = createTheme(resolveColorSupport());
-const SHELL_BRAND = "i<3urdf";
-const XACRO_RUNTIME_NOTICE = "xacro runtime not set. run !xacro, then retry";
-const SHELL_BUILTIN_COMMANDS = [
-    { name: "help", summary: "Show slash commands for the current context." },
-    { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
-    { name: "update", summary: "Install the latest ilu release." },
-    { name: "clear", summary: "Clear the terminal." },
-    { name: "last", summary: "Show the last remembered URDF path." },
-];
-const HIDDEN_SHELL_COMMAND_NAMES = ["exit", "quit"];
-const SESSION_BUILTIN_COMMANDS = [
-    { name: "show", summary: "Show the current command, values, and next step." },
-    { name: "run", summary: "Run the current command." },
-    { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
-    { name: "update", summary: "Install the latest ilu release." },
-    { name: "reset", summary: "Clear the current command state." },
-    { name: "back", summary: "Return to the root slash-command menu." },
-];
-const ROOT_TASKS = [
-    { name: "open", summary: "Open a repo, folder, or file as a working URDF." },
-    { name: "inspect", summary: "Preview a repo or URDF before deciding what to do next." },
-    { name: "check", summary: "Run health, validation, and orientation checks." },
-    { name: "convert", summary: "Convert XACRO and URDF files into other formats." },
-    { name: "fix", summary: "Repair mesh paths, mesh refs, and basic URDF issues." },
-];
-const ROOT_SHELL_COMMANDS = [
-    {
-        name: "open",
-        summary: "Load a repo, folder, or file as the current source.",
-        command: "load-source",
-        sessionLabel: "open",
-    },
-    {
-        name: "inspect",
-        summary: "Preview a repo or folder and suggest the best entrypoint.",
-        command: "inspect-repo",
-        sessionLabel: "inspect",
-    },
-    {
-        name: "analyze",
-        summary: "Inspect structure, morphology, and mesh references.",
-        command: "analyze",
-        sessionLabel: "analyze",
-        openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-    {
-        name: "health",
-        summary: "Check structure, axes, and orientation risks.",
-        command: "health-check",
-        sessionLabel: "health",
-        openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-    {
-        name: "validate",
-        summary: "Check whether the current URDF is structurally valid.",
-        command: "validate",
-        sessionLabel: "validate",
-        openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-    {
-        name: "orientation",
-        summary: "Guess the likely up-axis and forward axis.",
-        command: "guess-orientation",
-        sessionLabel: "orientation",
-        openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-    },
-];
-const ROOT_START_COMMAND_NAMES = ["open", "inspect", "analyze", "health", "validate", "orientation"];
-const ROOT_READY_COMMAND_NAMES = ["analyze", "health", "validate", "orientation", "open", "inspect"];
-const FLAT_ROOT_SESSION_LABELS = new Set(ROOT_SHELL_COMMANDS.map((entry) => entry.sessionLabel));
-const ROOT_TASK_ACTIONS = {
-    open: [
-        {
-            name: "repo",
-            summary: "Open from GitHub and assemble a working URDF.",
-            command: "load-source",
-            sessionLabel: "open",
-            openPending: { key: "github", slashName: "repo" },
-        },
-        {
-            name: "local",
-            summary: "Open from a local repo or directory.",
-            command: "load-source",
-            sessionLabel: "open",
-            openPending: { key: "path", slashName: "local" },
-        },
-        {
-            name: "file",
-            summary: "Open a local URDF file directly.",
-            command: "load-source",
-            sessionLabel: "open",
-            openPending: { key: "path", slashName: "file" },
-        },
-    ],
-    inspect: [
-        {
-            name: "repo",
-            summary: "Preview a GitHub repo and suggest the right entrypoint.",
-            command: "inspect-repo",
-            sessionLabel: "inspect",
-            openPending: { key: "github", slashName: "repo" },
-        },
-        {
-            name: "local",
-            summary: "Preview a local repo and suggest the right entrypoint.",
-            command: "inspect-repo",
-            sessionLabel: "inspect",
-            openPending: { key: "local", slashName: "local" },
-        },
-        {
-            name: "file",
-            summary: "Inspect a prepared URDF file.",
-            command: "analyze",
-            sessionLabel: "inspect",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-    ],
-    check: [
-        {
-            name: "health",
-            summary: "Run the main URDF health check.",
-            command: "health-check",
-            sessionLabel: "check",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-        {
-            name: "validate",
-            summary: "Validate URDF structure and required tags.",
-            command: "validate",
-            sessionLabel: "check",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-        {
-            name: "orientation",
-            summary: "Guess the likely up-axis and forward axis.",
-            command: "guess-orientation",
-            sessionLabel: "check",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-    ],
-    convert: [
-        {
-            name: "xacro",
-            summary: "Expand a XACRO file, repo, or GitHub source into URDF.",
-            command: "xacro-to-urdf",
-            sessionLabel: "convert",
-            openPending: { key: "xacro", slashName: "xacro" },
-        },
-        {
-            name: "mjcf",
-            summary: "Convert a URDF file into MJCF.",
-            command: "urdf-to-mjcf",
-            sessionLabel: "convert",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-        {
-            name: "usd",
-            summary: "Convert a URDF file into initial USD output.",
-            command: "urdf-to-usd",
-            sessionLabel: "convert",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-    ],
-    fix: [
-        {
-            name: "mesh-paths",
-            summary: "Repair package:// and relative mesh paths in a URDF file.",
-            command: "fix-mesh-paths",
-            sessionLabel: "fix",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-        {
-            name: "mesh-refs",
-            summary: "Repair missing mesh references in a repo-based source.",
-            command: "repair-mesh-refs",
-            sessionLabel: "fix",
-        },
-        {
-            name: "axes",
-            summary: "Normalize non-unit or awkward joint axes in a URDF file.",
-            command: "normalize-axes",
-            sessionLabel: "fix",
-            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
-        },
-    ],
-};
-const COMMAND_SUMMARY_OVERRIDES = {
-    "load-source": "Load from GitHub, a local repo, or a local file.",
-    "inspect-repo": "Preview a local or GitHub repo and suggest the right URDF or XACRO entrypoint.",
-    "xacro-to-urdf": "Expand a XACRO file, repo, or GitHub source into URDF.",
-    "repair-mesh-refs": "Repair broken mesh references in a local or GitHub repo.",
-    "health-check": "Check structure, axes, and orientation risks.",
-    analyze: "Inspect structure, morphology, and mesh references.",
-    validate: "Check whether the current URDF is structurally valid.",
-    "guess-orientation": "Guess the likely up-axis and forward axis.",
-};
-const URDF_OUTPUT_COMMANDS = new Set([
-    "load-source",
-    "xacro-to-urdf",
-    "repair-mesh-refs",
-    "canonical-order",
-    "pretty-print",
-    "normalize-axes",
-    "snap-axes",
-    "fix-mesh-paths",
-    "mesh-to-assets",
-    "set-joint-axis",
-    "set-joint-type",
-    "set-joint-limits",
-    "set-joint-velocity",
-    "rotate-90",
-    "apply-orientation",
-    "remove-joints",
-    "reassign-joint",
-    "set-material-color",
-    "rename-joint",
-    "rename-link",
-    "canonicalize-joint-frame",
-    "normalize-robot",
-]);
-const ADVANCED_OPTION_KEYS = new Set([
-    "args",
-    "concurrency",
-    "limits",
-    "max-candidates",
-    "max-faces",
-    "meshes",
-    "python",
-    "ref",
-    "root",
-    "subdir",
-    "token",
-    "venv",
-    "wheel",
-]);
-const SESSION_OPTION_ORDER = {
-    "load-source": ["github", "path", "entry", "out", "ref", "subdir", "args", "python", "wheel", "token", "root"],
-    "inspect-repo": ["github", "local", "path", "ref", "max-candidates", "token", "out"],
-    "repair-mesh-refs": ["github", "local", "urdf", "path", "ref", "token", "out"],
-    "xacro-to-urdf": ["xacro", "github", "local", "entry", "out", "args", "ref", "path", "python", "wheel", "token", "root"],
-    "health-check": ["urdf", "strict"],
-    validate: ["urdf"],
-    analyze: ["urdf"],
-    diff: ["left", "right"],
-};
-const MUTUALLY_EXCLUSIVE_OPTION_GROUPS = {
-    "load-source": [["path", "github"]],
-    "inspect-repo": [["local", "github"]],
-    "repair-mesh-refs": [["local", "github"]],
-    "xacro-to-urdf": [["local", "github"]],
-    "urdf-to-usd": [["urdf", "path"]],
-};
-const SESSION_SLASH_ALIASES = {
-    "load-source": {
-        repo: "github",
-        local: "path",
-    },
-    "inspect-repo": {
-        repo: "github",
-        local: "local",
-        subdir: "path",
-    },
-    "repair-mesh-refs": {
-        repo: "github",
-        local: "local",
-        subdir: "path",
-    },
-    "xacro-to-urdf": {
-        repo: "github",
-        local: "local",
-    },
-};
-const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
-const ROOT_GUIDANCE = "paste owner/repo or drop a local folder/file. type / for actions, !xacro for xacro setup, /update for latest, ctrl+c to quit";
-let cachedGitHubAuthState;
-const formatShellPrompt = (_state) => "/> ";
-const hasPendingUpdatePrompt = (state) => state.updatePrompt !== null;
-const dismissUpdatePrompt = (state) => {
-    state.updatePrompt = null;
-};
-const formatUpdatePromptLine = (update) => `update available ${update.currentVersion} -> ${update.latestVersion}  Enter updates now  Esc skips`;
-const quoteForPreview = (value) => (/\s/.test(value) ? JSON.stringify(value) : value);
-const buildCommandPreview = (command, args) => {
-    const serializedArgs = Array.from(args.entries()).flatMap(([key, value]) => {
-        if (value === false || value === undefined || value === null) {
-            return [];
-        }
-        if (value === true) {
-            return [`--${key}`];
-        }
-        return [`--${key}`, quoteForPreview(String(value))];
-    });
-    return `ilu ${[command, ...serializedArgs].join(" ")}`.trim();
-};
-const pushFeedback = (feedback, kind, text) => {
-    feedback?.push({ kind, text });
-};
-const writeFeedback = (entry) => {
-    const stream = entry.kind === "error" ? process.stderr : process.stdout;
-    const render = entry.kind === "success"
-        ? SHELL_THEME.success
-        : entry.kind === "warning"
-            ? SHELL_THEME.warning
-            : entry.kind === "error"
-                ? SHELL_THEME.error
-                : SHELL_THEME.muted;
-    stream.write(`${render(entry.text)}\n`);
-};
-const flushFeedback = (feedback) => {
-    for (const entry of feedback) {
-        writeFeedback(entry);
-    }
-};
-const stripAnsi = (value) => value.replace(/\u001b\[[0-9;]*m/g, "");
-const clamp = (value, minimum, maximum) => Math.min(Math.max(value, minimum), maximum);
-const formatInlineValue = (value) => (value.length > 0 ? ` ${quoteForPreview(value)}` : "");
-const createOutputPanel = (title, content, kind = "info") => {
-    const lines = content
-        .split(/\r?\n/)
-        .map((line) => line.trimEnd())
-        .filter((line, index, entries) => line.length > 0 || index < entries.length - 1);
-    if (lines.length === 0) {
-        return null;
-    }
-    return {
-        title,
-        lines: lines.slice(-10),
-        kind,
-    };
-};
-const getPanelLineIcon = (line) => {
-    const normalized = stripAnsi(line).trim().toLowerCase();
-    if (normalized === "looks ready" ||
-        normalized === "no obvious problems found" ||
-        normalized.startsWith("repaired ") ||
-        normalized === "working copy ready" ||
-        normalized.startsWith("validation passed") ||
-        normalized.startsWith("health check passed")) {
-        return "✓";
-    }
-    if (normalized.startsWith("best next step") ||
-        normalized.startsWith("recommended:") ||
-        normalized.startsWith("then /") ||
-        normalized.startsWith("next /")) {
-        return "→";
-    }
-    if (normalized.startsWith("validation found") ||
-        normalized.startsWith("health check found") ||
-        normalized.startsWith("error ")) {
-        return "!";
-    }
-    if (normalized.startsWith("warning ")) {
-        return "!";
-    }
-    return "•";
-};
-const renderPanelLine = (line, kind) => {
-    const renderText = kind === "error" ? SHELL_THEME.error : SHELL_THEME.muted;
-    return `${SHELL_THEME.icon(getPanelLineIcon(line))} ${renderText(line)}`;
-};
-const printOutputPanel = (panel) => {
-    if (!panel) {
-        return;
-    }
-    printSectionTitle(panel.title);
-    for (const line of panel.lines) {
-        process.stdout.write(`  ${renderPanelLine(line, panel.kind)}\n`);
-    }
-};
-const clearCandidatePicker = (state) => {
-    state.candidatePicker = null;
-};
-const clearXacroRetry = (state) => {
-    state.xacroRetry = null;
-};
-const clearSuggestedAction = (state) => {
-    state.suggestedAction = null;
-};
-const buildRepairMeshRefsSuggestion = () => ({
-    kind: "repair-mesh-refs",
-    summary: "mesh references need attention",
-    recommendedLine: "recommended: repair mesh references",
-    prompt: "repair mesh references now?  Enter yes  Esc not now",
-    acceptLabel: "repair mesh references",
-});
-const buildFixMeshPathsSuggestion = () => ({
-    kind: "fix-mesh-paths",
-    summary: "mesh paths need attention",
-    recommendedLine: "recommended: repair mesh paths",
-    prompt: "repair mesh paths now?  Enter yes  Esc not now",
-    acceptLabel: "repair mesh paths",
-});
-const formatAttentionDetail = (message, context) => context ? `${context}: ${message}` : message;
-const appendSuggestedActionLines = (lines, suggestedAction, fallbackLine) => {
-    if (!suggestedAction) {
-        lines.push(fallbackLine);
-        return;
-    }
-    if (!lines.includes(suggestedAction.summary)) {
-        lines.push(suggestedAction.summary);
-    }
-    lines.push(suggestedAction.recommendedLine);
-};
-const getValidationStatusLine = (payload) => (payload.isValid && payload.issues.length === 0 ? "validation passed" : "validation needs attention");
-const getHealthStatusLine = (payload) => payload.ok && payload.summary.errors === 0 && payload.summary.warnings === 0
-    ? "health check passed"
-    : "health check needs attention";
-const collectAttentionLines = (validationIssues = [], healthFindings = [], limit = 2) => {
-    const lines = [];
-    for (const issue of validationIssues) {
-        const line = formatAttentionDetail(issue.message, issue.context);
-        if (!lines.includes(line)) {
-            lines.push(line);
-        }
-        if (lines.length >= limit) {
-            return lines;
-        }
-    }
-    for (const finding of healthFindings) {
-        if (finding.level === "info") {
-            continue;
-        }
-        const line = formatAttentionDetail(finding.message, finding.context);
-        if (!lines.includes(line)) {
-            lines.push(line);
-        }
-        if (lines.length >= limit) {
-            return lines;
-        }
-    }
-    return lines;
-};
-const detectSuggestedAction = (state, options = {}) => {
-    const source = state.loadedSource;
-    if ((options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 &&
-        source &&
-        (source.source === "local-repo" || source.source === "github") &&
-        source.repositoryUrdfPath) {
-        return buildRepairMeshRefsSuggestion();
-    }
-    const urdfPath = options.urdfPath ?? source?.urdfPath ?? state.lastUrdfPath;
-    if (!urdfPath || source?.source !== "local-file") {
-        return null;
-    }
-    try {
-        const currentUrdf = fs.readFileSync(urdfPath, "utf8");
-        const fixed = (0, fixMeshPaths_1.fixMeshPaths)(currentUrdf);
-        return fixed.corrections.length > 0 ? buildFixMeshPathsSuggestion() : null;
-    }
-    catch {
-        return null;
-    }
-};
-const getCandidateDetails = (candidate) => {
-    const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
-    if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
-        details.push("mesh refs need attention");
-    }
-    if ((candidate.xacroArgs?.length ?? 0) > 0) {
-        details.push("needs xacro args");
-    }
-    return details;
-};
-const printCandidatePicker = (picker) => {
-    printSectionTitle("choose");
-    process.stdout.write(`  ${SHELL_THEME.muted("type a number, press Enter for the highlighted match, or paste a repo entry path")}\n`);
-    for (const [index, candidate] of picker.candidates.slice(0, 9).entries()) {
-        const prefix = index === picker.selectedIndex ? SHELL_THEME.accent(">") : SHELL_THEME.muted(`${index + 1}.`);
-        const details = getCandidateDetails(candidate);
-        process.stdout.write(`  ${prefix} ${SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${SHELL_THEME.muted(details.join("  "))}` : ""}\n`);
-    }
-    if (picker.candidates.length > 9) {
-        process.stdout.write(`  ${SHELL_THEME.muted(`+${picker.candidates.length - 9} more`)}\n`);
-    }
-};
-const hasGitHubAuthConfigured = () => {
-    if (cachedGitHubAuthState !== undefined) {
-        return cachedGitHubAuthState;
-    }
-    const envToken = process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim();
-    cachedGitHubAuthState = Boolean(envToken || (0, githubCliAuth_1.readGitHubCliToken)());
-    return cachedGitHubAuthState;
-};
-const printSectionTitle = (title) => {
-    process.stdout.write(`\n${SHELL_THEME.section(title)}\n`);
-};
-const renderContextValue = (row) => {
-    switch (row.tone) {
-        case "accent":
-            return SHELL_THEME.accent(row.value);
-        case "muted":
-            return SHELL_THEME.muted(row.value);
-        default:
-            return SHELL_THEME.command(row.value);
-    }
-};
-const renderContextRow = (row) => `  ${SHELL_THEME.muted(row.label.padEnd(12))} ${renderContextValue(row)}`;
-const printContextRows = (rows) => {
-    for (const row of rows) {
-        process.stdout.write(`${renderContextRow(row)}\n`);
-    }
-};
-const printCommandList = (entries, prefix = "/", includeSummary = true) => {
-    for (const entry of entries) {
-        const label = `${prefix}${entry.name}`;
-        if (!includeSummary || !entry.summary) {
-            process.stdout.write(`  ${SHELL_THEME.command(label)}\n`);
-            continue;
-        }
-        process.stdout.write(`  ${SHELL_THEME.command(label.padEnd(18))} ${SHELL_THEME.muted(entry.summary)}\n`);
-    }
-};
-const printRootQuickStart = () => {
-    process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)}\n`);
-    process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
-    process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
-};
 const describeLocalSourceValue = (value) => {
     const localPath = detectLocalPathDrop(value);
     if (localPath?.isDirectory) {
-        return `folder ${quoteForPreview(value)}`;
+        return `folder ${(0, cliShellConfig_1.quoteForPreview)(value)}`;
     }
     if (localPath?.isZipFile) {
-        return `archive ${quoteForPreview(value)}`;
+        return `archive ${(0, cliShellConfig_1.quoteForPreview)(value)}`;
     }
     if (localPath?.isXacroFile) {
-        return `xacro ${quoteForPreview(value)}`;
+        return `xacro ${(0, cliShellConfig_1.quoteForPreview)(value)}`;
     }
-    return `file ${quoteForPreview(value)}`;
+    return `file ${(0, cliShellConfig_1.quoteForPreview)(value)}`;
 };
 const getLoadedSourceContextRows = (state) => {
     const loadedSource = state.loadedSource;
@@ -609,7 +50,7 @@ const getLoadedSourceContextRows = (state) => {
             ];
         }
         return [
-            { label: "source", value: `remembered ${quoteForPreview(state.lastUrdfPath)}` },
+            { label: "source", value: `remembered ${(0, cliShellConfig_1.quoteForPreview)(state.lastUrdfPath)}` },
             {
                 label: "action",
                 value: "keep investigating the remembered URDF or paste another source",
@@ -626,13 +67,13 @@ const getLoadedSourceContextRows = (state) => {
     if (loadedSource.source === "github") {
         rows.push({
             label: "source",
-            value: `GitHub ${quoteForPreview(loadedSource.githubRef ?? loadedSource.urdfPath)}`,
+            value: `GitHub ${(0, cliShellConfig_1.quoteForPreview)(loadedSource.githubRef ?? loadedSource.urdfPath)}`,
         });
     }
     else if (loadedSource.source === "local-repo") {
         rows.push({
             label: "source",
-            value: `folder ${quoteForPreview(loadedSource.localPath ?? loadedSource.urdfPath)}`,
+            value: `folder ${(0, cliShellConfig_1.quoteForPreview)(loadedSource.localPath ?? loadedSource.urdfPath)}`,
         });
     }
     else {
@@ -646,7 +87,7 @@ const getLoadedSourceContextRows = (state) => {
     }
     if (loadedSource.urdfPath &&
         (loadedSource.source !== "local-file" || loadedSource.localPath !== loadedSource.urdfPath)) {
-        rows.push({ label: "working urdf", value: quoteForPreview(loadedSource.urdfPath) });
+        rows.push({ label: "working urdf", value: (0, cliShellConfig_1.quoteForPreview)(loadedSource.urdfPath) });
     }
     rows.push({
         label: "action",
@@ -661,32 +102,32 @@ const getLoadedSourceContextRows = (state) => {
     return rows;
 };
 const printRootOptions = (state) => {
-    printSectionTitle("context");
-    printContextRows(getLoadedSourceContextRows(state));
-    printSectionTitle("actions");
-    printCommandList(getReadySourceLabel(state) ? getLoadedRootCommandList() : START_ROOT_MENU_ENTRIES);
-    printSectionTitle("system");
-    printCommandList(SHELL_BUILTIN_COMMANDS);
+    (0, cliShellUi_1.printSectionTitle)("context");
+    (0, cliShellUi_1.printContextRows)(getLoadedSourceContextRows(state));
+    (0, cliShellUi_1.printSectionTitle)("actions");
+    (0, cliShellUi_1.printCommandList)(getReadySourceLabel(state) ? getLoadedRootCommandList() : START_ROOT_MENU_ENTRIES);
+    (0, cliShellUi_1.printSectionTitle)("system");
+    (0, cliShellUi_1.printCommandList)(cliShellConfig_1.SHELL_BUILTIN_COMMANDS);
 };
 const printRootTaskOptions = (_task) => {
-    process.stdout.write(`${SHELL_THEME.muted("Direct actions only. Type / for actions or paste a source.\n")}`);
+    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("Direct actions only. Type / for actions or paste a source.\n")}`);
     printRootOptions({
         lastUrdfPath: undefined,
         loadedSource: null,
     });
 };
-const getSlashAliasesForCommand = (command) => SESSION_SLASH_ALIASES[command] ?? {};
+const getSlashAliasesForCommand = (command) => cliShellConfig_1.SESSION_SLASH_ALIASES[command] ?? {};
 const getOptionSpecByKey = (session, key) => session.spec.options.find((option) => option.flag === `--${key}`);
 const getPreferredSlashName = (session, key) => {
     const alias = Object.entries(getSlashAliasesForCommand(session.command)).find(([, target]) => target === key)?.[0];
     return alias ?? key;
 };
 const getSlashDisplayName = (session, key) => `/${getPreferredSlashName(session, key)}`;
-const getShellCommandSummary = (command) => COMMAND_SUMMARY_OVERRIDES[command] ?? cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME[command].summary;
-const getRootTaskSummary = (task) => ROOT_TASKS.find((entry) => entry.name === task)?.summary ?? "Task flow";
-const getRootTaskActionDefinitions = (task) => ROOT_TASK_ACTIONS[task];
-const getRootShellCommandDefinition = (name) => ROOT_SHELL_COMMANDS.find((entry) => entry.name === name);
-const isFlatRootSession = (session) => FLAT_ROOT_SESSION_LABELS.has(session.label);
+const getShellCommandSummary = (command) => cliShellConfig_1.COMMAND_SUMMARY_OVERRIDES[command] ?? cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME[command].summary;
+const getRootTaskSummary = (task) => cliShellConfig_1.ROOT_TASKS.find((entry) => entry.name === task)?.summary ?? "Task flow";
+const getRootTaskActionDefinitions = (task) => cliShellConfig_1.ROOT_TASK_ACTIONS[task];
+const getRootShellCommandDefinition = (name) => cliShellConfig_1.ROOT_SHELL_COMMANDS.find((entry) => entry.name === name);
+const isFlatRootSession = (session) => cliShellConfig_1.FLAT_ROOT_SESSION_LABELS.has(session.label);
 const shouldSuppressSessionOptionMenu = (session) => isFlatRootSession(session) && (session.pending !== null || session.args.size === 0);
 const getSessionSourceValue = (session, keys) => {
     for (const key of keys) {
@@ -746,16 +187,16 @@ const getSessionContextRows = (state, session) => {
         !xacroSource &&
         session.inheritedKeys.has("urdf");
     if (githubSource) {
-        rows.push({ label: "source", value: `GitHub ${quoteForPreview(githubSource)}` });
+        rows.push({ label: "source", value: `GitHub ${(0, cliShellConfig_1.quoteForPreview)(githubSource)}` });
     }
     else if (localSource) {
-        rows.push({ label: "source", value: `folder ${quoteForPreview(localSource)}` });
+        rows.push({ label: "source", value: `folder ${(0, cliShellConfig_1.quoteForPreview)(localSource)}` });
     }
     else if (pathSource) {
         rows.push({ label: "source", value: describeLocalSourceValue(pathSource) });
     }
     else if (xacroSource) {
-        rows.push({ label: "source", value: `xacro ${quoteForPreview(xacroSource)}` });
+        rows.push({ label: "source", value: `xacro ${(0, cliShellConfig_1.quoteForPreview)(xacroSource)}` });
     }
     else if (urdfSource && !canReuseLoadedSource) {
         rows.push({ label: "source", value: describeLocalSourceValue(urdfSource) });
@@ -765,7 +206,7 @@ const getSessionContextRows = (state, session) => {
     }
     if (urdfSource) {
         const sourceValue = rows.find((row) => row.label === "source")?.value ?? "";
-        const inlineUrdfValue = quoteForPreview(urdfSource);
+        const inlineUrdfValue = (0, cliShellConfig_1.quoteForPreview)(urdfSource);
         if (!sourceValue.includes(inlineUrdfValue)) {
             rows.push({ label: "working urdf", value: inlineUrdfValue });
         }
@@ -789,23 +230,23 @@ const buildSessionHeadline = (session) => {
     switch (session.label) {
         case "open": {
             const source = getSessionSourceValue(session, ["github", "path"]);
-            return source ? `open ${quoteForPreview(source)}` : "open a repo, folder, or file";
+            return source ? `open ${(0, cliShellConfig_1.quoteForPreview)(source)}` : "open a repo, folder, or file";
         }
         case "inspect": {
             const source = getSessionSourceValue(session, ["github", "local", "urdf"]);
-            return source ? `inspect ${quoteForPreview(source)}` : "inspect a repo or URDF";
+            return source ? `inspect ${(0, cliShellConfig_1.quoteForPreview)(source)}` : "inspect a repo or URDF";
         }
         case "check": {
             const source = getSessionSourceValue(session, ["urdf"]);
-            return source ? `check ${quoteForPreview(source)}` : "check a URDF";
+            return source ? `check ${(0, cliShellConfig_1.quoteForPreview)(source)}` : "check a URDF";
         }
         case "convert": {
             const source = getSessionSourceValue(session, ["xacro", "urdf", "github", "local"]);
-            return source ? `convert ${quoteForPreview(source)}` : "convert a source";
+            return source ? `convert ${(0, cliShellConfig_1.quoteForPreview)(source)}` : "convert a source";
         }
         case "fix": {
             const source = getSessionSourceValue(session, ["urdf", "github", "local"]);
-            return source ? `fix ${quoteForPreview(source)}` : "fix a URDF or repo";
+            return source ? `fix ${(0, cliShellConfig_1.quoteForPreview)(source)}` : "fix a URDF or repo";
         }
         default:
             return getShellCommandSummary(session.command);
@@ -813,7 +254,7 @@ const buildSessionHeadline = (session) => {
 };
 const findRootTaskAction = (task, slashCommand) => getRootTaskActionDefinitions(task).find((entry) => entry.name === slashCommand);
 const getOptionOrderRank = (session, key) => {
-    const customOrder = SESSION_OPTION_ORDER[session.command] ?? [];
+    const customOrder = cliShellConfig_1.SESSION_OPTION_ORDER[session.command] ?? [];
     const customIndex = customOrder.indexOf(key);
     return customIndex === -1 ? Number.MAX_SAFE_INTEGER : customIndex;
 };
@@ -909,7 +350,7 @@ const getOptionPriority = (session, key) => {
     if (highlightedKeys.has(key) || (highlightedKeys.size === 0 && getRequiredKeys(session).has(key))) {
         return "required";
     }
-    if (ADVANCED_OPTION_KEYS.has(key)) {
+    if (cliShellConfig_1.ADVANCED_OPTION_KEYS.has(key)) {
         return "advanced";
     }
     return "common";
@@ -954,13 +395,13 @@ const formatSlashSequence = (session, keys) => keys.map((key) => getSlashDisplay
 const formatStatusTag = (label) => {
     switch (label) {
         case "next":
-            return SHELL_THEME.accent(`[${label}]`);
+            return cliShellConfig_1.SHELL_THEME.accent(`[${label}]`);
         case "ready":
-            return SHELL_THEME.success(`[${label}]`);
+            return cliShellConfig_1.SHELL_THEME.success(`[${label}]`);
         case "flow":
-            return SHELL_THEME.muted(label);
+            return cliShellConfig_1.SHELL_THEME.muted(label);
         case "cmd":
-            return SHELL_THEME.muted(label);
+            return cliShellConfig_1.SHELL_THEME.muted(label);
     }
 };
 const getRequirementStatus = (session) => {
@@ -1004,31 +445,31 @@ const getRequirementStatus = (session) => {
     };
 };
 const printSessionStatus = (state, session) => {
-    printSectionTitle("context");
-    printContextRows(getSessionContextRows(state, session));
+    (0, cliShellUi_1.printSectionTitle)("context");
+    (0, cliShellUi_1.printContextRows)(getSessionContextRows(state, session));
 };
 const printSessionPreview = (state, session) => {
-    printSectionTitle("context");
-    printContextRows(getSessionContextRows(state, session));
-    printSectionTitle("command");
-    process.stdout.write(`  ${SHELL_THEME.command(buildCommandPreview(session.command, session.args))}\n`);
+    (0, cliShellUi_1.printSectionTitle)("context");
+    (0, cliShellUi_1.printContextRows)(getSessionContextRows(state, session));
+    (0, cliShellUi_1.printSectionTitle)("command");
+    process.stdout.write(`  ${cliShellConfig_1.SHELL_THEME.command((0, cliShellConfig_1.buildCommandPreview)(session.command, session.args))}\n`);
     if (session.args.size > 0) {
-        printSectionTitle("values");
+        (0, cliShellUi_1.printSectionTitle)("values");
         for (const [key, value] of session.args.entries()) {
-            const renderedValue = value === true ? "enabled" : quoteForPreview(String(value));
-            process.stdout.write(`  ${SHELL_THEME.command(getSlashDisplayName(session, key).padEnd(18))} ${renderedValue}\n`);
+            const renderedValue = value === true ? "enabled" : (0, cliShellConfig_1.quoteForPreview)(String(value));
+            process.stdout.write(`  ${cliShellConfig_1.SHELL_THEME.command(getSlashDisplayName(session, key).padEnd(18))} ${renderedValue}\n`);
         }
     }
-    printSectionTitle("next");
-    process.stdout.write(`  ${renderContextValue(getSessionContextRows(state, session).find((row) => row.label === "next") ?? { label: "next", value: getSessionNextText(session) })}\n`);
+    (0, cliShellUi_1.printSectionTitle)("next");
+    process.stdout.write(`  ${(0, cliShellUi_1.renderContextValue)(getSessionContextRows(state, session).find((row) => row.label === "next") ?? { label: "next", value: getSessionNextText(session) })}\n`);
 };
 const printSessionOptions = (state, session) => {
     if (shouldSuppressSessionOptionMenu(session)) {
-        printSectionTitle(`/${session.label}`);
-        process.stdout.write(`  ${SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
+        (0, cliShellUi_1.printSectionTitle)(`/${session.label}`);
+        process.stdout.write(`  ${cliShellConfig_1.SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
         printSessionStatus(state, session);
-        printSectionTitle("actions");
-        printCommandList(SESSION_BUILTIN_COMMANDS);
+        (0, cliShellUi_1.printSectionTitle)("actions");
+        (0, cliShellUi_1.printCommandList)(cliShellConfig_1.SESSION_BUILTIN_COMMANDS);
         if (session.pending) {
             printPendingValuePrompt(session.pending);
         }
@@ -1038,23 +479,23 @@ const printSessionOptions = (state, session) => {
     const requiredEntries = entries.filter((entry) => entry.priority === "required");
     const commonEntries = entries.filter((entry) => entry.priority === "common");
     const advancedEntries = entries.filter((entry) => entry.priority === "advanced");
-    printSectionTitle(`/${session.label}`);
-    process.stdout.write(`  ${SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
+    (0, cliShellUi_1.printSectionTitle)(`/${session.label}`);
+    process.stdout.write(`  ${cliShellConfig_1.SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
     printSessionStatus(state, session);
     if (requiredEntries.length > 0) {
-        printSectionTitle("start");
-        printCommandList(requiredEntries);
+        (0, cliShellUi_1.printSectionTitle)("start");
+        (0, cliShellUi_1.printCommandList)(requiredEntries);
     }
     if (commonEntries.length > 0) {
-        printSectionTitle("more");
-        printCommandList(commonEntries);
+        (0, cliShellUi_1.printSectionTitle)("more");
+        (0, cliShellUi_1.printCommandList)(commonEntries);
     }
     if (advancedEntries.length > 0) {
-        printSectionTitle("advanced");
-        printCommandList(advancedEntries);
+        (0, cliShellUi_1.printSectionTitle)("advanced");
+        (0, cliShellUi_1.printCommandList)(advancedEntries);
     }
-    printSectionTitle("actions");
-    printCommandList(SESSION_BUILTIN_COMMANDS);
+    (0, cliShellUi_1.printSectionTitle)("actions");
+    (0, cliShellUi_1.printCommandList)(cliShellConfig_1.SESSION_BUILTIN_COMMANDS);
 };
 const parseSlashInput = (input) => {
     const trimmed = input.trim();
@@ -1075,7 +516,7 @@ const parseSlashInput = (input) => {
     };
 };
 const clearMutuallyExclusiveArgs = (session, key) => {
-    const groups = MUTUALLY_EXCLUSIVE_OPTION_GROUPS[session.command] ?? [];
+    const groups = cliShellConfig_1.MUTUALLY_EXCLUSIVE_OPTION_GROUPS[session.command] ?? [];
     for (const group of groups) {
         if (!group.includes(key)) {
             continue;
@@ -1177,7 +618,7 @@ const getPendingValuePrompt = (session, key, slashName) => {
                 "ANYbotics/anymal_b_simple_description",
                 "github.com/ANYbotics/anymal_b_simple_description",
             ],
-            notes: hasGitHubAuthConfigured()
+            notes: (0, cliShellConfig_1.hasGitHubAuthConfigured)()
                 ? []
                 : ["GitHub auth not found. Public repos still work. Run gh auth login for private repos and higher limits."],
             expectsPath: false,
@@ -1284,19 +725,19 @@ const getPendingValuePrompt = (session, key, slashName) => {
     };
 };
 const printPendingValuePrompt = (pending) => {
-    process.stdout.write(`\n${SHELL_THEME.section("input")}\n`);
-    process.stdout.write(`${SHELL_THEME.command(pending.title)}\n`);
+    process.stdout.write(`\n${cliShellConfig_1.SHELL_THEME.section("input")}\n`);
+    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.command(pending.title)}\n`);
     if (pending.examples.length === 1) {
-        process.stdout.write(`${SHELL_THEME.muted(`example: ${pending.examples[0]}`)}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(`example: ${pending.examples[0]}`)}\n`);
     }
     else if (pending.examples.length > 1) {
-        process.stdout.write(`${SHELL_THEME.muted("examples:")}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("examples:")}\n`);
         for (const example of pending.examples) {
-            process.stdout.write(`  ${SHELL_THEME.muted(example)}\n`);
+            process.stdout.write(`  ${cliShellConfig_1.SHELL_THEME.muted(example)}\n`);
         }
     }
     for (const note of pending.notes) {
-        process.stdout.write(`${SHELL_THEME.warning(note)}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning(note)}\n`);
     }
 };
 const isPathLikeOption = (session, key) => getOptionSpecByKey(session, key)?.isFilesystemPath === true;
@@ -1304,33 +745,33 @@ const setSessionValue = (session, key, rawValue, feedback) => {
     const value = validateOptionValue(session, key, rawValue);
     if (!value) {
         if (key === "github") {
-            pushFeedback(feedback, "error", "Expected owner/repo or a GitHub repository URL.");
+            (0, cliShellConfig_1.pushFeedback)(feedback, "error", "Expected owner/repo or a GitHub repository URL.");
         }
         else {
-            pushFeedback(feedback, "error", `Invalid value for --${key}.`);
+            (0, cliShellConfig_1.pushFeedback)(feedback, "error", `Invalid value for --${key}.`);
         }
         return false;
     }
     clearMutuallyExclusiveArgs(session, key);
     session.args.set(key, value);
     session.inheritedKeys.delete(key);
-    pushFeedback(feedback, "success", `[set] --${key} ${quoteForPreview(value)}`);
+    (0, cliShellConfig_1.pushFeedback)(feedback, "success", `[set] --${key} ${(0, cliShellConfig_1.quoteForPreview)(value)}`);
     return true;
 };
 const toggleSessionFlag = (session, key, feedback) => {
     if (session.args.get(key) === true) {
         session.args.delete(key);
         session.inheritedKeys.delete(key);
-        pushFeedback(feedback, "warning", `[unset] --${key}`);
+        (0, cliShellConfig_1.pushFeedback)(feedback, "warning", `[unset] --${key}`);
         return;
     }
     session.args.set(key, true);
     session.inheritedKeys.delete(key);
-    pushFeedback(feedback, "success", `[on] --${key}`);
+    (0, cliShellConfig_1.pushFeedback)(feedback, "success", `[on] --${key}`);
 };
 const getLastUrdfMessage = (state) => state.lastUrdfPath ? `last ${state.lastUrdfPath}` : "no remembered URDF yet";
 const printLastUrdf = (state) => {
-    process.stdout.write(`${SHELL_THEME.muted(getLastUrdfMessage(state))}\n`);
+    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(getLastUrdfMessage(state))}\n`);
 };
 const getReadySourceLabel = (state) => state.loadedSource?.githubRef || state.loadedSource?.localPath || state.loadedSource?.urdfPath || state.lastUrdfPath || null;
 const rememberDirectUrdfSource = (state, urdfPath) => {
@@ -1380,7 +821,7 @@ const updateRememberedUrdfPath = (state, session) => {
         return;
     }
     const outPath = session.args.get("out");
-    if (typeof outPath === "string" && URDF_OUTPUT_COMMANDS.has(session.command)) {
+    if (typeof outPath === "string" && cliShellConfig_1.URDF_OUTPUT_COMMANDS.has(session.command)) {
         state.lastUrdfPath = outPath;
         rememberDirectUrdfSource(state, outPath);
     }
@@ -1404,16 +845,16 @@ const printFollowUpSuggestions = (state, command) => {
     }
     for (const line of message.split("\n")) {
         if (line.startsWith("[next]")) {
-            process.stdout.write(`${SHELL_THEME.accent(line)}\n`);
+            process.stdout.write(`${cliShellConfig_1.SHELL_THEME.accent(line)}\n`);
         }
         else {
-            process.stdout.write(`${SHELL_THEME.muted(line)}\n`);
+            process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(line)}\n`);
         }
     }
 };
 const executeCliCommand = (command, args) => {
-    const preview = buildCommandPreview(command, args);
-    const argv = [CLI_ENTRY_PATH, command];
+    const preview = (0, cliShellConfig_1.buildCommandPreview)(command, args);
+    const argv = [cliShellConfig_1.CLI_ENTRY_PATH, command];
     for (const [key, value] of args.entries()) {
         if (value === true) {
             argv.push(`--${key}`);
@@ -1433,7 +874,7 @@ const executeCliCommand = (command, args) => {
     };
 };
 const executeSpecialCliCommand = (argv) => {
-    const result = (0, node_child_process_1.spawnSync)(process.execPath, [CLI_ENTRY_PATH, ...argv], {
+    const result = (0, node_child_process_1.spawnSync)(process.execPath, [cliShellConfig_1.CLI_ENTRY_PATH, ...argv], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
     });
@@ -1459,9 +900,9 @@ const summarizeXacroRuntimePanel = (payload, statusLine) => {
     if (payload.runtime) {
         lines.push(`runtime ${payload.runtime}`);
     }
-    lines.push(`python ${quoteForPreview(payload.pythonExecutable)}`);
+    lines.push(`python ${(0, cliShellConfig_1.quoteForPreview)(payload.pythonExecutable)}`);
     if (payload.venvPath) {
-        lines.push(`venv ${quoteForPreview(payload.venvPath)}`);
+        lines.push(`venv ${(0, cliShellConfig_1.quoteForPreview)(payload.venvPath)}`);
     }
     return {
         title: "xacro",
@@ -1475,7 +916,7 @@ const runXacroBangCommand = (state) => {
     if (probePayload?.available) {
         const pendingRetry = state.xacroRetry;
         if (pendingRetry) {
-            clearXacroRetry(state);
+            (0, cliShellConfig_1.clearXacroRetry)(state);
             const retryResult = pendingRetry(probePayload.pythonExecutable);
             return {
                 panel: retryResult.panel,
@@ -1493,7 +934,7 @@ const runXacroBangCommand = (state) => {
     if (setupPayload?.available) {
         const pendingRetry = state.xacroRetry;
         if (pendingRetry) {
-            clearXacroRetry(state);
+            (0, cliShellConfig_1.clearXacroRetry)(state);
             const retryResult = pendingRetry(setupPayload.pythonExecutable);
             return {
                 panel: retryResult.panel,
@@ -1543,7 +984,7 @@ const buildShellFailureNotice = (panel, fallbackText, fallbackKind = "error") =>
     if (panel?.title === "xacro") {
         return {
             kind: "warning",
-            text: XACRO_RUNTIME_NOTICE,
+            text: cliShellConfig_1.XACRO_RUNTIME_NOTICE,
         };
     }
     return {
@@ -1595,7 +1036,7 @@ const summarizeRepositoryPreview = (session, payload, options = {}) => {
         lines.push(`best match ${payload.primaryCandidatePath}`);
     }
     for (const [index, candidate] of payload.candidates.slice(0, 3).entries()) {
-        const details = getCandidateDetails(candidate);
+        const details = (0, cliShellRecommendations_1.getCandidateDetails)(candidate);
         lines.push(`${index + 1}. ${candidate.path}${details.length > 0 ? `  ${details.join("  ")}` : ""}`);
     }
     if (payload.candidateCount > 3) {
@@ -1613,15 +1054,15 @@ const summarizeRepositoryPreview = (session, payload, options = {}) => {
     };
 };
 const summarizeHealthPreview = (payload, urdfPath, suggestedAction = null) => {
-    const lines = [`source ${quoteForPreview(urdfPath)}`];
-    lines.push(getHealthStatusLine(payload));
+    const lines = [`source ${(0, cliShellConfig_1.quoteForPreview)(urdfPath)}`];
+    lines.push((0, cliShellRecommendations_1.getHealthStatusLine)(payload));
     if (payload.orientationGuess?.likelyUpAxis && payload.orientationGuess?.likelyForwardAxis) {
         lines.push(`orientation likely ${payload.orientationGuess.likelyUpAxis}-up / ${payload.orientationGuess.likelyForwardAxis}-forward`);
     }
     for (const finding of payload.findings.filter((entry) => entry.level !== "info").slice(0, 2)) {
-        lines.push(formatAttentionDetail(finding.message, finding.context));
+        lines.push((0, cliShellRecommendations_1.formatAttentionDetail)(finding.message, finding.context));
     }
-    appendSuggestedActionLines(lines, suggestedAction, "next /analyze or /orientation if you want a deeper review");
+    (0, cliShellRecommendations_1.appendSuggestedActionLines)(lines, suggestedAction, "next /analyze or /orientation if you want a deeper review");
     return {
         title: "health",
         kind: payload.ok && payload.summary.errors === 0 && payload.summary.warnings === 0 ? "success" : "info",
@@ -1630,7 +1071,7 @@ const summarizeHealthPreview = (payload, urdfPath, suggestedAction = null) => {
 };
 const summarizeAnalysisPreview = (payload, urdfPath, suggestedAction = null) => {
     const jointCount = payload.jointHierarchy?.orderedJoints?.length ?? 0;
-    const lines = [`source ${quoteForPreview(urdfPath)}`];
+    const lines = [`source ${(0, cliShellConfig_1.quoteForPreview)(urdfPath)}`];
     if (!payload.isValid) {
         lines.push(payload.error || "could not analyze this URDF");
         return {
@@ -1649,7 +1090,7 @@ const summarizeAnalysisPreview = (payload, urdfPath, suggestedAction = null) => 
             ? `root ${payload.rootLinks[0]}`
             : `${formatCount(payload.rootLinks.length, "root link")}`);
     }
-    appendSuggestedActionLines(lines, suggestedAction, "next /health or /orientation if you want deeper review");
+    (0, cliShellRecommendations_1.appendSuggestedActionLines)(lines, suggestedAction, "next /health or /orientation if you want deeper review");
     return {
         title: "preview",
         kind: "info",
@@ -1657,7 +1098,7 @@ const summarizeAnalysisPreview = (payload, urdfPath, suggestedAction = null) => 
     };
 };
 const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orientation, suggestedAction = null) => {
-    const lines = [`source ${quoteForPreview(urdfPath)}`];
+    const lines = [`source ${(0, cliShellConfig_1.quoteForPreview)(urdfPath)}`];
     const jointCount = analysis.jointHierarchy?.orderedJoints?.length ?? 0;
     if (!analysis.isValid) {
         lines.push(analysis.error || "could not analyze this URDF");
@@ -1672,8 +1113,8 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
     if ((analysis.sensors?.length ?? 0) > 0) {
         lines.push(`${formatCount(analysis.sensors?.length ?? 0, "sensor")}`);
     }
-    lines.push(getValidationStatusLine(validation));
-    lines.push(getHealthStatusLine(health));
+    lines.push((0, cliShellRecommendations_1.getValidationStatusLine)(validation));
+    lines.push((0, cliShellRecommendations_1.getHealthStatusLine)(health));
     if (orientation.isValid && orientation.likelyUpAxis && orientation.likelyForwardAxis) {
         const confidence = typeof orientation.confidence === "number" && Number.isFinite(orientation.confidence)
             ? `  ${Math.round(orientation.confidence * 100)}%`
@@ -1690,7 +1131,7 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
         health.summary.errors > 0 ||
         health.summary.warnings > 0 ||
         analysis.meshReferences.length > 0;
-    attentionLines.push(...collectAttentionLines(validation.issues, health.findings, 2));
+    attentionLines.push(...(0, cliShellRecommendations_1.collectAttentionLines)(validation.issues, health.findings, 2));
     const orientationConflict = orientation.report?.conflicts?.[0];
     if (needsAttention && orientationConflict) {
         attentionLines.push(`note ${orientationConflict}`);
@@ -1706,7 +1147,7 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
     if (!needsAttention) {
         lines.push("looks ready");
     }
-    appendSuggestedActionLines(lines, suggestedAction, needsAttention ? "next /fix what needs attention or rerun /analyze" : "convert it when you need output");
+    (0, cliShellRecommendations_1.appendSuggestedActionLines)(lines, suggestedAction, needsAttention ? "next /fix what needs attention or rerun /analyze" : "convert it when you need output");
     return {
         title: "investigation",
         kind: validation.isValid && health.ok && health.summary.warnings === 0 && attentionLines.length === 0
@@ -1716,12 +1157,12 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
     };
 };
 const summarizeValidationResult = (payload, urdfPath, suggestedAction = null) => {
-    const lines = [`source ${quoteForPreview(urdfPath)}`];
-    lines.push(getValidationStatusLine(payload));
+    const lines = [`source ${(0, cliShellConfig_1.quoteForPreview)(urdfPath)}`];
+    lines.push((0, cliShellRecommendations_1.getValidationStatusLine)(payload));
     for (const issue of payload.issues.slice(0, 2)) {
-        lines.push(formatAttentionDetail(issue.message, issue.context));
+        lines.push((0, cliShellRecommendations_1.formatAttentionDetail)(issue.message, issue.context));
     }
-    appendSuggestedActionLines(lines, suggestedAction, payload.isValid ? "next /analyze or /orientation if you want more" : "fix what needs attention and rerun /validate");
+    (0, cliShellRecommendations_1.appendSuggestedActionLines)(lines, suggestedAction, payload.isValid ? "next /analyze or /orientation if you want more" : "fix what needs attention and rerun /validate");
     return {
         title: "validation",
         kind: payload.isValid && payload.issues.length === 0 ? "success" : "info",
@@ -1729,7 +1170,7 @@ const summarizeValidationResult = (payload, urdfPath, suggestedAction = null) =>
     };
 };
 const summarizeOrientationResult = (payload, urdfPath) => {
-    const lines = [`source ${quoteForPreview(urdfPath)}`];
+    const lines = [`source ${(0, cliShellConfig_1.quoteForPreview)(urdfPath)}`];
     if (!payload.isValid || !payload.likelyUpAxis || !payload.likelyForwardAxis) {
         lines.push("could not infer orientation confidently");
         return {
@@ -1798,11 +1239,11 @@ const runValidationAndHealthChecks = (urdfPath) => {
     };
 };
 const summarizeRepairResult = (actionLine, validation, health, options = {}) => {
-    const lines = [actionLine, "working copy ready", getValidationStatusLine(validation), getHealthStatusLine(health)];
+    const lines = [actionLine, "working copy ready", (0, cliShellRecommendations_1.getValidationStatusLine)(validation), (0, cliShellRecommendations_1.getHealthStatusLine)(health)];
     if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
         lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
     }
-    for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
+    for (const line of (0, cliShellRecommendations_1.collectAttentionLines)(validation.issues, health.findings, 2)) {
         lines.push(line);
     }
     if ((options.unresolvedMeshRefs ?? 0) > 0) {
@@ -1832,7 +1273,7 @@ const getSuggestedActionBusyState = (suggestedAction) => suggestedAction.kind ==
     };
 const runSuggestedAction = (state) => {
     const suggestedAction = state.suggestedAction;
-    clearSuggestedAction(state);
+    (0, cliShellConfig_1.clearSuggestedAction)(state);
     if (!suggestedAction) {
         return {
             panel: null,
@@ -1845,7 +1286,7 @@ const runSuggestedAction = (state) => {
         const repositoryRef = source?.githubRef || source?.localPath;
         if (!source || !source.repositoryUrdfPath || !repositoryRef) {
             return {
-                panel: createOutputPanel("repair", "could not find a loaded repository source", "error"),
+                panel: (0, cliShellUi_1.createOutputPanel)("repair", "could not find a loaded repository source", "error"),
                 notice: { kind: "error", text: "repair could not start" },
                 clearSession: false,
             };
@@ -1911,7 +1352,7 @@ const runSuggestedAction = (state) => {
     const urdfPath = state.loadedSource?.urdfPath || state.lastUrdfPath;
     if (!urdfPath) {
         return {
-            panel: createOutputPanel("repair", "could not find a loaded URDF", "error"),
+            panel: (0, cliShellUi_1.createOutputPanel)("repair", "could not find a loaded URDF", "error"),
             notice: { kind: "error", text: "repair could not start" },
             clearSession: false,
         };
@@ -1946,7 +1387,7 @@ const runSuggestedAction = (state) => {
     }
     catch (error) {
         return {
-            panel: createOutputPanel("repair", error instanceof Error ? error.message : String(error), "error"),
+            panel: (0, cliShellUi_1.createOutputPanel)("repair", error instanceof Error ? error.message : String(error), "error"),
             notice: { kind: "error", text: "repair failed" },
             clearSession: false,
         };
@@ -2040,7 +1481,7 @@ const inspectRepositoryCandidatesForLoad = (session, execArgs, options = {}) => 
         payload,
         panel: summarizeRepositoryPreview(session, payload, {
             sourceLabelOverride: options.extractedArchivePath
-                ? quoteForPreview(options.extractedArchivePath)
+                ? (0, cliShellConfig_1.quoteForPreview)(options.extractedArchivePath)
                 : undefined,
         }),
     };
@@ -2052,7 +1493,7 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
     const loadExecution = executeCliCommand("load-source", loadArgs);
     const loadPayload = parseExecutionJson(loadExecution);
     if (!loadPayload || !loadPayload.outPath) {
-        clearSuggestedAction(state);
+        (0, cliShellConfig_1.clearSuggestedAction)(state);
         const panel = buildPreviewErrorPanel("error", loadExecution);
         if (panel?.title === "xacro") {
             const retryArgs = cloneArgsMap(execArgs);
@@ -2069,7 +1510,7 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
             };
         }
         else {
-            clearXacroRetry(state);
+            (0, cliShellConfig_1.clearXacroRetry)(state);
         }
         return {
             panel,
@@ -2077,7 +1518,7 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
             clearSession: false,
         };
     }
-    clearXacroRetry(state);
+    (0, cliShellConfig_1.clearXacroRetry)(state);
     state.lastUrdfPath = loadPayload.outPath;
     rememberLoadedSource(state, loadPayload, {
         githubRef: typeof execArgs.get("github") === "string" ? String(execArgs.get("github")) : undefined,
@@ -2085,14 +1526,14 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
     const { validationExecution, healthExecution, validationPayload, healthPayload } = runValidationAndHealthChecks(loadPayload.outPath);
     if (!validationPayload || !healthPayload) {
         const panel = buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution);
-        clearXacroRetry(state);
+        (0, cliShellConfig_1.clearXacroRetry)(state);
         return {
             panel,
             notice: buildShellFailureNotice(panel, "validation failed to run"),
             clearSession: false,
         };
     }
-    state.suggestedAction = detectSuggestedAction(state, {
+    state.suggestedAction = (0, cliShellRecommendations_1.detectSuggestedAction)(state, {
         selectedCandidate: options.selectedCandidate,
         urdfPath: loadPayload.outPath,
     });
@@ -2129,13 +1570,13 @@ const runSelectedCandidatePicker = (state, selectionPath) => {
 const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) => {
     const lines = [];
     if (options.extractedArchivePath) {
-        lines.push(`opened archive ${quoteForPreview(options.extractedArchivePath)}`);
+        lines.push(`opened archive ${(0, cliShellConfig_1.quoteForPreview)(options.extractedArchivePath)}`);
     }
     if (loadResult.repositoryUrl) {
         lines.push(`source ${loadResult.repositoryUrl}`);
     }
     else {
-        lines.push(`source ${quoteForPreview(loadResult.inspectedPath)}`);
+        lines.push(`source ${(0, cliShellConfig_1.quoteForPreview)(loadResult.inspectedPath)}`);
     }
     lines.push(`loaded ${loadResult.entryPath}`);
     if ((loadResult.candidateCount ?? 0) > 1) {
@@ -2143,15 +1584,15 @@ const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) =
             ? `selected ${loadResult.entryPath} from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`
             : `picked best match from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`);
     }
-    lines.push(getValidationStatusLine(validation));
-    lines.push(getHealthStatusLine(health));
+    lines.push((0, cliShellRecommendations_1.getValidationStatusLine)(validation));
+    lines.push((0, cliShellRecommendations_1.getHealthStatusLine)(health));
     if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
         lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
     }
-    for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
+    for (const line of (0, cliShellRecommendations_1.collectAttentionLines)(validation.issues, health.findings, 2)) {
         lines.push(line);
     }
-    appendSuggestedActionLines(lines, options.suggestedAction ?? null, "next /analyze /health /validate /orientation or paste another source");
+    (0, cliShellRecommendations_1.appendSuggestedActionLines)(lines, options.suggestedAction ?? null, "next /analyze /health /validate /orientation or paste another source");
     return {
         title: "loaded",
         kind: validation.isValid &&
@@ -2165,16 +1606,16 @@ const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) =
     };
 };
 const summarizeDirectUrdfChecks = (urdfPath, validation, health, suggestedAction = null) => {
-    const lines = [`source ${quoteForPreview(urdfPath)}`];
-    lines.push(getValidationStatusLine(validation));
-    lines.push(getHealthStatusLine(health));
+    const lines = [`source ${(0, cliShellConfig_1.quoteForPreview)(urdfPath)}`];
+    lines.push((0, cliShellRecommendations_1.getValidationStatusLine)(validation));
+    lines.push((0, cliShellRecommendations_1.getHealthStatusLine)(health));
     if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
         lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
     }
-    for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
+    for (const line of (0, cliShellRecommendations_1.collectAttentionLines)(validation.issues, health.findings, 2)) {
         lines.push(line);
     }
-    appendSuggestedActionLines(lines, suggestedAction, "next /analyze /health /validate /orientation or paste another source");
+    (0, cliShellRecommendations_1.appendSuggestedActionLines)(lines, suggestedAction, "next /analyze /health /validate /orientation or paste another source");
     return {
         title: "checks",
         kind: validation.isValid &&
@@ -2205,7 +1646,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
             });
             if (preview) {
                 if (preview.panel.kind === "error") {
-                    clearCandidatePicker(state);
+                    (0, cliShellConfig_1.clearCandidatePicker)(state);
                     return {
                         panel: preview.panel,
                         notice: { kind: "error", text: "preview failed" },
@@ -2213,7 +1654,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
                     };
                 }
                 if (preview.payload.candidateCount === 0) {
-                    clearCandidatePicker(state);
+                    (0, cliShellConfig_1.clearCandidatePicker)(state);
                     return {
                         panel: preview.panel,
                         notice: { kind: "info", text: "preview ready" },
@@ -2239,7 +1680,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
                 const selectedCandidate = typeof execArgs.get("entry") === "string"
                     ? preview.payload.candidates.find((candidate) => candidate.path === execArgs.get("entry"))
                     : undefined;
-                clearCandidatePicker(state);
+                (0, cliShellConfig_1.clearCandidatePicker)(state);
                 return executeLoadSourceChecks(state, execArgs, {
                     extractedArchivePath,
                     requestedEntryPath: typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
@@ -2247,10 +1688,10 @@ const runDirectInputAutomation = (state, session, changedKey) => {
                 });
             }
             else {
-                clearCandidatePicker(state);
+                (0, cliShellConfig_1.clearCandidatePicker)(state);
             }
         }
-        clearCandidatePicker(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
         return executeLoadSourceChecks(state, execArgs, {
             extractedArchivePath,
             requestedEntryPath: typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
@@ -2259,7 +1700,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
     if (((session.command === "analyze" || session.command === "validate" || session.command === "guess-orientation") &&
         changedKey === "urdf") ||
         (session.command === "inspect-repo" && (changedKey === "github" || changedKey === "local"))) {
-        clearCandidatePicker(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
         const execution = executeSessionCommand(state, session);
         if (execution.status !== 0) {
             const panel = getShellExecutionFailurePanel(execution, session.command);
@@ -2270,7 +1711,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
             };
         }
         const panel = getShellExecutionSuccessPanel(state, session, execution) ??
-            createOutputPanel("result", buildExecutionPanelText(execution, session.command), "success");
+            (0, cliShellUi_1.createOutputPanel)("result", buildExecutionPanelText(execution, session.command), "success");
         return {
             panel,
             notice: {
@@ -2287,7 +1728,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
         };
     }
     if (session.command === "health-check" && changedKey === "urdf") {
-        clearCandidatePicker(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
         const urdfPath = session.args.get("urdf");
         if (typeof urdfPath !== "string" || urdfPath.trim().length === 0) {
             return null;
@@ -2303,7 +1744,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
                 clearSession: false,
             };
         }
-        state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+        state.suggestedAction = (0, cliShellRecommendations_1.detectSuggestedAction)(state, { urdfPath });
         const panel = summarizeDirectUrdfChecks(urdfPath, validationPayload, healthPayload, state.suggestedAction);
         return {
             panel,
@@ -2332,7 +1773,7 @@ const applyValueChangeEffects = (state, session, changedKey) => {
     };
 };
 const buildAutoPreviewPanel = (state, session, changedKey) => {
-    clearCandidatePicker(state);
+    (0, cliShellConfig_1.clearCandidatePicker)(state);
     let previewCommand = null;
     const previewArgs = new Map();
     if (session.command === "load-source" && (changedKey === "github" || changedKey === "path")) {
@@ -2392,7 +1833,7 @@ const buildAutoPreviewPanel = (state, session, changedKey) => {
         if (payload && urdfPath) {
             state.lastUrdfPath = urdfPath;
             rememberDirectUrdfSource(state, urdfPath);
-            state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+            state.suggestedAction = (0, cliShellRecommendations_1.detectSuggestedAction)(state, { urdfPath });
             return summarizeHealthPreview(payload, urdfPath, state.suggestedAction);
         }
         return buildPreviewErrorPanel("health", execution);
@@ -2403,7 +1844,7 @@ const buildAutoPreviewPanel = (state, session, changedKey) => {
         if (payload && urdfPath) {
             state.lastUrdfPath = urdfPath;
             rememberDirectUrdfSource(state, urdfPath);
-            state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+            state.suggestedAction = (0, cliShellRecommendations_1.detectSuggestedAction)(state, { urdfPath });
             return summarizeAnalysisPreview(payload, urdfPath, state.suggestedAction);
         }
         return buildPreviewErrorPanel("preview", execution);
@@ -2468,7 +1909,7 @@ const executeSessionCommand = (state, session) => {
                 };
             }
             updateRememberedUrdfPath(state, session);
-            state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+            state.suggestedAction = (0, cliShellRecommendations_1.detectSuggestedAction)(state, { urdfPath });
             return {
                 preview: analysisExecution.preview,
                 stdout: "",
@@ -2487,11 +1928,11 @@ const executeSessionCommand = (state, session) => {
             const urdfPath = session.args.get("urdf");
             state.suggestedAction =
                 typeof urdfPath === "string" && urdfPath.trim().length > 0
-                    ? detectSuggestedAction(state, { urdfPath })
+                    ? (0, cliShellRecommendations_1.detectSuggestedAction)(state, { urdfPath })
                     : null;
         }
         else if (session.command === "inspect-repo" || session.command === "repair-mesh-refs" || session.command === "fix-mesh-paths") {
-            clearSuggestedAction(state);
+            (0, cliShellConfig_1.clearSuggestedAction)(state);
         }
     }
     return {
@@ -2568,26 +2009,26 @@ const getShellExecutionFailurePanel = (execution, command) => {
 const printSessionCommandExecution = (state, execution, session) => {
     const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
     if (compactFailurePanel) {
-        writeFeedback(buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`));
-        printOutputPanel(compactFailurePanel);
+        (0, cliShellConfig_1.writeFeedback)(buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`));
+        (0, cliShellUi_1.printOutputPanel)(compactFailurePanel);
         return;
     }
     const successPanel = getShellExecutionSuccessPanel(state, session, execution);
     if (successPanel) {
-        printOutputPanel(successPanel);
+        (0, cliShellUi_1.printOutputPanel)(successPanel);
         if (execution.followUp) {
             for (const line of execution.followUp.split("\n")) {
                 if (line.startsWith("[next]")) {
-                    process.stdout.write(`${SHELL_THEME.accent(line)}\n`);
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.accent(line)}\n`);
                 }
                 else {
-                    process.stdout.write(`${SHELL_THEME.muted(line)}\n`);
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(line)}\n`);
                 }
             }
         }
         return;
     }
-    process.stdout.write(`\n${formatStatusTag("cmd")} ${SHELL_THEME.command(execution.preview)}\n`);
+    process.stdout.write(`\n${formatStatusTag("cmd")} ${cliShellConfig_1.SHELL_THEME.command(execution.preview)}\n`);
     if (execution.stdout) {
         process.stdout.write(execution.stdout);
     }
@@ -2601,10 +2042,10 @@ const printSessionCommandExecution = (state, execution, session) => {
     if (execution.followUp) {
         for (const line of execution.followUp.split("\n")) {
             if (line.startsWith("[next]")) {
-                process.stdout.write(`${SHELL_THEME.accent(line)}\n`);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.accent(line)}\n`);
             }
             else {
-                process.stdout.write(`${SHELL_THEME.muted(line)}\n`);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(line)}\n`);
             }
         }
     }
@@ -2661,7 +2102,7 @@ const createSession = (command, state, label = command, feedback) => {
     if (inheritedValues.length > 0) {
         const primaryInherited = inheritedValues[0]?.[1];
         if (primaryInherited) {
-            pushFeedback(feedback, "info", `using ${primaryInherited}`);
+            (0, cliShellConfig_1.pushFeedback)(feedback, "info", `using ${primaryInherited}`);
         }
     }
     return session;
@@ -2677,15 +2118,15 @@ const listAvailableSlashCommands = (state) => {
         return [
             ...new Set([
                 ...getSessionMenuEntries(state.session).map((entry) => entry.name),
-                ...HIDDEN_SHELL_COMMAND_NAMES,
+                ...cliShellConfig_1.HIDDEN_SHELL_COMMAND_NAMES,
             ]),
         ];
     }
     return [
         ...new Set([
             ...getRootMenuEntries(state).map((entry) => entry.name),
-            ...SHELL_BUILTIN_COMMANDS.map((entry) => entry.name),
-            ...HIDDEN_SHELL_COMMAND_NAMES,
+            ...cliShellConfig_1.SHELL_BUILTIN_COMMANDS.map((entry) => entry.name),
+            ...cliShellConfig_1.HIDDEN_SHELL_COMMAND_NAMES,
             ...commandCatalog_1.CLI_HELP_SECTIONS.flatMap((section) => section.commands),
         ]),
     ];
@@ -3009,8 +2450,8 @@ const shouldTreatAsSlashInput = (rawValue, state) => {
 };
 const startRootTaskAction = (task, action, state, feedback) => {
     state.rootTask = task;
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    (0, cliShellConfig_1.clearCandidatePicker)(state);
+    (0, cliShellConfig_1.clearXacroRetry)(state);
     state.session = createSession(action.command, state, action.sessionLabel, feedback);
     if (state.session) {
         openPendingForSession(state.session, action.openPending);
@@ -3018,8 +2459,8 @@ const startRootTaskAction = (task, action, state, feedback) => {
 };
 const startRootShellCommand = (entry, state, feedback) => {
     state.rootTask = null;
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    (0, cliShellConfig_1.clearCandidatePicker)(state);
+    (0, cliShellConfig_1.clearXacroRetry)(state);
     state.session = createSession(entry.command, state, entry.sessionLabel, feedback);
     if (state.session) {
         openPendingForSession(state.session, entry.openPending);
@@ -3044,8 +2485,8 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
     }
     if (slashCommand === "doctor") {
         const result = runDoctorShellCommand();
-        writeFeedback(result.notice);
-        printOutputPanel(result.panel);
+        (0, cliShellConfig_1.writeFeedback)(result.notice);
+        (0, cliShellUi_1.printOutputPanel)(result.panel);
         return;
     }
     if (slashCommand === "last") {
@@ -3053,14 +2494,14 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         return;
     }
     if (slashCommand === "run") {
-        process.stdout.write(`${SHELL_THEME.muted(getRootIdleMessage(state))}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(getRootIdleMessage(state))}\n`);
         return;
     }
     const rootShellCommand = getRootShellCommandDefinition(slashCommand);
     if (rootShellCommand) {
         const feedback = [];
         startRootShellCommand(rootShellCommand, state, feedback);
-        flushFeedback(feedback);
+        (0, cliShellConfig_1.flushFeedback)(feedback);
         if (state.session && shouldAutoRunSession(state.session)) {
             printSessionCommandExecution(state, executeSessionCommand(state, state.session), state.session);
             state.session = null;
@@ -3078,23 +2519,23 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
     }
     if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
         process.stderr.write(`Unknown slash command: /${slashCommand}\n`);
-        process.stdout.write(`${ROOT_GUIDANCE}\n`);
+        process.stdout.write(`${cliShellConfig_1.ROOT_GUIDANCE}\n`);
         return;
     }
     const command = slashCommand;
     const quickSession = tryCreateLoadedRootQuickSession(state, command);
     if (quickSession) {
-        clearCandidatePicker(state);
-        clearXacroRetry(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
+        (0, cliShellConfig_1.clearXacroRetry)(state);
         printSessionCommandExecution(state, executeSessionCommand(state, quickSession), quickSession);
         return;
     }
     state.rootTask = null;
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    (0, cliShellConfig_1.clearCandidatePicker)(state);
+    (0, cliShellConfig_1.clearXacroRetry)(state);
     const feedback = [];
     state.session = createSession(command, state, slashCommand, feedback);
-    flushFeedback(feedback);
+    (0, cliShellConfig_1.flushFeedback)(feedback);
     printSessionOptions(state, state.session);
 };
 const handleRootTaskSlashCommand = (slashCommand, state, close) => {
@@ -3108,10 +2549,10 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
         return;
     }
     if (slashCommand === "back") {
-        clearCandidatePicker(state);
-        clearXacroRetry(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
+        (0, cliShellConfig_1.clearXacroRetry)(state);
         state.rootTask = null;
-        process.stdout.write(`${SHELL_THEME.muted("back to tasks")}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("back to tasks")}\n`);
         return;
     }
     if (slashCommand === "exit" || slashCommand === "quit") {
@@ -3128,8 +2569,8 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
     }
     if (slashCommand === "doctor") {
         const result = runDoctorShellCommand();
-        writeFeedback(result.notice);
-        printOutputPanel(result.panel);
+        (0, cliShellConfig_1.writeFeedback)(result.notice);
+        (0, cliShellUi_1.printOutputPanel)(result.panel);
         return;
     }
     if (slashCommand === "last") {
@@ -3137,14 +2578,14 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
         return;
     }
     if (slashCommand === "run") {
-        process.stdout.write(`${SHELL_THEME.muted("nothing is pending here. paste a source or use one of the direct actions")}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("nothing is pending here. paste a source or use one of the direct actions")}\n`);
         return;
     }
     const action = findRootTaskAction(task, slashCommand);
     if (action) {
         const feedback = [];
         startRootTaskAction(task, action, state, feedback);
-        flushFeedback(feedback);
+        (0, cliShellConfig_1.flushFeedback)(feedback);
         if (state.session && shouldAutoRunSession(state.session)) {
             printSessionCommandExecution(state, executeSessionCommand(state, state.session), state.session);
             state.session = null;
@@ -3166,10 +2607,10 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
     }
     const feedback = [];
     state.rootTask = null;
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    (0, cliShellConfig_1.clearCandidatePicker)(state);
+    (0, cliShellConfig_1.clearXacroRetry)(state);
     state.session = createSession(slashCommand, state, slashCommand, feedback);
-    flushFeedback(feedback);
+    (0, cliShellConfig_1.flushFeedback)(feedback);
     printSessionOptions(state, state.session);
 };
 const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
@@ -3182,18 +2623,18 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         return;
     }
     if (slashCommand === "back") {
-        clearCandidatePicker(state);
-        clearXacroRetry(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
+        (0, cliShellConfig_1.clearXacroRetry)(state);
         state.session = null;
-        process.stdout.write(`${SHELL_THEME.muted(state.rootTask ? `back to /${state.rootTask}` : "back to tasks")}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(state.rootTask ? `back to /${state.rootTask}` : "back to tasks")}\n`);
         return;
     }
     if (slashCommand === "reset") {
         const feedback = [];
-        clearCandidatePicker(state);
-        clearXacroRetry(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
+        (0, cliShellConfig_1.clearXacroRetry)(state);
         state.session = createSession(session.command, state, session.label, feedback);
-        flushFeedback(feedback);
+        (0, cliShellConfig_1.flushFeedback)(feedback);
         printSessionOptions(state, state.session);
         return;
     }
@@ -3202,10 +2643,10 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         return;
     }
     if (slashCommand === "run") {
-        clearCandidatePicker(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
         const requirementStatus = getRequirementStatus(session);
         if (!requirementStatus.ready) {
-            process.stderr.write(`${SHELL_THEME.warning("[missing]")} ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
+            process.stderr.write(`${cliShellConfig_1.SHELL_THEME.warning("[missing]")} ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
             return;
         }
         printSessionCommandExecution(state, executeSessionCommand(state, session), session);
@@ -3221,8 +2662,8 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     }
     if (slashCommand === "doctor") {
         const result = runDoctorShellCommand();
-        writeFeedback(result.notice);
-        printOutputPanel(result.panel);
+        (0, cliShellConfig_1.writeFeedback)(result.notice);
+        (0, cliShellUi_1.printOutputPanel)(result.panel);
         return;
     }
     if (slashCommand === "clear") {
@@ -3239,9 +2680,9 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     }
     if (!target.option.valueHint) {
         const feedback = [];
-        clearCandidatePicker(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
         toggleSessionFlag(session, target.key, feedback);
-        flushFeedback(feedback);
+        (0, cliShellConfig_1.flushFeedback)(feedback);
         printSessionStatus(state, session);
         return;
     }
@@ -3249,18 +2690,18 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
         const feedback = [];
         if (setSessionValue(session, target.key, inlineValue, feedback)) {
             session.pending = null;
-            flushFeedback(feedback);
+            (0, cliShellConfig_1.flushFeedback)(feedback);
             const { automation, preview } = applyValueChangeEffects(state, session, target.key);
             if (automation) {
                 if (automation.notice) {
-                    writeFeedback(automation.notice);
+                    (0, cliShellConfig_1.writeFeedback)(automation.notice);
                 }
-                printOutputPanel(automation.panel);
+                (0, cliShellUi_1.printOutputPanel)(automation.panel);
                 if (state.candidatePicker) {
-                    printCandidatePicker(state.candidatePicker);
+                    (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
                 }
                 if (automation.clearSession) {
-                    clearCandidatePicker(state);
+                    (0, cliShellConfig_1.clearCandidatePicker)(state);
                     state.session = null;
                     state.rootTask = null;
                 }
@@ -3270,13 +2711,13 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
                 return;
             }
             printSessionStatus(state, session);
-            printOutputPanel(preview);
+            (0, cliShellUi_1.printOutputPanel)(preview);
             if (state.candidatePicker) {
-                printCandidatePicker(state.candidatePicker);
+                (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
             }
             return;
         }
-        flushFeedback(feedback);
+        (0, cliShellConfig_1.flushFeedback)(feedback);
         return;
     }
     session.pending = getPendingValuePrompt(session, target.key, slashCommand);
@@ -3291,18 +2732,18 @@ const handlePendingValue = (input, state) => {
     if (setSessionValue(session, session.pending.key, input, feedback)) {
         const changedKey = session.pending.key;
         session.pending = null;
-        flushFeedback(feedback);
+        (0, cliShellConfig_1.flushFeedback)(feedback);
         const { automation, preview } = applyValueChangeEffects(state, session, changedKey);
         if (automation) {
             if (automation.notice) {
-                writeFeedback(automation.notice);
+                (0, cliShellConfig_1.writeFeedback)(automation.notice);
             }
-            printOutputPanel(automation.panel);
+            (0, cliShellUi_1.printOutputPanel)(automation.panel);
             if (state.candidatePicker) {
-                printCandidatePicker(state.candidatePicker);
+                (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
             }
             if (automation.clearSession) {
-                clearCandidatePicker(state);
+                (0, cliShellConfig_1.clearCandidatePicker)(state);
                 state.session = null;
                 state.rootTask = null;
             }
@@ -3312,13 +2753,13 @@ const handlePendingValue = (input, state) => {
             return;
         }
         printSessionStatus(state, session);
-        printOutputPanel(preview);
+        (0, cliShellUi_1.printOutputPanel)(preview);
         if (state.candidatePicker) {
-            printCandidatePicker(state.candidatePicker);
+            (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
         }
         return;
     }
-    flushFeedback(feedback);
+    (0, cliShellConfig_1.flushFeedback)(feedback);
     printPendingValuePrompt(session.pending);
 };
 const applyFreeformInputToSession = (session, rawValue, feedback) => {
@@ -3357,7 +2798,7 @@ const resolveCandidateSelectionInput = (state, rawValue) => {
     }
     const trimmed = rawValue.trim();
     if (trimmed.length === 0) {
-        return picker.candidates[clamp(picker.selectedIndex, 0, picker.candidates.length - 1)]?.path ?? null;
+        return picker.candidates[(0, cliShellConfig_1.clamp)(picker.selectedIndex, 0, picker.candidates.length - 1)]?.path ?? null;
     }
     if (/^\d+$/.test(trimmed)) {
         const index = Number(trimmed) - 1;
@@ -3369,7 +2810,7 @@ const resolveCandidateSelectionInput = (state, rawValue) => {
     }
     return (0, shellPathInput_1.normalizeShellInput)(rawValue);
 };
-const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
+const ROOT_SYSTEM_MENU_ENTRIES = cliShellConfig_1.SHELL_BUILTIN_COMMANDS.map((entry) => ({
     ...entry,
     kind: "system",
 }));
@@ -3385,8 +2826,8 @@ const buildRootShellMenuEntries = (names) => names
     summary: entry.summary,
     kind: "flow",
 }));
-const START_ROOT_MENU_ENTRIES = buildRootShellMenuEntries(ROOT_START_COMMAND_NAMES);
-const LOADED_ROOT_MENU_ENTRIES = buildRootShellMenuEntries(ROOT_READY_COMMAND_NAMES);
+const START_ROOT_MENU_ENTRIES = buildRootShellMenuEntries(cliShellConfig_1.ROOT_START_COMMAND_NAMES);
+const LOADED_ROOT_MENU_ENTRIES = buildRootShellMenuEntries(cliShellConfig_1.ROOT_READY_COMMAND_NAMES);
 const AUTO_RUN_READY_COMMANDS = new Set([
     "analyze",
     "validate",
@@ -3456,7 +2897,7 @@ const getSessionMenuEntries = (session) => {
             summary: entry.summary,
             kind: "option",
         }));
-    for (const entry of SESSION_BUILTIN_COMMANDS) {
+    for (const entry of cliShellConfig_1.SESSION_BUILTIN_COMMANDS) {
         entries.push({
             name: entry.name,
             summary: entry.summary,
@@ -3620,9 +3061,9 @@ const getMenuWindow = (entries, selectedIndex, maxVisible) => {
     if (entries.length === 0) {
         return { selectedIndex: 0, start: 0, visible: [] };
     }
-    const normalizedSelectedIndex = clamp(selectedIndex, 0, entries.length - 1);
-    const visibleCount = clamp(maxVisible, 1, entries.length);
-    const start = clamp(normalizedSelectedIndex - Math.floor(visibleCount / 2), 0, Math.max(entries.length - visibleCount, 0));
+    const normalizedSelectedIndex = (0, cliShellConfig_1.clamp)(selectedIndex, 0, entries.length - 1);
+    const visibleCount = (0, cliShellConfig_1.clamp)(maxVisible, 1, entries.length);
+    const start = (0, cliShellConfig_1.clamp)(normalizedSelectedIndex - Math.floor(visibleCount / 2), 0, Math.max(entries.length - visibleCount, 0));
     return {
         selectedIndex: normalizedSelectedIndex,
         start,
@@ -3632,10 +3073,10 @@ const getMenuWindow = (entries, selectedIndex, maxVisible) => {
 const buildSessionPreviewText = (state, session) => {
     const lines = getSessionContextRows(state, session).map((row) => `${row.label} ${row.value}`);
     lines.push("");
-    lines.push(`command ${buildCommandPreview(session.command, session.args)}`);
+    lines.push(`command ${(0, cliShellConfig_1.buildCommandPreview)(session.command, session.args)}`);
     if (session.args.size > 0) {
         for (const [key, value] of session.args.entries()) {
-            lines.push(`${getSlashDisplayName(session, key)}${formatInlineValue(value === true ? "enabled" : String(value))}`);
+            lines.push(`${getSlashDisplayName(session, key)}${(0, cliShellConfig_1.formatInlineValue)(value === true ? "enabled" : String(value))}`);
         }
     }
     return lines.join("\n");
@@ -3660,28 +3101,28 @@ const renderNotice = (notice) => {
     const text = notice.text;
     switch (notice.kind) {
         case "success":
-            return SHELL_THEME.success(text);
+            return cliShellConfig_1.SHELL_THEME.success(text);
         case "warning":
-            return SHELL_THEME.warning(text);
+            return cliShellConfig_1.SHELL_THEME.warning(text);
         case "error":
-            return SHELL_THEME.error(text);
+            return cliShellConfig_1.SHELL_THEME.error(text);
         case "info":
-            return SHELL_THEME.muted(text);
+            return cliShellConfig_1.SHELL_THEME.muted(text);
     }
 };
 const renderTimelineEntryLine = (entry, line, first) => {
     if (entry.role === "user") {
-        return `  ${SHELL_THEME.command(">")} ${SHELL_THEME.command(line)}`;
+        return `  ${cliShellConfig_1.SHELL_THEME.command(">")} ${cliShellConfig_1.SHELL_THEME.command(line)}`;
     }
-    const icon = first ? getPanelLineIcon(line) : "·";
+    const icon = first ? (0, cliShellUi_1.getPanelLineIcon)(line) : "·";
     const text = entry.kind === "error"
-        ? SHELL_THEME.error(line)
+        ? cliShellConfig_1.SHELL_THEME.error(line)
         : entry.kind === "warning"
-            ? SHELL_THEME.warning(line)
+            ? cliShellConfig_1.SHELL_THEME.warning(line)
             : entry.kind === "success" && first
-                ? SHELL_THEME.success(line)
-                : SHELL_THEME.muted(line);
-    return `  ${SHELL_THEME.icon(icon)} ${text}`;
+                ? cliShellConfig_1.SHELL_THEME.success(line)
+                : cliShellConfig_1.SHELL_THEME.muted(line);
+    return `  ${cliShellConfig_1.SHELL_THEME.icon(icon)} ${text}`;
 };
 const shouldRenderInlineNotice = (view) => {
     if (!view.notice) {
@@ -3711,7 +3152,7 @@ const renderMenuEntry = (entry, selected, width) => {
     const availableSummaryWidth = Math.max(12, width - left.length - badgeSuffix.length - 1);
     const summary = truncateText(entry.summary, availableSummaryWidth);
     const line = `${left}${summary}${badgeSuffix}`;
-    return selected ? SHELL_THEME.selected(line) : `${SHELL_THEME.command(left)}${SHELL_THEME.muted(`${summary}${badgeSuffix}`)}`;
+    return selected ? cliShellConfig_1.SHELL_THEME.selected(line) : `${cliShellConfig_1.SHELL_THEME.command(left)}${cliShellConfig_1.SHELL_THEME.muted(`${summary}${badgeSuffix}`)}`;
 };
 const getPromptPlaceholder = (state) => {
     if (!state.session && !state.rootTask && !state.candidatePicker && state.updatePrompt) {
@@ -3767,10 +3208,10 @@ const renderTtyShell = (state, view) => {
     const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
     view.menuIndex = menuWindow.selectedIndex;
     const lines = [];
-    lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
-    lines.push(SHELL_THEME.muted("paste owner/repo or drop a local path  / shows actions  !xacro sets up xacro  ctrl+c exits"));
+    lines.push(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)} ${cliShellConfig_1.SHELL_THEME.muted("ilu interactive urdf shell")}`);
+    lines.push(cliShellConfig_1.SHELL_THEME.muted("paste owner/repo or drop a local path  / shows actions  !xacro sets up xacro  ctrl+c exits"));
     if (state.candidatePicker && state.session) {
-        const selectedCandidate = state.candidatePicker.candidates[clamp(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
+        const selectedCandidate = state.candidatePicker.candidates[(0, cliShellConfig_1.clamp)(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
         const rows = getSessionContextRows(state, state.session).filter((row) => row.label !== "next");
         rows.push({
             label: "selected",
@@ -3782,31 +3223,31 @@ const renderTtyShell = (state, view) => {
             tone: "accent",
         });
         for (const row of rows) {
-            lines.push(renderContextRow(row));
+            lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
         if (selectedCandidate) {
-            const selectedDetails = getCandidateDetails(selectedCandidate);
+            const selectedDetails = (0, cliShellRecommendations_1.getCandidateDetails)(selectedCandidate);
             if (selectedDetails.length > 0) {
-                lines.push(`  ${SHELL_THEME.muted("details".padEnd(12))} ${SHELL_THEME.muted(selectedDetails.join("  "))}`);
+                lines.push(`  ${cliShellConfig_1.SHELL_THEME.muted("details".padEnd(12))} ${cliShellConfig_1.SHELL_THEME.muted(selectedDetails.join("  "))}`);
             }
         }
     }
     else if (state.session) {
         for (const row of getSessionContextRows(state, state.session)) {
-            lines.push(renderContextRow(row));
+            lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
     }
     else if (state.rootTask) {
-        lines.push(renderContextRow({ label: "source", value: "none yet", tone: "muted" }));
-        lines.push(renderContextRow({ label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" }));
-        lines.push(renderContextRow({ label: "next", value: "paste input directly or type /", tone: "accent" }));
+        lines.push((0, cliShellUi_1.renderContextRow)({ label: "source", value: "none yet", tone: "muted" }));
+        lines.push((0, cliShellUi_1.renderContextRow)({ label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" }));
+        lines.push((0, cliShellUi_1.renderContextRow)({ label: "next", value: "paste input directly or type /", tone: "accent" }));
     }
     else {
         for (const row of getLoadedSourceContextRows(state)) {
-            lines.push(renderContextRow(row));
+            lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
         if (!getReadySourceLabel(state)) {
-            lines.push(renderContextRow({ label: "help", value: "/ shows direct actions when you need them", tone: "muted" }));
+            lines.push((0, cliShellUi_1.renderContextRow)({ label: "help", value: "/ shows direct actions when you need them", tone: "muted" }));
         }
     }
     if (view.timeline.length > 0) {
@@ -3817,68 +3258,68 @@ const renderTtyShell = (state, view) => {
         }
     }
     if (view.busy) {
-        lines.push(`  ${SHELL_THEME.icon("…")} ${SHELL_THEME.muted(`${view.busy.title}  ${view.busy.lines.join("  ")}`)}`);
+        lines.push(`  ${cliShellConfig_1.SHELL_THEME.icon("…")} ${cliShellConfig_1.SHELL_THEME.muted(`${view.busy.title}  ${view.busy.lines.join("  ")}`)}`);
     }
     if (state.updatePrompt && !view.busy) {
-        lines.push(`  ${SHELL_THEME.icon("↑")} ${SHELL_THEME.muted(formatUpdatePromptLine(state.updatePrompt))}`);
+        lines.push(`  ${cliShellConfig_1.SHELL_THEME.icon("↑")} ${cliShellConfig_1.SHELL_THEME.muted((0, cliShellConfig_1.formatUpdatePromptLine)(state.updatePrompt))}`);
     }
     if (state.suggestedAction && !view.busy && !state.session && !state.rootTask && !state.candidatePicker) {
-        lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(state.suggestedAction.prompt)}`);
+        lines.push(`  ${cliShellConfig_1.SHELL_THEME.icon("→")} ${cliShellConfig_1.SHELL_THEME.muted(state.suggestedAction.prompt)}`);
     }
     if (shouldRenderInlineNotice(view)) {
         lines.push(`  ${renderNotice(view.notice)}`);
     }
-    const promptLabel = formatShellPrompt(state).trimEnd();
+    const promptLabel = (0, cliShellConfig_1.formatShellPrompt)(state).trimEnd();
     const promptLineIndex = lines.length;
     const shouldShowPlaceholder = view.input.length === 0 &&
         !view.busy &&
         (view.timeline.length === 0 || Boolean(state.session) || Boolean(state.candidatePicker));
     const placeholder = shouldShowPlaceholder ? getPromptPlaceholder(state) : "";
-    lines.push(`${SHELL_THEME.command(promptLabel)} ${view.input}${view.busy ? SHELL_THEME.muted("working...") : placeholder ? SHELL_THEME.muted(placeholder) : ""}`);
+    lines.push(`${cliShellConfig_1.SHELL_THEME.command(promptLabel)} ${view.input}${view.busy ? cliShellConfig_1.SHELL_THEME.muted("working...") : placeholder ? cliShellConfig_1.SHELL_THEME.muted(placeholder) : ""}`);
     if (state.session?.pending && !view.input.startsWith("/")) {
         const hasExamples = state.session.pending.examples.length > 0;
         const hasNotes = state.session.pending.notes.length > 0;
         if (hasExamples) {
-            lines.push(SHELL_THEME.section("examples"));
+            lines.push(cliShellConfig_1.SHELL_THEME.section("examples"));
             for (const example of state.session.pending.examples.slice(0, 2)) {
-                lines.push(`  ${SHELL_THEME.muted(example)}`);
+                lines.push(`  ${cliShellConfig_1.SHELL_THEME.muted(example)}`);
             }
         }
         if (hasNotes) {
-            lines.push(SHELL_THEME.section("note"));
+            lines.push(cliShellConfig_1.SHELL_THEME.section("note"));
             for (const note of state.session.pending.notes) {
-                lines.push(`  ${SHELL_THEME.warning(truncateText(note, columns - 4))}`);
+                lines.push(`  ${cliShellConfig_1.SHELL_THEME.warning(truncateText(note, columns - 4))}`);
             }
         }
     }
     else if (state.candidatePicker && !view.input.startsWith("/")) {
-        lines.push(SHELL_THEME.section("picker"));
+        lines.push(cliShellConfig_1.SHELL_THEME.section("picker"));
         for (const [index, candidate] of state.candidatePicker.candidates.slice(0, 8).entries()) {
-            const details = getCandidateDetails(candidate);
+            const details = (0, cliShellRecommendations_1.getCandidateDetails)(candidate);
             const line = `${candidate.path}${details.length > 0 ? `  ${details.join("  ")}` : ""}`;
             const selected = index === state.candidatePicker.selectedIndex;
             lines.push(selected
-                ? `  ${SHELL_THEME.selected(` ${truncateText(line, columns - 6)} `)}`
-                : `  ${SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${SHELL_THEME.muted(truncateText(details.join("  "), columns - candidate.path.length - 8))}` : ""}`);
+                ? `  ${cliShellConfig_1.SHELL_THEME.selected(` ${truncateText(line, columns - 6)} `)}`
+                : `  ${cliShellConfig_1.SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${cliShellConfig_1.SHELL_THEME.muted(truncateText(details.join("  "), columns - candidate.path.length - 8))}` : ""}`);
         }
         if (state.candidatePicker.candidates.length > 8) {
-            lines.push(`  ${SHELL_THEME.muted("...")}`);
+            lines.push(`  ${cliShellConfig_1.SHELL_THEME.muted("...")}`);
         }
     }
     else if (shouldTreatAsSlashInput(view.input, state)) {
-        lines.push(SHELL_THEME.section("picker"));
+        lines.push(cliShellConfig_1.SHELL_THEME.section("picker"));
         if (menuEntries.length === 0) {
-            lines.push(`  ${SHELL_THEME.warning("no matches")}`);
+            lines.push(`  ${cliShellConfig_1.SHELL_THEME.warning("no matches")}`);
         }
         else {
             if (menuWindow.start > 0) {
-                lines.push(`  ${SHELL_THEME.muted("...")}`);
+                lines.push(`  ${cliShellConfig_1.SHELL_THEME.muted("...")}`);
             }
             for (const [index, entry] of menuWindow.visible.entries()) {
                 lines.push(renderMenuEntry(entry, menuWindow.start + index === menuWindow.selectedIndex, columns - 2));
             }
             if (menuWindow.start + menuWindow.visible.length < menuEntries.length) {
-                lines.push(`  ${SHELL_THEME.muted("...")}`);
+                lines.push(`  ${cliShellConfig_1.SHELL_THEME.muted("...")}`);
             }
         }
     }
@@ -3889,7 +3330,7 @@ const renderTtyShell = (state, view) => {
         process.stdout.write(`\u001b[${linesBelowPrompt}A`);
     }
     process.stdout.write("\r");
-    process.stdout.write(`\u001b[${stripAnsi(`${promptLabel} ${view.input}`).length}C`);
+    process.stdout.write(`\u001b[${(0, cliShellConfig_1.stripAnsi)(`${promptLabel} ${view.input}`).length}C`);
 };
 const completeTtyPathInput = (input, state) => {
     if (state.session?.pending && state.session.pending.expectsPath) {
@@ -3948,7 +3389,7 @@ const completeSelectedSlashInput = (input, state, selectedIndex) => {
     if (menuEntries.length === 0) {
         return null;
     }
-    const selected = menuEntries[clamp(selectedIndex, 0, menuEntries.length - 1)];
+    const selected = menuEntries[(0, cliShellConfig_1.clamp)(selectedIndex, 0, menuEntries.length - 1)];
     return selected ? `/${selected.name}` : null;
 };
 const startStartupUpdateCheck = (state, onAvailable) => {
@@ -3985,14 +3426,14 @@ const runLineInteractiveShell = async (options = {}) => {
         rl.close();
     });
     const close = () => rl.close();
-    printRootQuickStart();
+    (0, cliShellUi_1.printRootQuickStart)();
     if (options.initialSlashCommand) {
         const parsed = parseSlashInput(options.initialSlashCommand);
         if (parsed) {
             handleRootSlashCommand(parsed.slashCommand, state, close);
         }
     }
-    rl.setPrompt(formatShellPrompt(state));
+    rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
     rl.prompt();
     for await (const line of rl) {
         const trimmed = line.trim();
@@ -4000,14 +3441,14 @@ const runLineInteractiveShell = async (options = {}) => {
         const isSlashInput = shouldTreatAsSlashInput(line, state);
         const bangCommand = parseBangInput(line);
         if (state.suggestedAction && trimmed.length > 0) {
-            clearSuggestedAction(state);
+            (0, cliShellConfig_1.clearSuggestedAction)(state);
         }
         if (bangCommand) {
             if (bangCommand === "xacro") {
-                process.stdout.write(`${SHELL_THEME.muted("setting up xacro runtime...")}\n`);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("setting up xacro runtime...")}\n`);
                 const result = runXacroBangCommand(state);
-                writeFeedback(result.notice);
-                printOutputPanel(result.panel);
+                (0, cliShellConfig_1.writeFeedback)(result.notice);
+                (0, cliShellUi_1.printOutputPanel)(result.panel);
                 if (result.clearSession) {
                     state.session = null;
                     state.rootTask = null;
@@ -4019,19 +3460,19 @@ const runLineInteractiveShell = async (options = {}) => {
             if (selectedPath) {
                 const result = runSelectedCandidatePicker(state, selectedPath);
                 if (result?.notice) {
-                    writeFeedback(result.notice);
+                    (0, cliShellConfig_1.writeFeedback)(result.notice);
                 }
-                printOutputPanel(result?.panel ?? null);
+                (0, cliShellUi_1.printOutputPanel)(result?.panel ?? null);
                 if (result?.clearSession) {
-                    clearCandidatePicker(state);
+                    (0, cliShellConfig_1.clearCandidatePicker)(state);
                     state.session = null;
                     state.rootTask = null;
                 }
             }
             else {
-                process.stdout.write(`${SHELL_THEME.warning("pick a valid number or paste a repo entry path")}\n`);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning("pick a valid number or paste a repo entry path")}\n`);
                 if (state.candidatePicker) {
-                    printCandidatePicker(state.candidatePicker);
+                    (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
                 }
             }
         }
@@ -4054,12 +3495,12 @@ const runLineInteractiveShell = async (options = {}) => {
         }
         else if (!trimmed) {
             if (!state.session && !state.rootTask && !state.candidatePicker && state.suggestedAction) {
-                process.stdout.write(`${SHELL_THEME.muted("applying the recommended fix...")}\n`);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("applying the recommended fix...")}\n`);
                 const result = runSuggestedAction(state);
                 if (result.notice) {
-                    writeFeedback(result.notice);
+                    (0, cliShellConfig_1.writeFeedback)(result.notice);
                 }
-                printOutputPanel(result.panel);
+                (0, cliShellUi_1.printOutputPanel)(result.panel);
             }
             else if (session) {
                 if (!session.pending && getRequirementStatus(session).ready) {
@@ -4083,14 +3524,14 @@ const runLineInteractiveShell = async (options = {}) => {
                 const automated = runDirectInputAutomation(state, applied.session, applied.key);
                 if (automated) {
                     if (automated.notice) {
-                        writeFeedback(automated.notice);
+                        (0, cliShellConfig_1.writeFeedback)(automated.notice);
                     }
-                    printOutputPanel(automated.panel);
+                    (0, cliShellUi_1.printOutputPanel)(automated.panel);
                     if (state.candidatePicker) {
-                        printCandidatePicker(state.candidatePicker);
+                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
                     }
                     if (automated.clearSession) {
-                        clearCandidatePicker(state);
+                        (0, cliShellConfig_1.clearCandidatePicker)(state);
                         state.session = null;
                         state.rootTask = null;
                     }
@@ -4102,15 +3543,15 @@ const runLineInteractiveShell = async (options = {}) => {
                 }
                 else {
                     printSessionStatus(state, session);
-                    printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                    (0, cliShellUi_1.printOutputPanel)(buildAutoPreviewPanel(state, applied.session, applied.key));
                     if (state.candidatePicker) {
-                        printCandidatePicker(state.candidatePicker);
+                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
                     }
                 }
             }
             else {
-                flushFeedback(feedback);
-                process.stdout.write(`${SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
+                (0, cliShellConfig_1.flushFeedback)(feedback);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
             }
         }
         else {
@@ -4120,14 +3561,14 @@ const runLineInteractiveShell = async (options = {}) => {
                 const automated = runDirectInputAutomation(state, applied.session, applied.key);
                 if (automated) {
                     if (automated.notice) {
-                        writeFeedback(automated.notice);
+                        (0, cliShellConfig_1.writeFeedback)(automated.notice);
                     }
-                    printOutputPanel(automated.panel);
+                    (0, cliShellUi_1.printOutputPanel)(automated.panel);
                     if (state.candidatePicker) {
-                        printCandidatePicker(state.candidatePicker);
+                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
                     }
                     if (automated.clearSession) {
-                        clearCandidatePicker(state);
+                        (0, cliShellConfig_1.clearCandidatePicker)(state);
                         state.session = null;
                         state.rootTask = null;
                     }
@@ -4139,24 +3580,24 @@ const runLineInteractiveShell = async (options = {}) => {
                 }
                 else {
                     printSessionStatus(state, state.session);
-                    printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
+                    (0, cliShellUi_1.printOutputPanel)(buildAutoPreviewPanel(state, applied.session, applied.key));
                     if (state.candidatePicker) {
-                        printCandidatePicker(state.candidatePicker);
+                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
                     }
                 }
             }
             else {
-                flushFeedback(feedback);
-                process.stdout.write(`${SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
+                (0, cliShellConfig_1.flushFeedback)(feedback);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
             }
         }
         if (!isClosed && state.suggestedAction && !state.session && !state.rootTask && !state.candidatePicker) {
-            process.stdout.write(`${SHELL_THEME.muted(state.suggestedAction.prompt)}\n`);
+            process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(state.suggestedAction.prompt)}\n`);
         }
         if (isClosed) {
             break;
         }
-        rl.setPrompt(formatShellPrompt(state));
+        rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
         rl.prompt();
     }
 };
@@ -4186,13 +3627,13 @@ const runTtyInteractiveShell = async (options = {}) => {
     const setInput = (nextInput) => {
         view.input = nextInput;
         const menuEntries = getSlashMenuEntries(state, view.input);
-        view.menuIndex = menuEntries.length === 0 ? 0 : clamp(view.menuIndex, 0, menuEntries.length - 1);
+        view.menuIndex = menuEntries.length === 0 ? 0 : (0, cliShellConfig_1.clamp)(view.menuIndex, 0, menuEntries.length - 1);
     };
     const openSession = (command) => {
         const feedback = [];
         state.rootTask = null;
-        clearCandidatePicker(state);
-        clearXacroRetry(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
+        (0, cliShellConfig_1.clearXacroRetry)(state);
         state.session = createSession(command, state, command, feedback);
         setNoticeFromFeedback(view, feedback);
         setInput(state.session?.pending ? "" : "/");
@@ -4205,8 +3646,8 @@ const runTtyInteractiveShell = async (options = {}) => {
     const openRootTask = (task) => {
         state.rootTask = task;
         state.session = null;
-        clearCandidatePicker(state);
-        clearXacroRetry(state);
+        (0, cliShellConfig_1.clearCandidatePicker)(state);
+        (0, cliShellConfig_1.clearXacroRetry)(state);
         setInput("/");
         view.notice = { kind: "info", text: `${getRootTaskSummary(task)}  choose below or paste input directly` };
         pushTimelineUserEntry(view, `/${task}`);
@@ -4298,7 +3739,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "run") {
-            clearCandidatePicker(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
             view.notice = {
                 kind: "info",
                 text: getRootIdleMessage(state),
@@ -4308,7 +3749,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "update") {
-            dismissUpdatePrompt(state);
+            (0, cliShellConfig_1.dismissUpdatePrompt)(state);
             try {
                 (0, cliUpdate_1.runUpdateCommand)();
                 view.notice = { kind: "success", text: "ilu is up to date." };
@@ -4344,7 +3785,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     const successPanel = getShellExecutionSuccessPanel(state, state.session, execution);
                     view.output =
                         successPanel ??
-                            createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, state.session.command), execution.status === 0 ? "success" : "error");
+                            (0, cliShellUi_1.createOutputPanel)(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, state.session.command), execution.status === 0 ? "success" : "error");
                     view.notice =
                         execution.status === 0
                             ? { kind: "success", text: "run complete" }
@@ -4383,8 +3824,8 @@ const runTtyInteractiveShell = async (options = {}) => {
         const command = slashCommand;
         const quickSession = tryCreateLoadedRootQuickSession(state, command);
         if (quickSession) {
-            clearCandidatePicker(state);
-            clearXacroRetry(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
+            (0, cliShellConfig_1.clearXacroRetry)(state);
             const execution = runBusyOperation(getBusyStateForSession(quickSession), () => executeSessionCommand(state, quickSession));
             const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, quickSession.command) : null;
             if (compactFailurePanel) {
@@ -4395,7 +3836,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                 const successPanel = getShellExecutionSuccessPanel(state, quickSession, execution);
                 view.output =
                     successPanel ??
-                        createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, quickSession.command), execution.status === 0 ? "success" : "error");
+                        (0, cliShellUi_1.createOutputPanel)(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, quickSession.command), execution.status === 0 ? "success" : "error");
                 view.notice =
                     execution.status === 0
                         ? { kind: "success", text: "run complete" }
@@ -4419,8 +3860,8 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (slashCommand === "back") {
             state.rootTask = null;
-            clearCandidatePicker(state);
-            clearXacroRetry(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
+            (0, cliShellConfig_1.clearXacroRetry)(state);
             view.notice = { kind: "info", text: "back to tasks" };
             pushTimelineUserEntry(view, "/back");
             archiveAssistantStateToTimeline(view);
@@ -4443,7 +3884,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "run") {
-            clearCandidatePicker(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
             view.notice = {
                 kind: "info",
                 text: "nothing is pending here. paste a source or choose one of the direct actions",
@@ -4453,7 +3894,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "update") {
-            dismissUpdatePrompt(state);
+            (0, cliShellConfig_1.dismissUpdatePrompt)(state);
             try {
                 (0, cliUpdate_1.runUpdateCommand)();
                 view.notice = { kind: "success", text: "ilu is up to date." };
@@ -4473,7 +3914,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             archiveAssistantStateToTimeline(view);
             return true;
         }
-        if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
+        if (cliShellConfig_1.ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
             openRootTask(slashCommand);
             return true;
         }
@@ -4493,7 +3934,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     const successPanel = getShellExecutionSuccessPanel(state, state.session, execution);
                     view.output =
                         successPanel ??
-                            createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, state.session.command), execution.status === 0 ? "success" : "error");
+                            (0, cliShellUi_1.createOutputPanel)(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, state.session.command), execution.status === 0 ? "success" : "error");
                     view.notice =
                         execution.status === 0
                             ? { kind: "success", text: "run complete" }
@@ -4542,8 +3983,8 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "back") {
-            clearCandidatePicker(state);
-            clearXacroRetry(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
+            (0, cliShellConfig_1.clearXacroRetry)(state);
             state.session = null;
             view.notice = { kind: "info", text: state.rootTask ? `back to /${state.rootTask}` : "back to tasks" };
             setInput(state.rootTask ? "/" : "");
@@ -4553,8 +3994,8 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (slashCommand === "reset") {
             const feedback = [];
-            clearCandidatePicker(state);
-            clearXacroRetry(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
+            (0, cliShellConfig_1.clearXacroRetry)(state);
             state.session = createSession(session.command, state, session.label, feedback);
             setNoticeFromFeedback(view, feedback);
             setInput(state.session?.pending ? "" : "/");
@@ -4566,14 +4007,14 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "show") {
-            view.output = createOutputPanel("context", buildSessionPreviewText(state, session));
+            view.output = (0, cliShellUi_1.createOutputPanel)("context", buildSessionPreviewText(state, session));
             view.notice = { kind: "info", text: "showing the current context" };
             pushTimelineUserEntry(view, "/show");
             archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "run") {
-            clearCandidatePicker(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
             const requirementStatus = getRequirementStatus(session);
             if (!requirementStatus.ready) {
                 view.notice = {
@@ -4596,7 +4037,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             const successPanel = getShellExecutionSuccessPanel(state, session, execution);
             view.output =
                 successPanel ??
-                    createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, session.command), execution.status === 0 ? "success" : "error");
+                    (0, cliShellUi_1.createOutputPanel)(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, session.command), execution.status === 0 ? "success" : "error");
             view.notice =
                 execution.status === 0
                     ? { kind: "success", text: "run complete" }
@@ -4612,7 +4053,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "update") {
-            dismissUpdatePrompt(state);
+            (0, cliShellConfig_1.dismissUpdatePrompt)(state);
             try {
                 (0, cliUpdate_1.runUpdateCommand)();
                 view.notice = { kind: "success", text: "ilu is up to date." };
@@ -4649,7 +4090,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (!target.option.valueHint) {
             const feedback = [];
-            clearCandidatePicker(state);
+            (0, cliShellConfig_1.clearCandidatePicker)(state);
             toggleSessionFlag(session, target.key, feedback);
             setNoticeFromFeedback(view, feedback);
             view.output = null;
@@ -4668,7 +4109,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     view.notice = automation.notice;
                     view.output = automation.panel;
                     if (automation.clearSession) {
-                        clearCandidatePicker(state);
+                        (0, cliShellConfig_1.clearCandidatePicker)(state);
                         state.session = null;
                         state.rootTask = null;
                     }
@@ -4677,7 +4118,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     setNoticeFromFeedback(view, feedback);
                     view.output = preview;
                 }
-                pushTimelineUserEntry(view, `/${slashCommand}${formatInlineValue(inlineValue)}`);
+                pushTimelineUserEntry(view, `/${slashCommand}${(0, cliShellConfig_1.formatInlineValue)(inlineValue)}`);
                 archiveAssistantStateToTimeline(view, {
                     fallbackText: buildSessionNarrativeLines(state, session).join("\n"),
                 });
@@ -4711,7 +4152,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         const feedback = [];
         if (setSessionValue(session, session.pending.key, view.input, feedback)) {
-            pushTimelineUserEntry(view, `/${session.pending.slashName}${formatInlineValue(view.input)}`);
+            pushTimelineUserEntry(view, `/${session.pending.slashName}${(0, cliShellConfig_1.formatInlineValue)(view.input)}`);
             const changedKey = session.pending.key;
             session.pending = null;
             const { automation, preview } = runBusyOperation(getBusyStateForSession(session, changedKey), () => applyValueChangeEffects(state, session, changedKey));
@@ -4719,7 +4160,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                 view.notice = automation.notice;
                 view.output = automation.panel;
                 if (automation.clearSession) {
-                    clearCandidatePicker(state);
+                    (0, cliShellConfig_1.clearCandidatePicker)(state);
                     state.session = null;
                     state.rootTask = null;
                 }
@@ -4745,7 +4186,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             !state.candidatePicker &&
             trimmed.length === 0) {
             const update = state.updatePrompt;
-            dismissUpdatePrompt(state);
+            (0, cliShellConfig_1.dismissUpdatePrompt)(state);
             pushTimelineUserEntry(view, "/update");
             try {
                 runBusyOperation({
@@ -4756,7 +4197,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     kind: "success",
                     text: `updated to ${update.latestVersion}. restart ilu to use the new build`,
                 };
-                view.output = createOutputPanel("update", `updated ${update.currentVersion} -> ${update.latestVersion}\nrestart ilu to use the new build`, "success");
+                view.output = (0, cliShellUi_1.createOutputPanel)("update", `updated ${update.currentVersion} -> ${update.latestVersion}\nrestart ilu to use the new build`, "success");
             }
             catch (error) {
                 view.notice = {
@@ -4812,7 +4253,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                 view.notice = result?.notice ?? { kind: "error", text: "could not load candidate" };
                 view.output = result?.panel ?? null;
                 if (result?.clearSession) {
-                    clearCandidatePicker(state);
+                    (0, cliShellConfig_1.clearCandidatePicker)(state);
                     state.session = null;
                     state.rootTask = null;
                 }
@@ -4837,7 +4278,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             if (!parsed.inlineValue) {
                 const menuEntries = getSlashMenuEntries(state, trimmed);
                 if (menuEntries.length > 0) {
-                    const selected = menuEntries[clamp(view.menuIndex, 0, menuEntries.length - 1)];
+                    const selected = menuEntries[(0, cliShellConfig_1.clamp)(view.menuIndex, 0, menuEntries.length - 1)];
                     if (selected) {
                         if (state.session) {
                             handleSessionAction(selected.name, "");
@@ -4872,7 +4313,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             }
             view.notice = {
                 kind: "info",
-                text: state.session || state.rootTask ? getPromptPlaceholder(state) : ROOT_GUIDANCE,
+                text: state.session || state.rootTask ? getPromptPlaceholder(state) : cliShellConfig_1.ROOT_GUIDANCE,
             };
             return;
         }
@@ -4886,7 +4327,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     view.notice = automated.notice;
                     view.output = automated.panel;
                     if (automated.clearSession) {
-                        clearCandidatePicker(state);
+                        (0, cliShellConfig_1.clearCandidatePicker)(state);
                         state.session = null;
                         state.rootTask = null;
                     }
@@ -4924,7 +4365,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     view.notice = automated.notice;
                     view.output = automated.panel;
                     if (automated.clearSession) {
-                        clearCandidatePicker(state);
+                        (0, cliShellConfig_1.clearCandidatePicker)(state);
                         state.session = null;
                         state.rootTask = null;
                     }
@@ -5013,7 +4454,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             state.session ||
             state.rootTask ||
             state.candidatePicker) {
-            dismissUpdatePrompt(state);
+            (0, cliShellConfig_1.dismissUpdatePrompt)(state);
             return;
         }
         queueRender("force");
@@ -5045,26 +4486,26 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (key.name === "up" || (key.shift && key.name === "tab")) {
             if (state.candidatePicker && !view.input.startsWith("/")) {
-                state.candidatePicker.selectedIndex = clamp(state.candidatePicker.selectedIndex - 1, 0, state.candidatePicker.candidates.length - 1);
+                state.candidatePicker.selectedIndex = (0, cliShellConfig_1.clamp)(state.candidatePicker.selectedIndex - 1, 0, state.candidatePicker.candidates.length - 1);
                 queueRender("navigation");
                 return;
             }
             const menuEntries = getSlashMenuEntries(state, view.input);
             if (menuEntries.length > 0) {
-                view.menuIndex = clamp(view.menuIndex - 1, 0, menuEntries.length - 1);
+                view.menuIndex = (0, cliShellConfig_1.clamp)(view.menuIndex - 1, 0, menuEntries.length - 1);
                 queueRender("navigation");
             }
             return;
         }
         if (key.name === "down") {
             if (state.candidatePicker && !view.input.startsWith("/")) {
-                state.candidatePicker.selectedIndex = clamp(state.candidatePicker.selectedIndex + 1, 0, state.candidatePicker.candidates.length - 1);
+                state.candidatePicker.selectedIndex = (0, cliShellConfig_1.clamp)(state.candidatePicker.selectedIndex + 1, 0, state.candidatePicker.candidates.length - 1);
                 queueRender("navigation");
                 return;
             }
             const menuEntries = getSlashMenuEntries(state, view.input);
             if (menuEntries.length > 0) {
-                view.menuIndex = clamp(view.menuIndex + 1, 0, menuEntries.length - 1);
+                view.menuIndex = (0, cliShellConfig_1.clamp)(view.menuIndex + 1, 0, menuEntries.length - 1);
                 queueRender("navigation");
             }
             return;
@@ -5086,12 +4527,12 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (key.name === "escape") {
             if (state.updatePrompt && view.input.length === 0 && !state.session && !state.rootTask && !state.candidatePicker) {
-                dismissUpdatePrompt(state);
+                (0, cliShellConfig_1.dismissUpdatePrompt)(state);
                 queueRender("navigation");
                 return;
             }
             if (state.suggestedAction && view.input.length === 0 && !state.session && !state.rootTask && !state.candidatePicker) {
-                clearSuggestedAction(state);
+                (0, cliShellConfig_1.clearSuggestedAction)(state);
                 queueRender("navigation");
                 return;
             }
@@ -5121,10 +4562,10 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (input && !key.ctrl && !key.meta) {
             if (state.updatePrompt && !state.session && !state.rootTask && !state.candidatePicker && view.input.length === 0) {
-                dismissUpdatePrompt(state);
+                (0, cliShellConfig_1.dismissUpdatePrompt)(state);
             }
             if (state.suggestedAction && !state.session && !state.rootTask && !state.candidatePicker) {
-                clearSuggestedAction(state);
+                (0, cliShellConfig_1.clearSuggestedAction)(state);
             }
             setInput(`${view.input}${input}`);
             if (view.input.startsWith("/")) {

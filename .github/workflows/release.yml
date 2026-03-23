@@ -101,11 +101,57 @@ jobs:
       - name: Real Repository Verification
         run: pnpm test:real-repos
 
+      - name: Generate Release Notes
+        run: mkdir -p .release-artifacts && pnpm release:notes -- --version "${GITHUB_REF_NAME#v}" > .release-artifacts/RELEASE_NOTES.md
+
       - name: Pack Release Tarball
-        run: mkdir -p .release-artifacts && pnpm pack --pack-destination .release-artifacts
+        run: pnpm pack --pack-destination .release-artifacts
 
       - name: Upload Release Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: npm-package
-          path: .release-artifacts/*.tgz
+          name: release-artifacts
+          path: .release-artifacts/
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release-readiness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Download Release Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts
+          path: .release-artifacts
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file .release-artifacts/RELEASE_NOTES.md
+            gh release upload "$GITHUB_REF_NAME" .release-artifacts/*.tgz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" .release-artifacts/*.tgz --title "$GITHUB_REF_NAME" --notes-file .release-artifacts/RELEASE_NOTES.md
+          fi
+
+      - name: Setup Node For npm Publish
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.6
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish npm Package
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish .release-artifacts/*.tgz --provenance --access public
+
+      - name: Skip npm Publish
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        run: echo "NPM_TOKEN not configured; skipped npm publish."

@@ -5,6 +5,7 @@ const process = require("node:process");
 const analysisCommands_1 = require("./commands/analysisCommands");
 const cliArgs_1 = require("./commands/cliArgs");
 const cliCompletion_1 = require("./commands/cliCompletion");
+const cliBugReport_1 = require("./commands/cliBugReport");
 const cliDoctor_1 = require("./commands/cliDoctor");
 const cliHelp_1 = require("./commands/cliHelp");
 const cliShell_1 = require("./commands/cliShell");
@@ -43,7 +44,19 @@ const run = async () => {
             console.log((0, cliDoctor_1.renderDoctorHelp)());
             return;
         }
+        if (positionals[0] === "bug-report") {
+            console.log((0, cliBugReport_1.renderBugReportHelp)());
+            return;
+        }
         (0, cliHelp_1.printHelp)();
+        return;
+    }
+    if (rawCommand === "bug-report") {
+        if (args.has("help")) {
+            console.log((0, cliBugReport_1.renderBugReportHelp)());
+            return;
+        }
+        await (0, cliBugReport_1.runBugReportCommand)(args);
         return;
     }
     if (rawCommand === "doctor") {
