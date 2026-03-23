@@ -13,6 +13,7 @@ Inside `ilu`:
 - `ilu` auto-runs validation and a health check when it can
 - if `ilu` finds an obvious safe repair, it offers one and `Enter` accepts it
 - if a newer release is available, `ilu` asks whether you want to update
+- run `ilu doctor` if the machine, auth, or xacro runtime looks wrong
 - if there are multiple entrypoints, use arrows and `Enter` to pick one
 - press `Tab` to complete the selected slash option
 - run `!xacro` if a source needs the XACRO runtime
@@ -34,6 +35,7 @@ npm uninstall -g i-love-urdf
 Docs:
 
 - [Scope and guarantees](docs/scope.md)
+- [Support matrix](docs/support.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Release checklist](docs/release.md)
 - [Changelog](CHANGELOG.md)

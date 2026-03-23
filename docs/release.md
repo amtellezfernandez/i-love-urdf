@@ -7,8 +7,9 @@ Ship a release only when all of these are true:
 3. `dist/` is current after the build.
 4. install checks pass for packed, git, and local global installs.
 5. the shell still opens by default with `ilu` and direct-input flows still work.
-6. `README.md`, `docs/scope.md`, `docs/troubleshooting.md`, and `CHANGELOG.md` are current.
-7. the version in `package.json` matches the intended release tag.
+6. `ilu doctor` still reports the correct support tier, auth state, and xacro runtime on the release machine.
+7. `README.md`, `docs/scope.md`, `docs/support.md`, `docs/troubleshooting.md`, and `CHANGELOG.md` are current.
+8. the version in `package.json` matches the intended release tag.
 
 ## Local deterministic gate
 

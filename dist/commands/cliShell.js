@@ -64,6 +64,7 @@ const SHELL_BRAND = "i<3urdf";
 const XACRO_RUNTIME_NOTICE = "xacro runtime not set. run !xacro, then retry";
 const SHELL_BUILTIN_COMMANDS = [
     { name: "help", summary: "Show slash commands for the current context." },
+    { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
     { name: "update", summary: "Install the latest ilu release." },
     { name: "clear", summary: "Clear the terminal." },
     { name: "last", summary: "Show the last remembered URDF path." },
@@ -72,6 +73,7 @@ const HIDDEN_SHELL_COMMAND_NAMES = ["exit", "quit"];
 const SESSION_BUILTIN_COMMANDS = [
     { name: "show", summary: "Show the current command, values, and next step." },
     { name: "run", summary: "Run the current command." },
+    { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
     { name: "update", summary: "Install the latest ilu release." },
     { name: "reset", summary: "Clear the current command state." },
     { name: "back", summary: "Return to the root slash-command menu." },
@@ -1430,6 +1432,17 @@ const executeCliCommand = (command, args) => {
         status: result.status ?? 1,
     };
 };
+const executeSpecialCliCommand = (argv) => {
+    const result = (0, node_child_process_1.spawnSync)(process.execPath, [CLI_ENTRY_PATH, ...argv], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+    });
+    return {
+        stdout: result.stdout ?? "",
+        stderr: result.stderr ?? "",
+        status: result.status ?? 1,
+    };
+};
 const parseExecutionJson = (execution) => {
     if (execution.status !== 0) {
         return null;
@@ -1536,6 +1549,29 @@ const buildShellFailureNotice = (panel, fallbackText, fallbackKind = "error") =>
     return {
         kind: fallbackKind,
         text: fallbackText,
+    };
+};
+const runDoctorShellCommand = () => {
+    const execution = executeSpecialCliCommand(["doctor"]);
+    if (execution.status !== 0) {
+        const panel = buildPreviewErrorPanel("doctor", execution);
+        return {
+            panel,
+            notice: buildShellFailureNotice(panel, "doctor failed"),
+        };
+    }
+    const doctorLines = execution.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter((line) => line.length > 0);
+    const trimmedLines = doctorLines[0] === "ILU Doctor" ? doctorLines.slice(1) : doctorLines;
+    return {
+        panel: {
+            title: "doctor",
+            kind: "info",
+            lines: trimmedLines.slice(0, 20),
+        },
+        notice: { kind: "info", text: "runtime diagnostics ready" },
     };
 };
 const summarizeRepositoryPreview = (session, payload, options = {}) => {
@@ -3006,6 +3042,12 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         (0, cliUpdate_1.runUpdateCommand)();
         return;
     }
+    if (slashCommand === "doctor") {
+        const result = runDoctorShellCommand();
+        writeFeedback(result.notice);
+        printOutputPanel(result.panel);
+        return;
+    }
     if (slashCommand === "last") {
         printLastUrdf(state);
         return;
@@ -3082,6 +3124,12 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
     }
     if (slashCommand === "update") {
         (0, cliUpdate_1.runUpdateCommand)();
+        return;
+    }
+    if (slashCommand === "doctor") {
+        const result = runDoctorShellCommand();
+        writeFeedback(result.notice);
+        printOutputPanel(result.panel);
         return;
     }
     if (slashCommand === "last") {
@@ -3169,6 +3217,12 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
     }
     if (slashCommand === "update") {
         (0, cliUpdate_1.runUpdateCommand)();
+        return;
+    }
+    if (slashCommand === "doctor") {
+        const result = runDoctorShellCommand();
+        writeFeedback(result.notice);
+        printOutputPanel(result.panel);
         return;
     }
     if (slashCommand === "clear") {
@@ -3481,19 +3535,21 @@ const buildTimelineResponseLines = (notice, panel, fallbackText) => {
             ? "checked the source"
             : panel?.title === "repair"
                 ? "updated the working copy"
-                : panel?.title === "investigation"
-                    ? "investigated the source"
-                    : panel?.title === "validation"
-                        ? "validated the URDF"
-                        : panel?.title === "orientation"
-                            ? "estimated orientation"
-                            : panel?.title === "preview"
-                                ? "previewed the source"
-                                : panel?.title === "context"
-                                    ? "current context"
-                                    : panel?.title === "xacro"
-                                        ? "xacro runtime"
-                                        : null;
+                : panel?.title === "doctor"
+                    ? "checked the local runtime"
+                    : panel?.title === "investigation"
+                        ? "investigated the source"
+                        : panel?.title === "validation"
+                            ? "validated the URDF"
+                            : panel?.title === "orientation"
+                                ? "estimated orientation"
+                                : panel?.title === "preview"
+                                    ? "previewed the source"
+                                    : panel?.title === "context"
+                                        ? "current context"
+                                        : panel?.title === "xacro"
+                                            ? "xacro runtime"
+                                            : null;
     if (panelNarrative) {
         lines.push(panelNarrative);
     }
@@ -4264,6 +4320,14 @@ const runTtyInteractiveShell = async (options = {}) => {
             archiveAssistantStateToTimeline(view);
             return true;
         }
+        if (slashCommand === "doctor") {
+            const result = runDoctorShellCommand();
+            view.notice = result.notice;
+            view.output = result.panel;
+            pushTimelineUserEntry(view, "/doctor");
+            archiveAssistantStateToTimeline(view);
+            return true;
+        }
         const rootShellCommand = getRootShellCommandDefinition(slashCommand);
         if (rootShellCommand) {
             const feedback = [];
@@ -4398,6 +4462,14 @@ const runTtyInteractiveShell = async (options = {}) => {
                 view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
             }
             pushTimelineUserEntry(view, "/update");
+            archiveAssistantStateToTimeline(view);
+            return true;
+        }
+        if (slashCommand === "doctor") {
+            const result = runDoctorShellCommand();
+            view.notice = result.notice;
+            view.output = result.panel;
+            pushTimelineUserEntry(view, "/doctor");
             archiveAssistantStateToTimeline(view);
             return true;
         }
@@ -4549,6 +4621,14 @@ const runTtyInteractiveShell = async (options = {}) => {
                 view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
             }
             pushTimelineUserEntry(view, "/update");
+            archiveAssistantStateToTimeline(view);
+            return true;
+        }
+        if (slashCommand === "doctor") {
+            const result = runDoctorShellCommand();
+            view.notice = result.notice;
+            view.output = result.panel;
+            pushTimelineUserEntry(view, "/doctor");
             archiveAssistantStateToTimeline(view);
             return true;
         }
@@ -5101,6 +5181,7 @@ const renderShellHelp = () => {
         "  /validate          Validate URDF structure and required tags",
         "  /orientation       Guess the likely up-axis and forward axis",
         "  /update            Install the latest ilu release",
+        "  /doctor            Show runtime, auth, and xacro diagnostics",
         "  /show              Show the current source and next step",
     ].join("\n");
 };

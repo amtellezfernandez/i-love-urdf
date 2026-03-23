@@ -1,5 +1,19 @@
 # Troubleshooting
 
+## First step
+
+Run:
+
+```sh
+ilu doctor
+```
+
+If you need to attach the result to a bug report, use:
+
+```sh
+ilu doctor --json
+```
+
 ## GitHub repo failed to load
 
 - public repos should work without setup

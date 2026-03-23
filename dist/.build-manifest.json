@@ -35,6 +35,8 @@
     "commands/cliArgs.js",
     "commands/cliCompletion.d.ts",
     "commands/cliCompletion.js",
+    "commands/cliDoctor.d.ts",
+    "commands/cliDoctor.js",
     "commands/cliHelp.d.ts",
     "commands/cliHelp.js",
     "commands/cliShell.d.ts",

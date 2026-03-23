@@ -53,6 +53,7 @@ It does not guarantee:
 - private GitHub repos require a token or `gh auth login`
 - XACRO expansion may need `!xacro`
 - very large repos or repos with external ROS package dependencies may still need manual narrowing
+- `ilu doctor` is the first support command when environment, auth, or runtime setup looks wrong
 
 ## Design goal
 

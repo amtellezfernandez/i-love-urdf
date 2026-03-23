@@ -271,6 +271,7 @@ export const COMMAND_COMPLETION_SPEC_BY_NAME: Readonly<
 
 const TOP_LEVEL_SPECS: readonly CompletionTopLevelSpec[] = [
   { name: "help", summary: "Show CLI help." },
+  { name: "doctor", summary: "Inspect runtime, support, auth, and xacro diagnostics." },
   { name: "update", summary: "Update ilu to the latest version from GitHub." },
   { name: "shell", summary: "Start the interactive slash-command shell." },
   { name: "completion", summary: "Generate shell completion scripts." },
@@ -281,6 +282,7 @@ const TOP_LEVEL_SPECS: readonly CompletionTopLevelSpec[] = [
 ];
 
 const HELP_TOPIC_SPECS: readonly CompletionTopLevelSpec[] = [
+  { name: "doctor", summary: "Inspect runtime, support, auth, and xacro diagnostics." },
   { name: "update", summary: "Update ilu to the latest version from GitHub." },
   { name: "shell", summary: "Start the interactive slash-command shell." },
   { name: "completion", summary: "Generate shell completion scripts." },
@@ -344,6 +346,13 @@ const renderBashCompletion = (): string => {
     '  if [[ "${COMP_WORDS[1]}" == "completion" ]]; then',
     "    if [[ $COMP_CWORD -eq 2 ]]; then",
     `      COMPREPLY=( $(compgen -W ${renderWordList(COMPLETION_SHELLS)} -- "$cur") )`,
+    "    fi",
+    "    return 0",
+    "  fi",
+    "",
+    '  if [[ "${COMP_WORDS[1]}" == "doctor" ]]; then',
+    "    if [[ $COMP_CWORD -eq 2 ]]; then",
+    '      COMPREPLY=( $(compgen -W "--json --help" -- "$cur") )',
     "    fi",
     "    return 0",
     "  fi",
@@ -444,6 +453,16 @@ const renderZshCompletion = (): string => {
     "  return",
     "fi",
     "",
+    'if [[ "$command" == "doctor" ]]; then',
+    "  local -a doctor_options",
+    "  doctor_options=(",
+    `    ${quoteJson("--json:emit machine-readable diagnostics")}`,
+    `    ${quoteJson("--help:show doctor help")}`,
+    "  )",
+    "  _describe -t options 'doctor options' doctor_options",
+    "  return",
+    "fi",
+    "",
     'case "$command" in',
     ...COMMAND_COMPLETION_SPECS.map((entry) => renderZshCase(entry)),
     "esac",
@@ -503,6 +522,8 @@ const renderFishCompletion = (): string => {
         )}`
     ),
     `complete -c ilu -n '__fish_seen_subcommand_from completion' -a ${quoteJson(COMPLETION_SHELLS.join(" "))}`,
+    `complete -c ilu -n '__fish_seen_subcommand_from doctor' -l json -d ${quoteJson("emit machine-readable diagnostics")}`,
+    `complete -c ilu -n '__fish_seen_subcommand_from doctor' -l help -d ${quoteJson("show doctor help")}`,
   ];
 
   for (const entry of COMMAND_COMPLETION_SPECS) {

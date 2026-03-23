@@ -1252,6 +1252,7 @@ if (
   !cliHelpOutput.includes("health-check") ||
   !cliHelpOutput.includes("morphology-card") ||
   !cliHelpOutput.includes("ilu  Open the interactive shell.") ||
+  !cliHelpOutput.includes("ilu doctor") ||
   !cliHelpOutput.includes("ilu update") ||
   !cliHelpOutput.includes("ilu shell") ||
   !cliHelpOutput.includes("ilu completion bash") ||
@@ -1278,9 +1279,23 @@ const bashCompletionOutput = execFileSync(process.execPath, [cliPath, "completio
 });
 if (
   !bashCompletionOutput.includes("complete -o bashdefault -o default -F _ilu ilu") ||
-  !bashCompletionOutput.includes("help update shell completion")
+  !bashCompletionOutput.includes("help doctor update shell completion")
 ) {
   throw new Error("ilu bash completion smoke test failed");
+}
+
+const doctorJsonOutput = execFileSync(process.execPath, [cliPath, "doctor", "--json"], {
+  cwd: root,
+  encoding: "utf8",
+});
+const doctorReport = JSON.parse(doctorJsonOutput);
+if (
+  typeof doctorReport.ilu?.version !== "string" ||
+  typeof doctorReport.support?.platformTier !== "string" ||
+  typeof doctorReport.github?.authenticated !== "boolean" ||
+  typeof doctorReport.xacro?.available !== "boolean"
+) {
+  throw new Error("ilu doctor smoke test failed");
 }
 
 const updateDryRunOutput = execFileSync(process.execPath, [cliPath, "update", "--dry-run"], {
@@ -1306,6 +1321,7 @@ if (
   !shellHelpOutput.includes("/open") ||
   !shellHelpOutput.includes("/health") ||
   !shellHelpOutput.includes("/orientation") ||
+  !shellHelpOutput.includes("/doctor") ||
   !shellHelpOutput.includes("/update") ||
   shellHelpOutput.includes("/exit") ||
   shellHelpOutput.includes("/convert") ||
@@ -1313,6 +1329,19 @@ if (
   shellHelpOutput.includes("/check")
 ) {
   throw new Error("ilu shell help smoke test failed");
+}
+
+const shellDoctorTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: "/doctor\n/exit\n",
+});
+if (
+  !shellDoctorTranscript.includes("doctor") ||
+  !shellDoctorTranscript.includes("runtime diagnostics ready") ||
+  !shellDoctorTranscript.includes("XACRO")
+) {
+  throw new Error("ilu shell doctor smoke test failed");
 }
 
 const shellDropDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-drop-"));

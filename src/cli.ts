@@ -5,6 +5,7 @@ import { isAnalysisCommand, runAnalysisCommand } from "./commands/analysisComman
 import { createCliCommandHelpers, parseArgs } from "./commands/cliArgs";
 import type { CompletionShell } from "./commands/cliCompletion";
 import { isCompletionShell, renderCompletionHelp, renderCompletionScript } from "./commands/cliCompletion";
+import { renderDoctorHelp, runDoctorCommand } from "./commands/cliDoctor";
 import { printHelp } from "./commands/cliHelp";
 import { renderShellHelp, runInteractiveShell } from "./commands/cliShell";
 import { renderUpdateHelp, runUpdateCommand } from "./commands/cliUpdate";
@@ -46,7 +47,22 @@ const run = async () => {
       return;
     }
 
+    if (positionals[0] === "doctor") {
+      console.log(renderDoctorHelp());
+      return;
+    }
+
     printHelp();
+    return;
+  }
+
+  if (rawCommand === "doctor") {
+    if (args.has("help")) {
+      console.log(renderDoctorHelp());
+      return;
+    }
+
+    await runDoctorCommand(args);
     return;
   }
 
