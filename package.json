@@ -4,7 +4,7 @@
   "type": "commonjs",
   "packageManager": "pnpm@10.32.1",
   "private": false,
-  "description": "URDF parsing, validation, transformation, mesh, and conversion utilities.",
+  "description": "Interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
@@ -16,8 +16,11 @@
   "scripts": {
     "check:browser-entry": "node ./scripts/check-browser-entry.mjs",
     "check:install": "node ./scripts/check-install.mjs",
+    "check:performance": "node ./scripts/check-performance.mjs",
     "refresh:global": "node ./scripts/build-package.mjs && npm install -g .",
     "ilu": "node ./scripts/run-cli.mjs",
+    "release:verify": "node ./scripts/build-package.mjs && npm run check:install && npm run check:browser-entry && npm run test && npm run setup:xacro && npm run ilu -- probe-xacro-runtime && npm run smoke && npm run check:performance",
+    "release:verify:full": "npm run release:verify && npm run test:real-repos",
     "setup:xacro": "node ./scripts/run-cli.mjs setup-xacro-runtime",
     "smoke": "node ./scripts/smoke-cli.mjs",
     "test": "node ./scripts/build-package.mjs && node --test",
@@ -33,6 +36,8 @@
   "keywords": [
     "urdf",
     "robotics",
+    "cli",
+    "interactive",
     "xacro",
     "mjcf",
     "parser"

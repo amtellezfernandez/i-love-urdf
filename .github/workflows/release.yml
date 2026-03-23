@@ -1,18 +1,14 @@
-name: CI
+name: Release
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 jobs:
-  verify:
+  release-readiness:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: ["20.19.6", "22", "24"]
 
     steps:
       - name: Checkout
@@ -21,7 +17,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20.19.6
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -52,9 +48,20 @@ jobs:
       - name: Probe XACRO Runtime
         run: pnpm ilu probe-xacro-runtime
 
-      - name: Check Performance Budget
-        if: matrix.node-version == '20.19.6'
-        run: pnpm check:performance
-
       - name: Smoke Test
         run: pnpm smoke
+
+      - name: Check Performance Budget
+        run: pnpm check:performance
+
+      - name: Real Repository Verification
+        run: pnpm test:real-repos
+
+      - name: Pack Release Tarball
+        run: mkdir -p .release-artifacts && pnpm pack --pack-destination .release-artifacts
+
+      - name: Upload Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: .release-artifacts/*.tgz

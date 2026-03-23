@@ -4795,9 +4795,7 @@ const renderShellHelp = () => {
         "  /validate          Validate URDF structure and required tags",
         "  /orientation       Guess the likely up-axis and forward axis",
         "  /update            Install the latest ilu release",
-        "  /show              Show the assembled command and next step",
-        "  /run               Execute an explicit command when one is pending",
-        "  /back              Return to the root action list",
+        "  /show              Show the current source and next step",
     ].join("\n");
 };
 exports.renderShellHelp = renderShellHelp;
