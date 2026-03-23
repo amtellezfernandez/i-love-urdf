@@ -1318,6 +1318,12 @@ if (
 const shellDropDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-drop-"));
 const droppedUrdfPath = path.join(shellDropDir, "local robot.urdf");
 fs.writeFileSync(droppedUrdfPath, "<robot name=\"drop_robot\"><link name=\"base\"/></robot>", "utf8");
+const brokenMeshUrdfPath = path.join(shellDropDir, "broken-mesh.urdf");
+fs.writeFileSync(
+  brokenMeshUrdfPath,
+  "<robot name=\"broken_robot\"><link name=\"base\"><visual><geometry><mesh filename=\"meshes\\\\part.stl\"/></geometry></visual></link></robot>",
+  "utf8"
+);
 const multiCandidateDir = path.join(shellDropDir, "multi-candidate");
 fs.mkdirSync(path.join(multiCandidateDir, "robots"), { recursive: true });
 fs.writeFileSync(
@@ -1337,6 +1343,15 @@ fs.writeFileSync(
   "<robot name=\"single_repo_robot\"><link name=\"base\"/></robot>",
   "utf8"
 );
+const repairableRepoDir = path.join(shellDropDir, "repairable-repo");
+fs.mkdirSync(path.join(repairableRepoDir, "urdf"), { recursive: true });
+fs.mkdirSync(path.join(repairableRepoDir, "meshes"), { recursive: true });
+fs.writeFileSync(
+  path.join(repairableRepoDir, "urdf", "robot.urdf"),
+  "<robot name=\"repairable_robot\"><link name=\"base\"><visual><geometry><mesh filename=\"mesh.stl\"/></geometry></visual></link></robot>",
+  "utf8"
+);
+fs.writeFileSync(path.join(repairableRepoDir, "meshes", "mesh.stl"), "solid mesh", "utf8");
 const droppedZipPath = path.join(shellDropDir, "robot bundle.zip");
 const droppedZip = new AdmZip();
 droppedZip.addLocalFile(droppedUrdfPath, "robot_bundle/urdf", "robot.urdf");
@@ -1449,12 +1464,43 @@ const loadedHealthTranscript = execFileSync(process.execPath, [cliPath, "shell"]
   input: `${droppedUrdfPath}\n/health\n/exit\n`,
 });
 if (
-  !loadedHealthTranscript.includes("looks healthy") ||
+  !loadedHealthTranscript.includes("health check passed") ||
   !loadedHealthTranscript.includes(droppedUrdfPath) ||
   loadedHealthTranscript.includes("/urdf              URDF file path.") ||
   loadedHealthTranscript.includes("[ready] /run")
 ) {
   throw new Error("ilu shell loaded health shortcut smoke test failed");
+}
+
+const suggestedMeshRepairTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${brokenMeshUrdfPath}\n\n/exit\n`,
+});
+if (
+  !suggestedMeshRepairTranscript.includes("mesh paths need attention") ||
+  !suggestedMeshRepairTranscript.includes("recommended: repair mesh paths") ||
+  !suggestedMeshRepairTranscript.includes("repair mesh paths now?") ||
+  !suggestedMeshRepairTranscript.includes("applying the recommended fix") ||
+  !suggestedMeshRepairTranscript.includes("mesh paths repaired") ||
+  !suggestedMeshRepairTranscript.includes("repaired mesh paths")
+) {
+  throw new Error("ilu shell suggested mesh-path repair smoke test failed");
+}
+
+const suggestedRepoRepairTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${repairableRepoDir}\n\n/exit\n`,
+});
+if (
+  !suggestedRepoRepairTranscript.includes("mesh references need attention") ||
+  !suggestedRepoRepairTranscript.includes("recommended: repair mesh references") ||
+  !suggestedRepoRepairTranscript.includes("repair mesh references now?") ||
+  !suggestedRepoRepairTranscript.includes("mesh references repaired") ||
+  !suggestedRepoRepairTranscript.includes("repaired mesh references")
+) {
+  throw new Error("ilu shell suggested repo mesh repair smoke test failed");
 }
 
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {

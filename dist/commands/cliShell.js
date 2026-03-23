@@ -13,6 +13,7 @@ const cliCompletion_1 = require("./cliCompletion");
 const shellPathInput_1 = require("./shellPathInput");
 const cliUpdate_1 = require("./cliUpdate");
 const githubCliAuth_1 = require("../node/githubCliAuth");
+const fixMeshPaths_1 = require("../mesh/fixMeshPaths");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
 const ANSI = {
     reset: "\u001b[0m",
@@ -391,11 +392,14 @@ const getPanelLineIcon = (line) => {
     const normalized = stripAnsi(line).trim().toLowerCase();
     if (normalized === "looks ready" ||
         normalized === "no obvious problems found" ||
+        normalized.startsWith("repaired ") ||
+        normalized === "working copy ready" ||
         normalized.startsWith("validation passed") ||
         normalized.startsWith("health check passed")) {
         return "✓";
     }
     if (normalized.startsWith("best next step") ||
+        normalized.startsWith("recommended:") ||
         normalized.startsWith("then /") ||
         normalized.startsWith("next /")) {
         return "→";
@@ -429,13 +433,91 @@ const clearCandidatePicker = (state) => {
 const clearXacroRetry = (state) => {
     state.xacroRetry = null;
 };
+const clearSuggestedAction = (state) => {
+    state.suggestedAction = null;
+};
+const buildRepairMeshRefsSuggestion = () => ({
+    kind: "repair-mesh-refs",
+    summary: "mesh references need attention",
+    recommendedLine: "recommended: repair mesh references",
+    prompt: "repair mesh references now?  Enter yes  Esc not now",
+    acceptLabel: "repair mesh references",
+});
+const buildFixMeshPathsSuggestion = () => ({
+    kind: "fix-mesh-paths",
+    summary: "mesh paths need attention",
+    recommendedLine: "recommended: repair mesh paths",
+    prompt: "repair mesh paths now?  Enter yes  Esc not now",
+    acceptLabel: "repair mesh paths",
+});
+const formatAttentionDetail = (message, context) => context ? `${context}: ${message}` : message;
+const appendSuggestedActionLines = (lines, suggestedAction, fallbackLine) => {
+    if (!suggestedAction) {
+        lines.push(fallbackLine);
+        return;
+    }
+    if (!lines.includes(suggestedAction.summary)) {
+        lines.push(suggestedAction.summary);
+    }
+    lines.push(suggestedAction.recommendedLine);
+};
+const getValidationStatusLine = (payload) => (payload.isValid && payload.issues.length === 0 ? "validation passed" : "validation needs attention");
+const getHealthStatusLine = (payload) => payload.ok && payload.summary.errors === 0 && payload.summary.warnings === 0
+    ? "health check passed"
+    : "health check needs attention";
+const collectAttentionLines = (validationIssues = [], healthFindings = [], limit = 2) => {
+    const lines = [];
+    for (const issue of validationIssues) {
+        const line = formatAttentionDetail(issue.message, issue.context);
+        if (!lines.includes(line)) {
+            lines.push(line);
+        }
+        if (lines.length >= limit) {
+            return lines;
+        }
+    }
+    for (const finding of healthFindings) {
+        if (finding.level === "info") {
+            continue;
+        }
+        const line = formatAttentionDetail(finding.message, finding.context);
+        if (!lines.includes(line)) {
+            lines.push(line);
+        }
+        if (lines.length >= limit) {
+            return lines;
+        }
+    }
+    return lines;
+};
+const detectSuggestedAction = (state, options = {}) => {
+    const source = state.loadedSource;
+    if ((options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 &&
+        source &&
+        (source.source === "local-repo" || source.source === "github") &&
+        source.repositoryUrdfPath) {
+        return buildRepairMeshRefsSuggestion();
+    }
+    const urdfPath = options.urdfPath ?? source?.urdfPath ?? state.lastUrdfPath;
+    if (!urdfPath || source?.source !== "local-file") {
+        return null;
+    }
+    try {
+        const currentUrdf = fs.readFileSync(urdfPath, "utf8");
+        const fixed = (0, fixMeshPaths_1.fixMeshPaths)(currentUrdf);
+        return fixed.corrections.length > 0 ? buildFixMeshPathsSuggestion() : null;
+    }
+    catch {
+        return null;
+    }
+};
 const getCandidateDetails = (candidate) => {
     const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
     if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
-        details.push(`${candidate.unresolvedMeshReferenceCount} missing mesh refs`);
+        details.push("mesh refs need attention");
     }
     if ((candidate.xacroArgs?.length ?? 0) > 0) {
-        details.push(`${candidate.xacroArgs.length} xacro args`);
+        details.push("needs xacro args");
     }
     return details;
 };
@@ -1494,29 +1576,23 @@ const summarizeRepositoryPreview = (session, payload, options = {}) => {
         lines,
     };
 };
-const summarizeHealthPreview = (payload, urdfPath) => {
+const summarizeHealthPreview = (payload, urdfPath, suggestedAction = null) => {
     const lines = [`source ${quoteForPreview(urdfPath)}`];
-    lines.push(payload.ok
-        ? "looks healthy"
-        : `${formatCount(payload.summary.errors, "error")}, ${formatCount(payload.summary.warnings, "warning")}, ${formatCount(payload.summary.infos, "info")}`);
+    lines.push(getHealthStatusLine(payload));
     if (payload.orientationGuess?.likelyUpAxis && payload.orientationGuess?.likelyForwardAxis) {
         lines.push(`orientation likely ${payload.orientationGuess.likelyUpAxis}-up / ${payload.orientationGuess.likelyForwardAxis}-forward`);
     }
-    for (const finding of payload.findings.slice(0, 2)) {
-        const prefix = finding.context ? `${finding.context}: ` : "";
-        lines.push(`${finding.level} ${prefix}${finding.message}`);
+    for (const finding of payload.findings.filter((entry) => entry.level !== "info").slice(0, 2)) {
+        lines.push(formatAttentionDetail(finding.message, finding.context));
     }
-    if (payload.findings.length > 2) {
-        lines.push(`+${payload.findings.length - 2} more findings`);
-    }
-    lines.push("next /analyze or /orientation if you want a deeper review");
+    appendSuggestedActionLines(lines, suggestedAction, "next /analyze or /orientation if you want a deeper review");
     return {
         title: "health",
-        kind: payload.ok ? "success" : "info",
+        kind: payload.ok && payload.summary.errors === 0 && payload.summary.warnings === 0 ? "success" : "info",
         lines,
     };
 };
-const summarizeAnalysisPreview = (payload, urdfPath) => {
+const summarizeAnalysisPreview = (payload, urdfPath, suggestedAction = null) => {
     const jointCount = payload.jointHierarchy?.orderedJoints?.length ?? 0;
     const lines = [`source ${quoteForPreview(urdfPath)}`];
     if (!payload.isValid) {
@@ -1528,7 +1604,7 @@ const summarizeAnalysisPreview = (payload, urdfPath) => {
         };
     }
     lines.push(payload.robotName ? `robot ${payload.robotName}` : "robot detected");
-    lines.push(`${formatCount(payload.linkNames.length, "link")}  ${formatCount(jointCount, "joint")}  ${formatCount(payload.meshReferences.length, "mesh ref")}`);
+    lines.push(`${formatCount(payload.linkNames.length, "link")}  ${formatCount(jointCount, "joint")}`);
     if ((payload.sensors?.length ?? 0) > 0) {
         lines.push(`${formatCount(payload.sensors?.length ?? 0, "sensor")}`);
     }
@@ -1537,18 +1613,16 @@ const summarizeAnalysisPreview = (payload, urdfPath) => {
             ? `root ${payload.rootLinks[0]}`
             : `${formatCount(payload.rootLinks.length, "root link")}`);
     }
-    lines.push("next /health or /orientation if you want deeper review");
+    appendSuggestedActionLines(lines, suggestedAction, "next /health or /orientation if you want deeper review");
     return {
         title: "preview",
         kind: "info",
         lines,
     };
 };
-const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orientation) => {
+const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orientation, suggestedAction = null) => {
     const lines = [`source ${quoteForPreview(urdfPath)}`];
     const jointCount = analysis.jointHierarchy?.orderedJoints?.length ?? 0;
-    const validationErrorCount = validation.issues.filter((issue) => issue.level === "error").length;
-    const validationWarningCount = validation.issues.filter((issue) => issue.level === "warning").length;
     if (!analysis.isValid) {
         lines.push(analysis.error || "could not analyze this URDF");
         return {
@@ -1558,28 +1632,12 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
         };
     }
     lines.push(analysis.robotName ? `robot ${analysis.robotName}` : "robot detected");
-    lines.push(`${formatCount(analysis.linkNames.length, "link")}  ${formatCount(jointCount, "joint")}  ${formatCount(analysis.meshReferences.length, "mesh ref")}`);
+    lines.push(`${formatCount(analysis.linkNames.length, "link")}  ${formatCount(jointCount, "joint")}`);
     if ((analysis.sensors?.length ?? 0) > 0) {
         lines.push(`${formatCount(analysis.sensors?.length ?? 0, "sensor")}`);
     }
-    if (validation.isValid && validation.issues.length === 0) {
-        lines.push("validation passed");
-    }
-    else if (validation.isValid) {
-        lines.push(`validation passed with ${formatCount(validationWarningCount, "warning")}`);
-    }
-    else {
-        lines.push(`validation found ${formatCount(validationErrorCount, "error")} and ${formatCount(validationWarningCount, "warning")}`);
-    }
-    if (health.ok && health.summary.warnings === 0) {
-        lines.push("health check passed");
-    }
-    else if (health.ok) {
-        lines.push(`health check passed with ${formatCount(health.summary.warnings, "warning")}`);
-    }
-    else {
-        lines.push(`health check found ${formatCount(health.summary.errors, "error")} and ${formatCount(health.summary.warnings, "warning")}`);
-    }
+    lines.push(getValidationStatusLine(validation));
+    lines.push(getHealthStatusLine(health));
     if (orientation.isValid && orientation.likelyUpAxis && orientation.likelyForwardAxis) {
         const confidence = typeof orientation.confidence === "number" && Number.isFinite(orientation.confidence)
             ? `  ${Math.round(orientation.confidence * 100)}%`
@@ -1596,23 +1654,7 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
         health.summary.errors > 0 ||
         health.summary.warnings > 0 ||
         analysis.meshReferences.length > 0;
-    for (const issue of validation.issues.slice(0, 2)) {
-        const prefix = issue.context ? `${issue.context}: ` : "";
-        attentionLines.push(`${issue.level} ${prefix}${issue.message}`);
-    }
-    for (const finding of health.findings.filter((item) => item.level !== "info").slice(0, 2)) {
-        const prefix = finding.context ? `${finding.context}: ` : "";
-        const line = `${finding.level} ${prefix}${finding.message}`;
-        if (!attentionLines.includes(line)) {
-            attentionLines.push(line);
-        }
-        if (attentionLines.length >= 3) {
-            break;
-        }
-    }
-    if (analysis.meshReferences.length > 0) {
-        attentionLines.push(`${formatCount(analysis.meshReferences.length, "mesh ref")} detected`);
-    }
+    attentionLines.push(...collectAttentionLines(validation.issues, health.findings, 2));
     const orientationConflict = orientation.report?.conflicts?.[0];
     if (needsAttention && orientationConflict) {
         attentionLines.push(`note ${orientationConflict}`);
@@ -1625,13 +1667,10 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
             lines.push(line);
         }
     }
-    if (needsAttention) {
-        lines.push("best next step fix the URDF and rerun /analyze");
-    }
-    else {
+    if (!needsAttention) {
         lines.push("looks ready");
     }
-    lines.push("convert it when you need output");
+    appendSuggestedActionLines(lines, suggestedAction, needsAttention ? "next /fix what needs attention or rerun /analyze" : "convert it when you need output");
     return {
         title: "investigation",
         kind: validation.isValid && health.ok && health.summary.warnings === 0 && attentionLines.length === 0
@@ -1640,27 +1679,13 @@ const summarizeInvestigateResult = (urdfPath, validation, health, analysis, orie
         lines,
     };
 };
-const summarizeValidationResult = (payload, urdfPath) => {
+const summarizeValidationResult = (payload, urdfPath, suggestedAction = null) => {
     const lines = [`source ${quoteForPreview(urdfPath)}`];
-    const errorCount = payload.issues.filter((issue) => issue.level === "error").length;
-    const warningCount = payload.issues.filter((issue) => issue.level === "warning").length;
-    if (payload.isValid && payload.issues.length === 0) {
-        lines.push("validation passed");
-    }
-    else if (payload.isValid) {
-        lines.push(`validation passed with ${formatCount(warningCount, "warning")}`);
-    }
-    else {
-        lines.push(`validation found ${formatCount(errorCount, "error")} and ${formatCount(warningCount, "warning")}`);
-    }
+    lines.push(getValidationStatusLine(payload));
     for (const issue of payload.issues.slice(0, 2)) {
-        const prefix = issue.context ? `${issue.context}: ` : "";
-        lines.push(`${issue.level} ${prefix}${issue.message}`);
+        lines.push(formatAttentionDetail(issue.message, issue.context));
     }
-    if (payload.issues.length > 2) {
-        lines.push(`+${payload.issues.length - 2} more issues`);
-    }
-    lines.push(payload.isValid ? "next /analyze or /orientation if you want more" : "fix the URDF and rerun /validate");
+    appendSuggestedActionLines(lines, suggestedAction, payload.isValid ? "next /analyze or /orientation if you want more" : "fix what needs attention and rerun /validate");
     return {
         title: "validation",
         kind: payload.isValid && payload.issues.length === 0 ? "success" : "info",
@@ -1712,6 +1737,184 @@ const sanitizeUrdfSnapshotName = (hint) => {
 const createTempUrdfSnapshotPath = (hint) => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-loaded-"));
     return path.join(tempDir, sanitizeUrdfSnapshotName(hint));
+};
+const applyWorkingUrdfSnapshot = (state, urdfPath) => {
+    state.lastUrdfPath = urdfPath;
+    if (state.loadedSource) {
+        state.loadedSource = {
+            ...state.loadedSource,
+            urdfPath,
+        };
+        return;
+    }
+    rememberDirectUrdfSource(state, urdfPath);
+};
+const runValidationAndHealthChecks = (urdfPath) => {
+    const validationExecution = executeCliCommand("validate", new Map([["urdf", urdfPath]]));
+    const healthExecution = executeCliCommand("health-check", new Map([["urdf", urdfPath]]));
+    const validationPayload = parseExecutionJson(validationExecution);
+    const healthPayload = parseExecutionJson(healthExecution);
+    return {
+        validationExecution,
+        healthExecution,
+        validationPayload,
+        healthPayload,
+    };
+};
+const summarizeRepairResult = (actionLine, validation, health, options = {}) => {
+    const lines = [actionLine, "working copy ready", getValidationStatusLine(validation), getHealthStatusLine(health)];
+    if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
+        lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
+    }
+    for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
+        lines.push(line);
+    }
+    if ((options.unresolvedMeshRefs ?? 0) > 0) {
+        lines.push("some mesh references still need attention");
+    }
+    lines.push("next /analyze or paste another source");
+    return {
+        title: "repair",
+        kind: validation.isValid &&
+            health.ok &&
+            health.summary.errors === 0 &&
+            health.summary.warnings === 0 &&
+            (options.unresolvedMeshRefs ?? 0) === 0
+            ? "success"
+            : "info",
+        lines,
+    };
+};
+const getSuggestedActionBusyState = (suggestedAction) => suggestedAction.kind === "repair-mesh-refs"
+    ? {
+        title: "repairing",
+        lines: ["repairing mesh references...", "rerunning validation and health check..."],
+    }
+    : {
+        title: "repairing",
+        lines: ["repairing mesh paths...", "rerunning validation and health check..."],
+    };
+const runSuggestedAction = (state) => {
+    const suggestedAction = state.suggestedAction;
+    clearSuggestedAction(state);
+    if (!suggestedAction) {
+        return {
+            panel: null,
+            notice: { kind: "info", text: getRootIdleMessage(state) },
+            clearSession: false,
+        };
+    }
+    if (suggestedAction.kind === "repair-mesh-refs") {
+        const source = state.loadedSource;
+        const repositoryRef = source?.githubRef || source?.localPath;
+        if (!source || !source.repositoryUrdfPath || !repositoryRef) {
+            return {
+                panel: createOutputPanel("repair", "could not find a loaded repository source", "error"),
+                notice: { kind: "error", text: "repair could not start" },
+                clearSession: false,
+            };
+        }
+        const outPath = createTempUrdfSnapshotPath(source.repositoryUrdfPath);
+        const args = new Map([
+            ["urdf", source.repositoryUrdfPath],
+            ["out", outPath],
+        ]);
+        if (source.githubRef) {
+            args.set("github", source.githubRef);
+            const token = resolveShellGitHubAccessToken();
+            if (token) {
+                args.set("token", token);
+            }
+        }
+        else if (source.localPath) {
+            args.set("local", source.localPath);
+        }
+        const repairExecution = executeCliCommand("repair-mesh-refs", args);
+        const repairPayload = parseExecutionJson(repairExecution);
+        if (!repairPayload) {
+            const panel = buildPreviewErrorPanel("repair", repairExecution);
+            return {
+                panel,
+                notice: buildShellFailureNotice(panel, "repair failed"),
+                clearSession: false,
+            };
+        }
+        const workingUrdfPath = repairPayload.outPath || outPath;
+        if (!repairPayload.outPath) {
+            fs.writeFileSync(workingUrdfPath, repairPayload.content, "utf8");
+        }
+        applyWorkingUrdfSnapshot(state, workingUrdfPath);
+        const { validationExecution, healthExecution, validationPayload, healthPayload } = runValidationAndHealthChecks(workingUrdfPath);
+        if (!validationPayload || !healthPayload) {
+            const panel = buildPreviewErrorPanel("repair", !validationPayload ? validationExecution : healthExecution);
+            return {
+                panel,
+                notice: buildShellFailureNotice(panel, "repair checks failed"),
+                clearSession: false,
+            };
+        }
+        return {
+            panel: summarizeRepairResult("repaired mesh references", validationPayload, healthPayload, {
+                unresolvedMeshRefs: repairPayload.unresolved.length,
+            }),
+            notice: {
+                kind: validationPayload.isValid &&
+                    healthPayload.ok &&
+                    healthPayload.summary.errors === 0 &&
+                    healthPayload.summary.warnings === 0 &&
+                    repairPayload.unresolved.length === 0
+                    ? "success"
+                    : "info",
+                text: repairPayload.unresolved.length === 0
+                    ? "mesh references repaired"
+                    : "mesh references repaired. review the remaining attention points",
+            },
+            clearSession: false,
+        };
+    }
+    const urdfPath = state.loadedSource?.urdfPath || state.lastUrdfPath;
+    if (!urdfPath) {
+        return {
+            panel: createOutputPanel("repair", "could not find a loaded URDF", "error"),
+            notice: { kind: "error", text: "repair could not start" },
+            clearSession: false,
+        };
+    }
+    try {
+        const fixed = (0, fixMeshPaths_1.fixMeshPaths)(fs.readFileSync(urdfPath, "utf8"));
+        const workingUrdfPath = createTempUrdfSnapshotPath(urdfPath);
+        fs.writeFileSync(workingUrdfPath, fixed.urdfContent, "utf8");
+        applyWorkingUrdfSnapshot(state, workingUrdfPath);
+        const { validationExecution, healthExecution, validationPayload, healthPayload } = runValidationAndHealthChecks(workingUrdfPath);
+        if (!validationPayload || !healthPayload) {
+            const panel = buildPreviewErrorPanel("repair", !validationPayload ? validationExecution : healthExecution);
+            return {
+                panel,
+                notice: buildShellFailureNotice(panel, "repair checks failed"),
+                clearSession: false,
+            };
+        }
+        return {
+            panel: summarizeRepairResult("repaired mesh paths", validationPayload, healthPayload),
+            notice: {
+                kind: validationPayload.isValid &&
+                    healthPayload.ok &&
+                    healthPayload.summary.errors === 0 &&
+                    healthPayload.summary.warnings === 0
+                    ? "success"
+                    : "info",
+                text: fixed.corrections.length > 0 ? "mesh paths repaired" : "mesh paths already looked consistent",
+            },
+            clearSession: false,
+        };
+    }
+    catch (error) {
+        return {
+            panel: createOutputPanel("repair", error instanceof Error ? error.message : String(error), "error"),
+            notice: { kind: "error", text: "repair failed" },
+            clearSession: false,
+        };
+    }
 };
 const resolveExtractedArchiveRoot = (archiveRoot) => {
     const entries = fs
@@ -1813,6 +2016,7 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
     const loadExecution = executeCliCommand("load-source", loadArgs);
     const loadPayload = parseExecutionJson(loadExecution);
     if (!loadPayload || !loadPayload.outPath) {
+        clearSuggestedAction(state);
         const panel = buildPreviewErrorPanel("error", loadExecution);
         if (panel?.title === "xacro") {
             const retryArgs = cloneArgsMap(execArgs);
@@ -1842,10 +2046,7 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
     rememberLoadedSource(state, loadPayload, {
         githubRef: typeof execArgs.get("github") === "string" ? String(execArgs.get("github")) : undefined,
     });
-    const validationExecution = executeCliCommand("validate", new Map([["urdf", loadPayload.outPath]]));
-    const healthExecution = executeCliCommand("health-check", new Map([["urdf", loadPayload.outPath]]));
-    const validationPayload = parseExecutionJson(validationExecution);
-    const healthPayload = parseExecutionJson(healthExecution);
+    const { validationExecution, healthExecution, validationPayload, healthPayload } = runValidationAndHealthChecks(loadPayload.outPath);
     if (!validationPayload || !healthPayload) {
         const panel = buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution);
         clearXacroRetry(state);
@@ -1855,9 +2056,14 @@ const executeLoadSourceChecks = (state, execArgs, options = {}) => {
             clearSession: false,
         };
     }
+    state.suggestedAction = detectSuggestedAction(state, {
+        selectedCandidate: options.selectedCandidate,
+        urdfPath: loadPayload.outPath,
+    });
     const panel = summarizeAutoLoadChecks(loadPayload, validationPayload, healthPayload, {
         extractedArchivePath: options.extractedArchivePath,
         requestedEntryPath: options.requestedEntryPath,
+        suggestedAction: state.suggestedAction,
     });
     return {
         panel,
@@ -1877,9 +2083,11 @@ const runSelectedCandidatePicker = (state, selectionPath) => {
     }
     const execArgs = cloneArgsMap(picker.loadArgs);
     execArgs.set("entry", selectionPath);
+    const selectedCandidate = picker.candidates.find((candidate) => candidate.path === selectionPath);
     return executeLoadSourceChecks(state, execArgs, {
         extractedArchivePath: picker.extractedArchivePath,
         requestedEntryPath: selectionPath,
+        selectedCandidate,
     });
 };
 const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) => {
@@ -1899,63 +2107,47 @@ const summarizeAutoLoadChecks = (loadResult, validation, health, options = {}) =
             ? `selected ${loadResult.entryPath} from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`
             : `picked best match from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`);
     }
-    lines.push(validation.isValid
-        ? "validation passed"
-        : `validation found ${formatCount(validation.issues.filter((issue) => issue.level === "error").length, "error")} and ${formatCount(validation.issues.filter((issue) => issue.level === "warning").length, "warning")}`);
-    if (health.ok && health.summary.warnings === 0) {
-        lines.push("health check passed");
-    }
-    else if (health.ok) {
-        lines.push(`health check passed with ${formatCount(health.summary.warnings, "warning")}`);
-    }
-    else {
-        lines.push(`health check found ${formatCount(health.summary.errors, "error")} and ${formatCount(health.summary.warnings, "warning")}`);
-    }
+    lines.push(getValidationStatusLine(validation));
+    lines.push(getHealthStatusLine(health));
     if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
         lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
     }
-    for (const finding of health.findings.slice(0, 2)) {
-        if (health.ok && health.summary.warnings === 0 && finding.level === "info") {
-            continue;
-        }
-        const prefix = finding.context ? `${finding.context}: ` : "";
-        lines.push(`${finding.level} ${prefix}${finding.message}`);
+    for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
+        lines.push(line);
     }
-    lines.push("next /analyze /health /validate /orientation or paste another source");
+    appendSuggestedActionLines(lines, options.suggestedAction ?? null, "next /analyze /health /validate /orientation or paste another source");
     return {
         title: "loaded",
-        kind: validation.isValid && health.ok && health.summary.warnings === 0 ? "success" : "info",
+        kind: validation.isValid &&
+            health.ok &&
+            health.summary.errors === 0 &&
+            health.summary.warnings === 0 &&
+            !options.suggestedAction
+            ? "success"
+            : "info",
         lines,
     };
 };
-const summarizeDirectUrdfChecks = (urdfPath, validation, health) => {
+const summarizeDirectUrdfChecks = (urdfPath, validation, health, suggestedAction = null) => {
     const lines = [`source ${quoteForPreview(urdfPath)}`];
-    lines.push(validation.isValid
-        ? "validation passed"
-        : `validation found ${formatCount(validation.issues.filter((issue) => issue.level === "error").length, "error")} and ${formatCount(validation.issues.filter((issue) => issue.level === "warning").length, "warning")}`);
-    if (health.ok && health.summary.warnings === 0) {
-        lines.push("health check passed");
-    }
-    else if (health.ok) {
-        lines.push(`health check passed with ${formatCount(health.summary.warnings, "warning")}`);
-    }
-    else {
-        lines.push(`health check found ${formatCount(health.summary.errors, "error")} and ${formatCount(health.summary.warnings, "warning")}`);
-    }
+    lines.push(getValidationStatusLine(validation));
+    lines.push(getHealthStatusLine(health));
     if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
         lines.push(`orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`);
     }
-    for (const finding of health.findings.slice(0, 2)) {
-        if (health.ok && health.summary.warnings === 0 && finding.level === "info") {
-            continue;
-        }
-        const prefix = finding.context ? `${finding.context}: ` : "";
-        lines.push(`${finding.level} ${prefix}${finding.message}`);
+    for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
+        lines.push(line);
     }
-    lines.push("next /analyze /health /validate /orientation or paste another source");
+    appendSuggestedActionLines(lines, suggestedAction, "next /analyze /health /validate /orientation or paste another source");
     return {
         title: "checks",
-        kind: validation.isValid && health.ok && health.summary.warnings === 0 ? "success" : "info",
+        kind: validation.isValid &&
+            health.ok &&
+            health.summary.errors === 0 &&
+            health.summary.warnings === 0 &&
+            !suggestedAction
+            ? "success"
+            : "info",
         lines,
     };
 };
@@ -2008,6 +2200,15 @@ const runDirectInputAutomation = (state, session, changedKey) => {
                 if (preview.payload.primaryCandidatePath) {
                     execArgs.set("entry", preview.payload.primaryCandidatePath);
                 }
+                const selectedCandidate = typeof execArgs.get("entry") === "string"
+                    ? preview.payload.candidates.find((candidate) => candidate.path === execArgs.get("entry"))
+                    : undefined;
+                clearCandidatePicker(state);
+                return executeLoadSourceChecks(state, execArgs, {
+                    extractedArchivePath,
+                    requestedEntryPath: typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
+                    selectedCandidate,
+                });
             }
             else {
                 clearCandidatePicker(state);
@@ -2032,7 +2233,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
                 clearSession: false,
             };
         }
-        const panel = getShellExecutionSuccessPanel(session, execution) ??
+        const panel = getShellExecutionSuccessPanel(state, session, execution) ??
             createOutputPanel("result", buildExecutionPanelText(execution, session.command), "success");
         return {
             panel,
@@ -2057,10 +2258,7 @@ const runDirectInputAutomation = (state, session, changedKey) => {
         }
         state.lastUrdfPath = urdfPath;
         rememberDirectUrdfSource(state, urdfPath);
-        const validationExecution = executeCliCommand("validate", new Map([["urdf", urdfPath]]));
-        const healthExecution = executeCliCommand("health-check", new Map([["urdf", urdfPath]]));
-        const validationPayload = parseExecutionJson(validationExecution);
-        const healthPayload = parseExecutionJson(healthExecution);
+        const { validationExecution, healthExecution, validationPayload, healthPayload } = runValidationAndHealthChecks(urdfPath);
         if (!validationPayload || !healthPayload) {
             const panel = buildPreviewErrorPanel("error", !validationPayload ? validationExecution : healthExecution);
             return {
@@ -2069,7 +2267,8 @@ const runDirectInputAutomation = (state, session, changedKey) => {
                 clearSession: false,
             };
         }
-        const panel = summarizeDirectUrdfChecks(urdfPath, validationPayload, healthPayload);
+        state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+        const panel = summarizeDirectUrdfChecks(urdfPath, validationPayload, healthPayload, state.suggestedAction);
         return {
             panel,
             notice: {
@@ -2157,7 +2356,8 @@ const buildAutoPreviewPanel = (state, session, changedKey) => {
         if (payload && urdfPath) {
             state.lastUrdfPath = urdfPath;
             rememberDirectUrdfSource(state, urdfPath);
-            return summarizeHealthPreview(payload, urdfPath);
+            state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+            return summarizeHealthPreview(payload, urdfPath, state.suggestedAction);
         }
         return buildPreviewErrorPanel("health", execution);
     }
@@ -2167,7 +2367,8 @@ const buildAutoPreviewPanel = (state, session, changedKey) => {
         if (payload && urdfPath) {
             state.lastUrdfPath = urdfPath;
             rememberDirectUrdfSource(state, urdfPath);
-            return summarizeAnalysisPreview(payload, urdfPath);
+            state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+            return summarizeAnalysisPreview(payload, urdfPath, state.suggestedAction);
         }
         return buildPreviewErrorPanel("preview", execution);
     }
@@ -2231,13 +2432,14 @@ const executeSessionCommand = (state, session) => {
                 };
             }
             updateRememberedUrdfPath(state, session);
+            state.suggestedAction = detectSuggestedAction(state, { urdfPath });
             return {
                 preview: analysisExecution.preview,
                 stdout: "",
                 stderr: "",
                 status: 0,
                 followUp: getFollowUpSuggestionMessage(state, session.command),
-                shellPanel: summarizeInvestigateResult(urdfPath, validationPayload, healthPayload, analysisPayload, orientationPayload),
+                shellPanel: summarizeInvestigateResult(urdfPath, validationPayload, healthPayload, analysisPayload, orientationPayload, state.suggestedAction),
             };
         }
     }
@@ -2245,6 +2447,16 @@ const executeSessionCommand = (state, session) => {
     const status = result.status;
     if (status === 0) {
         updateRememberedUrdfPath(state, session);
+        if (session.command === "validate" || session.command === "health-check" || session.command === "guess-orientation") {
+            const urdfPath = session.args.get("urdf");
+            state.suggestedAction =
+                typeof urdfPath === "string" && urdfPath.trim().length > 0
+                    ? detectSuggestedAction(state, { urdfPath })
+                    : null;
+        }
+        else if (session.command === "inspect-repo" || session.command === "repair-mesh-refs" || session.command === "fix-mesh-paths") {
+            clearSuggestedAction(state);
+        }
     }
     return {
         preview: result.preview,
@@ -2254,7 +2466,7 @@ const executeSessionCommand = (state, session) => {
         followUp: status === 0 ? getFollowUpSuggestionMessage(state, session.command) : null,
     };
 };
-const getShellExecutionSuccessPanel = (session, execution) => {
+const getShellExecutionSuccessPanel = (state, session, execution) => {
     if (execution.status !== 0) {
         return null;
     }
@@ -2269,17 +2481,17 @@ const getShellExecutionSuccessPanel = (session, execution) => {
         case "health-check": {
             const payload = parseExecutionJson(execution);
             const urdfPath = session.args.get("urdf");
-            return payload && typeof urdfPath === "string" ? summarizeHealthPreview(payload, urdfPath) : null;
+            return payload && typeof urdfPath === "string" ? summarizeHealthPreview(payload, urdfPath, state.suggestedAction) : null;
         }
         case "analyze": {
             const payload = parseExecutionJson(execution);
             const urdfPath = session.args.get("urdf");
-            return payload && typeof urdfPath === "string" ? summarizeAnalysisPreview(payload, urdfPath) : null;
+            return payload && typeof urdfPath === "string" ? summarizeAnalysisPreview(payload, urdfPath, state.suggestedAction) : null;
         }
         case "validate": {
             const payload = parseExecutionJson(execution);
             const urdfPath = session.args.get("urdf");
-            return payload && typeof urdfPath === "string" ? summarizeValidationResult(payload, urdfPath) : null;
+            return payload && typeof urdfPath === "string" ? summarizeValidationResult(payload, urdfPath, state.suggestedAction) : null;
         }
         case "guess-orientation": {
             const payload = parseExecutionJson(execution);
@@ -2311,20 +2523,20 @@ const getShellExecutionFailurePanel = (execution, command) => {
             lines: [
                 "xacro runtime not set",
                 "run !xacro",
-                "retry /run when setup finishes",
+                "retry when setup finishes",
             ],
         };
     }
     return null;
 };
-const printSessionCommandExecution = (execution, session) => {
+const printSessionCommandExecution = (state, execution, session) => {
     const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
     if (compactFailurePanel) {
         writeFeedback(buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`));
         printOutputPanel(compactFailurePanel);
         return;
     }
-    const successPanel = getShellExecutionSuccessPanel(session, execution);
+    const successPanel = getShellExecutionSuccessPanel(state, session, execution);
     if (successPanel) {
         printOutputPanel(successPanel);
         if (execution.followUp) {
@@ -2808,7 +3020,7 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
         startRootShellCommand(rootShellCommand, state, feedback);
         flushFeedback(feedback);
         if (state.session && shouldAutoRunSession(state.session)) {
-            printSessionCommandExecution(executeSessionCommand(state, state.session), state.session);
+            printSessionCommandExecution(state, executeSessionCommand(state, state.session), state.session);
             state.session = null;
             state.rootTask = null;
             return;
@@ -2832,7 +3044,7 @@ const handleRootSlashCommand = (slashCommand, state, close) => {
     if (quickSession) {
         clearCandidatePicker(state);
         clearXacroRetry(state);
-        printSessionCommandExecution(executeSessionCommand(state, quickSession), quickSession);
+        printSessionCommandExecution(state, executeSessionCommand(state, quickSession), quickSession);
         return;
     }
     state.rootTask = null;
@@ -2886,7 +3098,7 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
         startRootTaskAction(task, action, state, feedback);
         flushFeedback(feedback);
         if (state.session && shouldAutoRunSession(state.session)) {
-            printSessionCommandExecution(executeSessionCommand(state, state.session), state.session);
+            printSessionCommandExecution(state, executeSessionCommand(state, state.session), state.session);
             state.session = null;
             state.rootTask = null;
             return;
@@ -2948,7 +3160,7 @@ const handleSessionSlashCommand = (slashCommand, inlineValue, state) => {
             process.stderr.write(`${SHELL_THEME.warning("[missing]")} ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`);
             return;
         }
-        printSessionCommandExecution(executeSessionCommand(state, session), session);
+        printSessionCommandExecution(state, executeSessionCommand(state, session), session);
         return;
     }
     if (slashCommand === "last") {
@@ -3251,7 +3463,7 @@ const pushTimelineUserEntry = (view, text) => {
         kind: "info",
     });
 };
-const compactTimelineLines = (lines, maxLines = 7) => {
+const compactTimelineLines = (lines, maxLines = 8) => {
     if (lines.length <= maxLines) {
         return lines;
     }
@@ -3267,19 +3479,21 @@ const buildTimelineResponseLines = (notice, panel, fallbackText) => {
         ? "loaded the source"
         : panel?.title === "checks"
             ? "checked the source"
-            : panel?.title === "investigation"
-                ? "investigated the source"
-                : panel?.title === "validation"
-                    ? "validated the URDF"
-                    : panel?.title === "orientation"
-                        ? "estimated orientation"
-                        : panel?.title === "preview"
-                            ? "previewed the source"
-                            : panel?.title === "context"
-                                ? "current context"
-                                : panel?.title === "xacro"
-                                    ? "xacro runtime"
-                                    : null;
+            : panel?.title === "repair"
+                ? "updated the working copy"
+                : panel?.title === "investigation"
+                    ? "investigated the source"
+                    : panel?.title === "validation"
+                        ? "validated the URDF"
+                        : panel?.title === "orientation"
+                            ? "estimated orientation"
+                            : panel?.title === "preview"
+                                ? "previewed the source"
+                                : panel?.title === "context"
+                                    ? "current context"
+                                    : panel?.title === "xacro"
+                                        ? "xacro runtime"
+                                        : null;
     if (panelNarrative) {
         lines.push(panelNarrative);
     }
@@ -3447,6 +3661,9 @@ const getPromptPlaceholder = (state) => {
     if (!state.session && !state.rootTask && !state.candidatePicker && state.updatePrompt) {
         return "Enter updates now or Esc skips";
     }
+    if (!state.session && !state.rootTask && !state.candidatePicker && state.suggestedAction) {
+        return "Enter accepts the recommendation";
+    }
     if (state.candidatePicker) {
         return "arrows choose a match, Enter loads it";
     }
@@ -3548,6 +3765,9 @@ const renderTtyShell = (state, view) => {
     }
     if (state.updatePrompt && !view.busy) {
         lines.push(`  ${SHELL_THEME.icon("↑")} ${SHELL_THEME.muted(formatUpdatePromptLine(state.updatePrompt))}`);
+    }
+    if (state.suggestedAction && !view.busy && !state.session && !state.rootTask && !state.candidatePicker) {
+        lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(state.suggestedAction.prompt)}`);
     }
     if (shouldRenderInlineNotice(view)) {
         lines.push(`  ${renderNotice(view.notice)}`);
@@ -3692,6 +3912,7 @@ const runLineInteractiveShell = async (options = {}) => {
         xacroRetry: null,
         loadedSource: null,
         updatePrompt: null,
+        suggestedAction: null,
     };
     let isClosed = false;
     const rl = readline.createInterface({
@@ -3722,6 +3943,9 @@ const runLineInteractiveShell = async (options = {}) => {
         const session = state.session;
         const isSlashInput = shouldTreatAsSlashInput(line, state);
         const bangCommand = parseBangInput(line);
+        if (state.suggestedAction && trimmed.length > 0) {
+            clearSuggestedAction(state);
+        }
         if (bangCommand) {
             if (bangCommand === "xacro") {
                 process.stdout.write(`${SHELL_THEME.muted("setting up xacro runtime...")}\n`);
@@ -3773,9 +3997,17 @@ const runLineInteractiveShell = async (options = {}) => {
             }
         }
         else if (!trimmed) {
-            if (session) {
+            if (!state.session && !state.rootTask && !state.candidatePicker && state.suggestedAction) {
+                process.stdout.write(`${SHELL_THEME.muted("applying the recommended fix...")}\n`);
+                const result = runSuggestedAction(state);
+                if (result.notice) {
+                    writeFeedback(result.notice);
+                }
+                printOutputPanel(result.panel);
+            }
+            else if (session) {
                 if (!session.pending && getRequirementStatus(session).ready) {
-                    printSessionCommandExecution(executeSessionCommand(state, session), session);
+                    printSessionCommandExecution(state, executeSessionCommand(state, session), session);
                 }
                 else {
                     printSessionStatus(state, session);
@@ -3862,6 +4094,9 @@ const runLineInteractiveShell = async (options = {}) => {
                 process.stdout.write(`${SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
             }
         }
+        if (!isClosed && state.suggestedAction && !state.session && !state.rootTask && !state.candidatePicker) {
+            process.stdout.write(`${SHELL_THEME.muted(state.suggestedAction.prompt)}\n`);
+        }
         if (isClosed) {
             break;
         }
@@ -3877,6 +4112,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         xacroRetry: null,
         loadedSource: null,
         updatePrompt: null,
+        suggestedAction: null,
     };
     const view = {
         input: "",
@@ -4041,7 +4277,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     view.notice = buildShellFailureNotice(compactFailurePanel, `[${state.session.command}] exited with status ${execution.status}`);
                 }
                 else {
-                    const successPanel = getShellExecutionSuccessPanel(state.session, execution);
+                    const successPanel = getShellExecutionSuccessPanel(state, state.session, execution);
                     view.output =
                         successPanel ??
                             createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, state.session.command), execution.status === 0 ? "success" : "error");
@@ -4092,7 +4328,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                 view.notice = buildShellFailureNotice(compactFailurePanel, `[${quickSession.command}] exited with status ${execution.status}`);
             }
             else {
-                const successPanel = getShellExecutionSuccessPanel(quickSession, execution);
+                const successPanel = getShellExecutionSuccessPanel(state, quickSession, execution);
                 view.output =
                     successPanel ??
                         createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, quickSession.command), execution.status === 0 ? "success" : "error");
@@ -4182,7 +4418,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     view.notice = buildShellFailureNotice(compactFailurePanel, `[${state.session.command}] exited with status ${execution.status}`);
                 }
                 else {
-                    const successPanel = getShellExecutionSuccessPanel(state.session, execution);
+                    const successPanel = getShellExecutionSuccessPanel(state, state.session, execution);
                     view.output =
                         successPanel ??
                             createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, state.session.command), execution.status === 0 ? "success" : "error");
@@ -4285,7 +4521,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                 archiveAssistantStateToTimeline(view);
                 return true;
             }
-            const successPanel = getShellExecutionSuccessPanel(session, execution);
+            const successPanel = getShellExecutionSuccessPanel(state, session, execution);
             view.output =
                 successPanel ??
                     createOutputPanel(execution.status === 0 ? "result" : "error", buildExecutionPanelText(execution, session.command), execution.status === 0 ? "success" : "error");
@@ -4449,6 +4685,20 @@ const runTtyInteractiveShell = async (options = {}) => {
                 };
                 view.output = null;
             }
+            archiveAssistantStateToTimeline(view);
+            setInput("");
+            return;
+        }
+        if (state.suggestedAction &&
+            !state.session &&
+            !state.rootTask &&
+            !state.candidatePicker &&
+            trimmed.length === 0) {
+            const acceptedAction = state.suggestedAction.acceptLabel;
+            pushTimelineUserEntry(view, `yes, ${acceptedAction}`);
+            const result = runBusyOperation(getSuggestedActionBusyState(state.suggestedAction), () => runSuggestedAction(state));
+            view.notice = result.notice;
+            view.output = result.panel;
             archiveAssistantStateToTimeline(view);
             setInput("");
             return;
@@ -4760,6 +5010,11 @@ const runTtyInteractiveShell = async (options = {}) => {
                 queueRender("navigation");
                 return;
             }
+            if (state.suggestedAction && view.input.length === 0 && !state.session && !state.rootTask && !state.candidatePicker) {
+                clearSuggestedAction(state);
+                queueRender("navigation");
+                return;
+            }
             if (view.input.startsWith("/")) {
                 setInput("");
                 queueRender("navigation");
@@ -4787,6 +5042,9 @@ const runTtyInteractiveShell = async (options = {}) => {
         if (input && !key.ctrl && !key.meta) {
             if (state.updatePrompt && !state.session && !state.rootTask && !state.candidatePicker && view.input.length === 0) {
                 dismissUpdatePrompt(state);
+            }
+            if (state.suggestedAction && !state.session && !state.rootTask && !state.candidatePicker) {
+                clearSuggestedAction(state);
             }
             setInput(`${view.input}${input}`);
             if (view.input.startsWith("/")) {
@@ -4833,9 +5091,9 @@ const renderShellHelp = () => {
         "  /                  Open direct actions under the prompt",
         "  up/down            Move through picker options",
         "  tab                Complete the selected option or path",
-        "  enter              Select the highlighted option or run the ready action",
+        "  enter              Select the highlighted option, run the ready action, or accept a recommended fix",
         "  ctrl+c             Exit immediately",
-        "  esc                Close the picker or cancel a pending value",
+        "  esc                Close the picker, cancel a pending value, or skip the recommended fix",
         "  /open              Load a repo, folder, or file as the current source",
         "  /inspect           Preview a repo or folder and suggest an entrypoint",
         "  /analyze           Run the compact investigation view",

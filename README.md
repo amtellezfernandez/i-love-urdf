@@ -11,6 +11,7 @@ Inside `ilu`:
 
 - paste `owner/repo` or drop a local folder, `.urdf`, `.xacro`, or `.zip`
 - `ilu` auto-runs validation and a health check when it can
+- if `ilu` finds an obvious safe repair, it offers one and `Enter` accepts it
 - if a newer release is available, `ilu` asks whether you want to update
 - if there are multiple entrypoints, use arrows and `Enter` to pick one
 - press `Tab` to complete the selected slash option
