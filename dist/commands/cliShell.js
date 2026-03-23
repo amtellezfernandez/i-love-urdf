@@ -692,6 +692,9 @@ const getSessionContextRows = (state, session) => {
     });
     return rows;
 };
+const buildSessionNarrativeLines = (state, session) => getSessionContextRows(state, session)
+    .filter((row) => row.label === "source" || row.label === "action" || row.label === "next")
+    .map((row) => `${row.label} ${row.value}`);
 const buildSessionHeadline = (session) => {
     switch (session.label) {
         case "open": {
@@ -3261,8 +3264,71 @@ const getSlashMenuEntries = (state, input) => {
     }
     return primaryEntries.matchKind !== "none" ? primaryEntries.entries : fallbackEntries.entries;
 };
-const pushTimelineEntry = (view, text) => {
-    view.timeline = [...view.timeline.slice(-7), { text }];
+const appendTimelineEntry = (view, entry) => {
+    view.timeline = [...view.timeline.slice(-11), entry];
+};
+const pushTimelineUserEntry = (view, text) => {
+    appendTimelineEntry(view, {
+        role: "user",
+        lines: [text],
+        kind: "info",
+    });
+};
+const compactTimelineLines = (lines, maxLines = 7) => {
+    if (lines.length <= maxLines) {
+        return lines;
+    }
+    return [...lines.slice(0, maxLines), `+${lines.length - maxLines} more`];
+};
+const buildTimelineResponseLines = (notice, panel, fallbackText) => {
+    const lines = [];
+    const kind = notice?.kind ?? panel?.kind ?? "info";
+    const shouldIncludeNoticeText = !panel ||
+        !notice?.text ||
+        !new Set(["run complete", "preview ready", "health preview ready", "showing the current context"]).has(notice.text);
+    if (notice?.text && shouldIncludeNoticeText) {
+        lines.push(notice.text);
+    }
+    if (panel) {
+        if (panel.title && panel.title !== "result") {
+            lines.push(panel.title);
+        }
+        for (const line of panel.lines) {
+            if (!notice?.text || line !== notice.text) {
+                lines.push(line);
+            }
+        }
+    }
+    if (lines.length === 0 && fallbackText) {
+        lines.push(...fallbackText.split(/\r?\n/).filter((line) => line.trim().length > 0));
+    }
+    if (lines.length === 0) {
+        return null;
+    }
+    return {
+        lines: compactTimelineLines(lines),
+        kind,
+    };
+};
+const pushTimelineAssistantEntry = (view, lines, kind = "info") => {
+    if (lines.length === 0) {
+        return;
+    }
+    appendTimelineEntry(view, {
+        role: "assistant",
+        lines: compactTimelineLines(lines),
+        kind,
+    });
+};
+const archiveAssistantStateToTimeline = (view, options = {}) => {
+    const built = buildTimelineResponseLines(view.notice, view.output, options.fallbackText);
+    if (built) {
+        pushTimelineAssistantEntry(view, built.lines, built.kind);
+    }
+    if (options.clear !== false) {
+        view.notice = null;
+        view.output = null;
+    }
 };
 const setNoticeFromFeedback = (view, feedback) => {
     if (feedback.length === 0) {
@@ -3339,6 +3405,20 @@ const renderNotice = (notice) => {
             return SHELL_THEME.muted(text);
     }
 };
+const renderTimelineEntryLine = (entry, line, first) => {
+    if (entry.role === "user") {
+        return `  ${SHELL_THEME.command(">")} ${SHELL_THEME.command(line)}`;
+    }
+    const icon = first ? getPanelLineIcon(line) : "·";
+    const text = entry.kind === "error"
+        ? SHELL_THEME.error(line)
+        : entry.kind === "warning"
+            ? SHELL_THEME.warning(line)
+            : entry.kind === "success" && first
+                ? SHELL_THEME.success(line)
+                : SHELL_THEME.muted(line);
+    return `  ${SHELL_THEME.icon(icon)} ${text}`;
+};
 const renderMenuEntry = (entry, selected, width) => {
     const badge = entry.kind === "task"
         ? "top"
@@ -3407,17 +3487,6 @@ const renderTtyShell = (state, view) => {
     const lines = [];
     lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
     lines.push(SHELL_THEME.muted("paste owner/repo or drop a local path  / shows actions  !xacro sets up xacro  ctrl+c exits"));
-    if (view.notice) {
-        lines.push(renderNotice(view.notice));
-    }
-    if (view.timeline.length > 0) {
-        lines.push("");
-        lines.push(SHELL_THEME.section("recent"));
-        for (const entry of view.timeline.slice(-6)) {
-            lines.push(`  ${SHELL_THEME.command(entry.text)}`);
-        }
-    }
-    lines.push("");
     lines.push(SHELL_THEME.section("context"));
     if (state.candidatePicker && state.session) {
         const selectedCandidate = state.candidatePicker.candidates[clamp(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
@@ -3459,21 +3528,23 @@ const renderTtyShell = (state, view) => {
             lines.push(renderContextRow({ label: "help", value: "/ shows direct actions when you need them", tone: "muted" }));
         }
     }
-    if (view.output) {
-        lines.push("");
-        lines.push(SHELL_THEME.section(view.output.title));
-        for (const line of view.output.lines) {
-            lines.push(`  ${renderPanelLine(truncateText(line, columns - 6), view.output.kind)}`);
+    if (view.timeline.length > 0) {
+        lines.push(SHELL_THEME.section("activity"));
+        for (const entry of view.timeline.slice(-8)) {
+            for (const [index, line] of entry.lines.entries()) {
+                lines.push(renderTimelineEntryLine(entry, truncateText(line, columns - 6), index === 0));
+            }
         }
     }
     if (view.busy) {
-        lines.push("");
         lines.push(SHELL_THEME.section(view.busy.title));
         for (const line of view.busy.lines) {
             lines.push(`  ${SHELL_THEME.icon("…")} ${SHELL_THEME.muted(truncateText(line, columns - 6))}`);
         }
     }
-    lines.push("");
+    if (view.notice) {
+        lines.push(`  ${renderNotice(view.notice)}`);
+    }
     const promptLabel = formatShellPrompt(state).trimEnd();
     const promptLineIndex = lines.length;
     const placeholder = view.input.length === 0 && !view.busy ? getPromptPlaceholder(state) : "";
@@ -3812,7 +3883,11 @@ const runTtyInteractiveShell = async (options = {}) => {
         state.session = createSession(command, state, command, feedback);
         setNoticeFromFeedback(view, feedback);
         setInput(state.session?.pending ? "" : "/");
-        pushTimelineEntry(view, `/${command}`);
+        pushTimelineUserEntry(view, `/${command}`);
+        if (state.session) {
+            pushTimelineAssistantEntry(view, buildSessionNarrativeLines(state, state.session), "info");
+            view.notice = null;
+        }
     };
     const openRootTask = (task) => {
         state.rootTask = task;
@@ -3821,7 +3896,9 @@ const runTtyInteractiveShell = async (options = {}) => {
         clearXacroRetry(state);
         setInput("/");
         view.notice = { kind: "info", text: `${getRootTaskSummary(task)}  choose below or paste input directly` };
-        pushTimelineEntry(view, `/${task}`);
+        pushTimelineUserEntry(view, `/${task}`);
+        pushTimelineAssistantEntry(view, [`action ${getRootTaskSummary(task)}`, "next paste input directly or type /"], "info");
+        view.notice = null;
     };
     const getBusyStateForSession = (session, changedKey) => {
         if (session.command === "load-source") {
@@ -3903,7 +3980,8 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (slashCommand === "last") {
             view.notice = { kind: "info", text: getLastUrdfMessage(state) };
-            pushTimelineEntry(view, "/last");
+            pushTimelineUserEntry(view, "/last");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "run") {
@@ -3912,7 +3990,8 @@ const runTtyInteractiveShell = async (options = {}) => {
                 kind: "info",
                 text: getRootIdleMessage(state),
             };
-            pushTimelineEntry(view, "/run");
+            pushTimelineUserEntry(view, "/run");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "update") {
@@ -3923,7 +4002,8 @@ const runTtyInteractiveShell = async (options = {}) => {
             catch (error) {
                 view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
             }
-            pushTimelineEntry(view, "/update");
+            pushTimelineUserEntry(view, "/update");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         const rootShellCommand = getRootShellCommandDefinition(slashCommand);
@@ -3962,7 +4042,16 @@ const runTtyInteractiveShell = async (options = {}) => {
                     ].join("  "),
                 };
             }
-            pushTimelineEntry(view, `/${slashCommand}`);
+            pushTimelineUserEntry(view, `/${slashCommand}`);
+            if (view.output || view.notice) {
+                archiveAssistantStateToTimeline(view, {
+                    clear: true,
+                    fallbackText: state.session ? buildSessionNarrativeLines(state, state.session).join("\n") : undefined,
+                });
+            }
+            if (state.session) {
+                pushTimelineAssistantEntry(view, buildSessionNarrativeLines(state, state.session), "info");
+            }
             return true;
         }
         if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
@@ -3990,7 +4079,8 @@ const runTtyInteractiveShell = async (options = {}) => {
                         ? { kind: "success", text: "run complete" }
                         : { kind: "error", text: `[${quickSession.command}] exited with status ${execution.status}` };
             }
-            pushTimelineEntry(view, `/${slashCommand}`);
+            pushTimelineUserEntry(view, `/${slashCommand}`);
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         openSession(command);
@@ -4010,7 +4100,8 @@ const runTtyInteractiveShell = async (options = {}) => {
             clearCandidatePicker(state);
             clearXacroRetry(state);
             view.notice = { kind: "info", text: "back to tasks" };
-            pushTimelineEntry(view, "/back");
+            pushTimelineUserEntry(view, "/back");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "exit" || slashCommand === "quit") {
@@ -4025,7 +4116,8 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         if (slashCommand === "last") {
             view.notice = { kind: "info", text: getLastUrdfMessage(state) };
-            pushTimelineEntry(view, "/last");
+            pushTimelineUserEntry(view, "/last");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "run") {
@@ -4034,7 +4126,8 @@ const runTtyInteractiveShell = async (options = {}) => {
                 kind: "info",
                 text: "nothing is pending here. paste a source or choose one of the direct actions",
             };
-            pushTimelineEntry(view, "/run");
+            pushTimelineUserEntry(view, "/run");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "update") {
@@ -4045,7 +4138,8 @@ const runTtyInteractiveShell = async (options = {}) => {
             catch (error) {
                 view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
             }
-            pushTimelineEntry(view, "/update");
+            pushTimelineUserEntry(view, "/update");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (ROOT_TASKS.some((entry) => entry.name === slashCommand)) {
@@ -4076,7 +4170,8 @@ const runTtyInteractiveShell = async (options = {}) => {
                 }
                 state.session = null;
                 state.rootTask = null;
-                pushTimelineEntry(view, `/${slashCommand}`);
+                pushTimelineUserEntry(view, `/${slashCommand}`);
+                archiveAssistantStateToTimeline(view);
                 return true;
             }
             if (state.session?.pending) {
@@ -4090,7 +4185,13 @@ const runTtyInteractiveShell = async (options = {}) => {
                     ].join("  "),
                 };
             }
-            pushTimelineEntry(view, `/${slashCommand}`);
+            pushTimelineUserEntry(view, `/${slashCommand}`);
+            if (view.output || view.notice) {
+                archiveAssistantStateToTimeline(view);
+            }
+            if (state.session) {
+                pushTimelineAssistantEntry(view, buildSessionNarrativeLines(state, state.session), "info");
+            }
             return true;
         }
         if (!(slashCommand in cliCompletion_1.COMMAND_COMPLETION_SPEC_BY_NAME)) {
@@ -4115,7 +4216,8 @@ const runTtyInteractiveShell = async (options = {}) => {
             state.session = null;
             view.notice = { kind: "info", text: state.rootTask ? `back to /${state.rootTask}` : "back to tasks" };
             setInput(state.rootTask ? "/" : "");
-            pushTimelineEntry(view, "/back");
+            pushTimelineUserEntry(view, "/back");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "reset") {
@@ -4125,13 +4227,18 @@ const runTtyInteractiveShell = async (options = {}) => {
             state.session = createSession(session.command, state, session.label, feedback);
             setNoticeFromFeedback(view, feedback);
             setInput(state.session?.pending ? "" : "/");
-            pushTimelineEntry(view, "/reset");
+            pushTimelineUserEntry(view, "/reset");
+            if (state.session) {
+                pushTimelineAssistantEntry(view, buildSessionNarrativeLines(state, state.session), "info");
+            }
+            view.notice = null;
             return true;
         }
         if (slashCommand === "show") {
             view.output = createOutputPanel("context", buildSessionPreviewText(state, session));
             view.notice = { kind: "info", text: "showing the current context" };
-            pushTimelineEntry(view, "/show");
+            pushTimelineUserEntry(view, "/show");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "run") {
@@ -4142,6 +4249,8 @@ const runTtyInteractiveShell = async (options = {}) => {
                     kind: "error",
                     text: `[missing] ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}`,
                 };
+                pushTimelineUserEntry(view, "/run");
+                archiveAssistantStateToTimeline(view);
                 return true;
             }
             const execution = runBusyOperation(getBusyStateForSession(session), () => executeSessionCommand(state, session));
@@ -4149,7 +4258,8 @@ const runTtyInteractiveShell = async (options = {}) => {
             if (compactFailurePanel) {
                 view.output = compactFailurePanel;
                 view.notice = buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`);
-                pushTimelineEntry(view, "/run");
+                pushTimelineUserEntry(view, "/run");
+                archiveAssistantStateToTimeline(view);
                 return true;
             }
             const successPanel = getShellExecutionSuccessPanel(session, execution);
@@ -4160,12 +4270,14 @@ const runTtyInteractiveShell = async (options = {}) => {
                 execution.status === 0
                     ? { kind: "success", text: "run complete" }
                     : { kind: "error", text: `[${session.command}] exited with status ${execution.status}` };
-            pushTimelineEntry(view, "/run");
+            pushTimelineUserEntry(view, "/run");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "last") {
             view.notice = { kind: "info", text: getLastUrdfMessage(state) };
-            pushTimelineEntry(view, "/last");
+            pushTimelineUserEntry(view, "/last");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "update") {
@@ -4176,7 +4288,8 @@ const runTtyInteractiveShell = async (options = {}) => {
             catch (error) {
                 view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
             }
-            pushTimelineEntry(view, "/update");
+            pushTimelineUserEntry(view, "/update");
+            archiveAssistantStateToTimeline(view);
             return true;
         }
         if (slashCommand === "clear") {
@@ -4200,7 +4313,10 @@ const runTtyInteractiveShell = async (options = {}) => {
             toggleSessionFlag(session, target.key, feedback);
             setNoticeFromFeedback(view, feedback);
             view.output = null;
-            pushTimelineEntry(view, `/${slashCommand} ${session.args.get(target.key) === true ? "on" : "off"}`);
+            pushTimelineUserEntry(view, `/${slashCommand} ${session.args.get(target.key) === true ? "on" : "off"}`);
+            archiveAssistantStateToTimeline(view, {
+                fallbackText: buildSessionNarrativeLines(state, session).join("\n"),
+            });
             return true;
         }
         if (inlineValue) {
@@ -4221,7 +4337,10 @@ const runTtyInteractiveShell = async (options = {}) => {
                     setNoticeFromFeedback(view, feedback);
                     view.output = preview;
                 }
-                pushTimelineEntry(view, `/${slashCommand}${formatInlineValue(inlineValue)}`);
+                pushTimelineUserEntry(view, `/${slashCommand}${formatInlineValue(inlineValue)}`);
+                archiveAssistantStateToTimeline(view, {
+                    fallbackText: buildSessionNarrativeLines(state, session).join("\n"),
+                });
                 return true;
             }
             setNoticeFromFeedback(view, feedback);
@@ -4237,6 +4356,11 @@ const runTtyInteractiveShell = async (options = {}) => {
                 ...session.pending.notes,
             ].join("  "),
         };
+        pushTimelineUserEntry(view, `/${slashCommand}`);
+        archiveAssistantStateToTimeline(view, {
+            clear: true,
+            fallbackText: buildSessionNarrativeLines(state, session).join("\n"),
+        });
         setInput("");
         return true;
     };
@@ -4247,7 +4371,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
         const feedback = [];
         if (setSessionValue(session, session.pending.key, view.input, feedback)) {
-            pushTimelineEntry(view, `/${session.pending.slashName}${formatInlineValue(view.input)}`);
+            pushTimelineUserEntry(view, `/${session.pending.slashName}${formatInlineValue(view.input)}`);
             const changedKey = session.pending.key;
             session.pending = null;
             const { automation, preview } = runBusyOperation(getBusyStateForSession(session, changedKey), () => applyValueChangeEffects(state, session, changedKey));
@@ -4264,6 +4388,9 @@ const runTtyInteractiveShell = async (options = {}) => {
                 setNoticeFromFeedback(view, feedback);
                 view.output = preview;
             }
+            archiveAssistantStateToTimeline(view, {
+                fallbackText: buildSessionNarrativeLines(state, session).join("\n"),
+            });
             return;
         }
         setNoticeFromFeedback(view, feedback);
@@ -4274,6 +4401,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         const isSlashInput = shouldTreatAsSlashInput(view.input, state);
         if (bangCommand) {
             if (bangCommand === "xacro") {
+                pushTimelineUserEntry(view, "!xacro");
                 const result = runBusyOperation({
                     title: "xacro",
                     lines: ["setting up xacro runtime...", "this can take a moment..."],
@@ -4284,6 +4412,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     state.session = null;
                     state.rootTask = null;
                 }
+                archiveAssistantStateToTimeline(view);
             }
             setInput("");
             return;
@@ -4291,6 +4420,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         if (state.candidatePicker && !isSlashInput) {
             const selectedPath = resolveCandidateSelectionInput(state, view.input);
             if (selectedPath) {
+                pushTimelineUserEntry(view, selectedPath === view.input.trim() ? selectedPath : view.input.trim() || selectedPath);
                 const result = runBusyOperation({
                     title: "loading",
                     lines: ["loading selected entry...", "running validation and health check..."],
@@ -4302,6 +4432,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                     state.session = null;
                     state.rootTask = null;
                 }
+                archiveAssistantStateToTimeline(view);
             }
             else {
                 view.notice = { kind: "warning", text: "pick a valid candidate or paste an entry path" };
@@ -4333,7 +4464,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                         else {
                             handleRootAction(selected.name);
                         }
-                        syncInputAfterSlashAction(parsed);
+                        syncInputAfterSlashAction({ slashCommand: selected.name, inlineValue: "" });
                         return;
                     }
                 }
@@ -4390,7 +4521,10 @@ const runTtyInteractiveShell = async (options = {}) => {
                         : { kind: "info", text: buildSessionHeadline(applied.session) };
                     view.output = preview;
                 }
-                pushTimelineEntry(view, submittedInput);
+                pushTimelineUserEntry(view, submittedInput);
+                archiveAssistantStateToTimeline(view, {
+                    fallbackText: buildSessionNarrativeLines(state, applied.session).join("\n"),
+                });
                 setInput("");
                 return;
             }
@@ -4425,7 +4559,10 @@ const runTtyInteractiveShell = async (options = {}) => {
                         : { kind: "info", text: buildSessionHeadline(applied.session) };
                     view.output = preview;
                 }
-                pushTimelineEntry(view, submittedInput);
+                pushTimelineUserEntry(view, submittedInput);
+                archiveAssistantStateToTimeline(view, {
+                    fallbackText: buildSessionNarrativeLines(state, applied.session).join("\n"),
+                });
                 setInput("");
                 return;
             }
