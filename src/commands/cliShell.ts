@@ -4587,15 +4587,34 @@ const buildTimelineResponseLines = (
     !panel ||
     !notice?.text ||
     !new Set(["run complete", "preview ready", "health preview ready", "showing the current context"]).has(notice.text);
+  const panelNarrative =
+    panel?.title === "loaded"
+      ? "loaded the source"
+      : panel?.title === "checks"
+        ? "checked the source"
+        : panel?.title === "investigation"
+          ? "investigated the source"
+          : panel?.title === "validation"
+            ? "validated the URDF"
+            : panel?.title === "orientation"
+              ? "estimated orientation"
+              : panel?.title === "preview"
+                ? "previewed the source"
+                : panel?.title === "context"
+                  ? "current context"
+                  : panel?.title === "xacro"
+                    ? "xacro runtime"
+                    : null;
+
+  if (panelNarrative) {
+    lines.push(panelNarrative);
+  }
 
   if (notice?.text && shouldIncludeNoticeText) {
     lines.push(notice.text);
   }
 
   if (panel) {
-    if (panel.title && panel.title !== "result") {
-      lines.push(panel.title);
-    }
     for (const line of panel.lines) {
       if (!notice?.text || line !== notice.text) {
         lines.push(line);
@@ -4774,6 +4793,22 @@ const renderTimelineEntryLine = (
   return `  ${SHELL_THEME.icon(icon)} ${text}`;
 };
 
+const shouldRenderInlineNotice = (view: TtyShellViewState): boolean => {
+  if (!view.notice) {
+    return false;
+  }
+
+  if (view.busy && view.notice.kind === "info") {
+    return false;
+  }
+
+  if (view.timeline.length > 0 && view.notice.kind === "info") {
+    return false;
+  }
+
+  return true;
+};
+
 const renderMenuEntry = (
   entry: TtyMenuEntry,
   selected: boolean,
@@ -4857,7 +4892,6 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   const lines: string[] = [];
   lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("ilu interactive urdf shell")}`);
   lines.push(SHELL_THEME.muted("paste owner/repo or drop a local path  / shows actions  !xacro sets up xacro  ctrl+c exits"));
-  lines.push(SHELL_THEME.section("context"));
   if (state.candidatePicker && state.session) {
     const selectedCandidate =
       state.candidatePicker.candidates[clamp(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
@@ -4898,7 +4932,6 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   }
 
   if (view.timeline.length > 0) {
-    lines.push(SHELL_THEME.section("activity"));
     for (const entry of view.timeline.slice(-8)) {
       for (const [index, line] of entry.lines.entries()) {
         lines.push(renderTimelineEntryLine(entry, truncateText(line, columns - 6), index === 0));
@@ -4907,19 +4940,20 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   }
 
   if (view.busy) {
-    lines.push(SHELL_THEME.section(view.busy.title));
-    for (const line of view.busy.lines) {
-      lines.push(`  ${SHELL_THEME.icon("…")} ${SHELL_THEME.muted(truncateText(line, columns - 6))}`);
-    }
+    lines.push(`  ${SHELL_THEME.icon("…")} ${SHELL_THEME.muted(`${view.busy.title}  ${view.busy.lines.join("  ")}`)}`);
   }
 
-  if (view.notice) {
+  if (shouldRenderInlineNotice(view)) {
     lines.push(`  ${renderNotice(view.notice)}`);
   }
 
   const promptLabel = formatShellPrompt(state).trimEnd();
   const promptLineIndex = lines.length;
-  const placeholder = view.input.length === 0 && !view.busy ? getPromptPlaceholder(state) : "";
+  const shouldShowPlaceholder =
+    view.input.length === 0 &&
+    !view.busy &&
+    (view.timeline.length === 0 || Boolean(state.session) || Boolean(state.candidatePicker));
+  const placeholder = shouldShowPlaceholder ? getPromptPlaceholder(state) : "";
   lines.push(
     `${SHELL_THEME.command(promptLabel)} ${view.input}${
       view.busy ? SHELL_THEME.muted("working...") : placeholder ? SHELL_THEME.muted(placeholder) : ""
