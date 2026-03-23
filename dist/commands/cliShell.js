@@ -52,13 +52,8 @@ const getLoadedSourceContextRows = (state) => {
         return [
             { label: "source", value: `remembered ${(0, cliShellConfig_1.quoteForPreview)(state.lastUrdfPath)}` },
             {
-                label: "action",
-                value: "keep investigating the remembered URDF or paste another source",
-                tone: "muted",
-            },
-            {
                 label: "next",
-                value: "/analyze /health /validate /orientation or paste another source",
+                value: "/analyze /health /validate /orientation",
                 tone: "accent",
             },
         ];
@@ -90,13 +85,8 @@ const getLoadedSourceContextRows = (state) => {
         rows.push({ label: "working urdf", value: (0, cliShellConfig_1.quoteForPreview)(loadedSource.urdfPath) });
     }
     rows.push({
-        label: "action",
-        value: "work with the loaded source or paste another one",
-        tone: "muted",
-    });
-    rows.push({
         label: "next",
-        value: "/analyze /health /validate /orientation or paste another source",
+        value: "/analyze /health /validate /orientation",
         tone: "accent",
     });
     return rows;
@@ -229,17 +219,29 @@ const getSessionContextRows = (state, session) => {
             rows.push({ label: "output", value: (0, cliShellConfig_1.quoteForPreview)(outPath) });
         }
     }
-    rows.push({
-        label: "action",
-        value: getSessionPurposeText(session).replace(/\.$/, ""),
-        tone: "muted",
-    });
+    if (session.pending ||
+        ((session.label === "open" || session.label === "inspect") && session.args.size === 0) ||
+        !getRequirementStatus(session).ready) {
+        rows.push({
+            label: "action",
+            value: getSessionPurposeText(session).replace(/\.$/, ""),
+            tone: "muted",
+        });
+    }
     rows.push({
         label: "next",
         value: getSessionNextText(session),
         tone: getRequirementStatus(session).ready ? "accent" : "command",
     });
     return rows;
+};
+const getPersistentTtyContextRows = (rows, hasHistory) => {
+    if (!hasHistory) {
+        return rows;
+    }
+    const importantLabels = new Set(["source", "entry", "selected", "output", "working urdf", "next"]);
+    const compactRows = rows.filter((row) => importantLabels.has(row.label));
+    return compactRows.length > 0 ? compactRows : rows;
 };
 const buildSessionNarrativeLines = (state, session) => getSessionContextRows(state, session)
     .filter((row) => row.label === "source" || row.label === "action" || row.label === "next")
@@ -3544,12 +3546,15 @@ const renderTtyShell = (state, view) => {
     const menuEntries = getSlashMenuEntries(state, view.input);
     const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
     view.menuIndex = menuWindow.selectedIndex;
+    const hasHistory = view.timeline.length > 0 || Boolean(view.output) || Boolean(view.notice);
     const lines = [];
     lines.push(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)} ${cliShellConfig_1.SHELL_THEME.muted("urdf shell")}`);
-    lines.push(cliShellConfig_1.SHELL_THEME.muted(cliShellConfig_1.ROOT_GUIDANCE));
+    if (!hasHistory) {
+        lines.push(cliShellConfig_1.SHELL_THEME.muted(cliShellConfig_1.ROOT_GUIDANCE));
+    }
     if (state.candidatePicker && state.session) {
         const selectedCandidate = state.candidatePicker.candidates[(0, cliShellConfig_1.clamp)(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
-        const rows = getSessionContextRows(state, state.session).filter((row) => row.label !== "next");
+        const rows = [...getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory)].filter((row) => row.label !== "next");
         rows.push({
             label: "selected",
             value: selectedCandidate?.path ?? "none yet",
@@ -3570,20 +3575,24 @@ const renderTtyShell = (state, view) => {
         }
     }
     else if (state.session) {
-        for (const row of getSessionContextRows(state, state.session)) {
+        for (const row of getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory)) {
             lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
     }
     else if (state.rootTask) {
-        lines.push((0, cliShellUi_1.renderContextRow)({ label: "source", value: "none yet", tone: "muted" }));
-        lines.push((0, cliShellUi_1.renderContextRow)({ label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" }));
-        lines.push((0, cliShellUi_1.renderContextRow)({ label: "next", value: "paste input directly or type /", tone: "accent" }));
-    }
-    else {
-        for (const row of getLoadedSourceContextRows(state)) {
+        for (const row of getPersistentTtyContextRows([
+            { label: "source", value: "none yet", tone: "muted" },
+            { label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" },
+            { label: "next", value: "paste input directly or type /", tone: "accent" },
+        ], hasHistory)) {
             lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
-        if (!getReadySourceLabel(state)) {
+    }
+    else {
+        for (const row of getPersistentTtyContextRows(getLoadedSourceContextRows(state), hasHistory)) {
+            lines.push((0, cliShellUi_1.renderContextRow)(row));
+        }
+        if (!getReadySourceLabel(state) && !hasHistory) {
             lines.push((0, cliShellUi_1.renderContextRow)({ label: "help", value: "/ shows direct actions when you need them", tone: "muted" }));
         }
     }

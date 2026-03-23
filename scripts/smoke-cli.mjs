@@ -1468,12 +1468,8 @@ const loadedFollowUpMenuTranscript = execFileSync(process.execPath, [cliPath, "s
 });
 if (
   !loadedFollowUpMenuTranscript.includes("context") ||
-  !loadedFollowUpMenuTranscript.includes("work with the loaded source or paste another one") ||
   !loadedFollowUpMenuTranscript.includes(droppedUrdfPath) ||
-  !loadedFollowUpMenuTranscript.includes("/analyze") ||
-  !loadedFollowUpMenuTranscript.includes("/health") ||
-  !loadedFollowUpMenuTranscript.includes("/validate") ||
-  !loadedFollowUpMenuTranscript.includes("/orientation") ||
+  !loadedFollowUpMenuTranscript.includes("/analyze /health /validate /orientation") ||
   loadedFollowUpMenuTranscript.includes("paste owner/repo or drop a local folder/file first") ||
   loadedFollowUpMenuTranscript.includes("/fix") ||
   loadedFollowUpMenuTranscript.includes("/convert") ||

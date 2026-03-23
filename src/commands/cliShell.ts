@@ -155,13 +155,8 @@ const getLoadedSourceContextRows = (
     return [
       { label: "source", value: `remembered ${quoteForPreview(state.lastUrdfPath)}` },
       {
-        label: "action",
-        value: "keep investigating the remembered URDF or paste another source",
-        tone: "muted",
-      },
-      {
         label: "next",
-        value: "/analyze /health /validate /orientation or paste another source",
+        value: "/analyze /health /validate /orientation",
         tone: "accent",
       },
     ];
@@ -196,15 +191,9 @@ const getLoadedSourceContextRows = (
   ) {
     rows.push({ label: "working urdf", value: quoteForPreview(loadedSource.urdfPath) });
   }
-
-  rows.push({
-    label: "action",
-    value: "work with the loaded source or paste another one",
-    tone: "muted",
-  });
   rows.push({
     label: "next",
-    value: "/analyze /health /validate /orientation or paste another source",
+    value: "/analyze /health /validate /orientation",
     tone: "accent",
   });
 
@@ -378,11 +367,17 @@ const getSessionContextRows = (
     }
   }
 
-  rows.push({
-    label: "action",
-    value: getSessionPurposeText(session).replace(/\.$/, ""),
-    tone: "muted",
-  });
+  if (
+    session.pending ||
+    ((session.label === "open" || session.label === "inspect") && session.args.size === 0) ||
+    !getRequirementStatus(session).ready
+  ) {
+    rows.push({
+      label: "action",
+      value: getSessionPurposeText(session).replace(/\.$/, ""),
+      tone: "muted",
+    });
+  }
   rows.push({
     label: "next",
     value: getSessionNextText(session),
@@ -390,6 +385,19 @@ const getSessionContextRows = (
   });
 
   return rows;
+};
+
+const getPersistentTtyContextRows = (
+  rows: readonly ShellContextRow[],
+  hasHistory: boolean
+): readonly ShellContextRow[] => {
+  if (!hasHistory) {
+    return rows;
+  }
+
+  const importantLabels = new Set(["source", "entry", "selected", "output", "working urdf", "next"]);
+  const compactRows = rows.filter((row) => importantLabels.has(row.label));
+  return compactRows.length > 0 ? compactRows : rows;
 };
 
 const buildSessionNarrativeLines = (
@@ -4970,14 +4978,19 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   const menuEntries = getSlashMenuEntries(state, view.input);
   const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
   view.menuIndex = menuWindow.selectedIndex;
+  const hasHistory = view.timeline.length > 0 || Boolean(view.output) || Boolean(view.notice);
 
   const lines: string[] = [];
   lines.push(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("urdf shell")}`);
-  lines.push(SHELL_THEME.muted(ROOT_GUIDANCE));
+  if (!hasHistory) {
+    lines.push(SHELL_THEME.muted(ROOT_GUIDANCE));
+  }
   if (state.candidatePicker && state.session) {
     const selectedCandidate =
       state.candidatePicker.candidates[clamp(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
-    const rows = getSessionContextRows(state, state.session).filter((row) => row.label !== "next");
+    const rows = [...getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory)].filter(
+      (row) => row.label !== "next"
+    );
     rows.push({
       label: "selected",
       value: selectedCandidate?.path ?? "none yet",
@@ -4997,18 +5010,25 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
       }
     }
   } else if (state.session) {
-    for (const row of getSessionContextRows(state, state.session)) {
+    for (const row of getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory)) {
       lines.push(renderContextRow(row));
     }
   } else if (state.rootTask) {
-    lines.push(renderContextRow({ label: "source", value: "none yet", tone: "muted" }));
-    lines.push(renderContextRow({ label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" }));
-    lines.push(renderContextRow({ label: "next", value: "paste input directly or type /", tone: "accent" }));
-  } else {
-    for (const row of getLoadedSourceContextRows(state)) {
+    for (const row of getPersistentTtyContextRows(
+      [
+        { label: "source", value: "none yet", tone: "muted" },
+        { label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" },
+        { label: "next", value: "paste input directly or type /", tone: "accent" },
+      ],
+      hasHistory
+    )) {
       lines.push(renderContextRow(row));
     }
-    if (!getReadySourceLabel(state)) {
+  } else {
+    for (const row of getPersistentTtyContextRows(getLoadedSourceContextRows(state), hasHistory)) {
+      lines.push(renderContextRow(row));
+    }
+    if (!getReadySourceLabel(state) && !hasHistory) {
       lines.push(renderContextRow({ label: "help", value: "/ shows direct actions when you need them", tone: "muted" }));
     }
   }
