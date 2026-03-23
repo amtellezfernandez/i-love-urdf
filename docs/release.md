@@ -36,5 +36,5 @@ This adds the real-repository verification pass.
 
 ## CI gates
 
-- [CI workflow](../.github/workflows/ci.yml): multi-Node build, tests, smoke, install, browser entry, and performance budget
-- [Release workflow](../.github/workflows/release.yml): release-grade Linux verification, real-repo checks, and packed tarball artifact
+- [CI workflow](../.github/workflows/ci.yml): Linux multi-Node verification plus macOS and Windows build, install, test, and smoke gates
+- [Release workflow](../.github/workflows/release.yml): macOS and Windows readiness gates, then release-grade Linux verification, real-repo checks, and packed tarball artifact

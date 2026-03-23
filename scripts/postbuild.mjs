@@ -2,9 +2,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getBrowserRuntimeExports } from "./browser-exports.mjs";
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const destinationDir = path.join(root, "dist", "xacro");
 const browserEntryPath = path.join(root, "dist", "browser.mjs");
 const cliEntryPath = path.join(root, "dist", "cli.js");

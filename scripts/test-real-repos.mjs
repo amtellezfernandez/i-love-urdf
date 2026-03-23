@@ -5,8 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(root, "dist", "cli.js");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-real-repos-"));
 

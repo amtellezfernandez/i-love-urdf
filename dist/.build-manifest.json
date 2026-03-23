@@ -59,6 +59,8 @@
     "commands/editJointCommands.js",
     "commands/editOrientationCommands.d.ts",
     "commands/editOrientationCommands.js",
+    "commands/shellPathInput.d.ts",
+    "commands/shellPathInput.js",
     "commands/sourceCommandRuntime.d.ts",
     "commands/sourceCommandRuntime.js",
     "commands/sourceCommands.d.ts",

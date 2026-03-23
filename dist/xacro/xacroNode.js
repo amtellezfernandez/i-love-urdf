@@ -24,6 +24,7 @@ const XACRO_PROCESS_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const XACRO_MISSING_PACKAGE_PATTERN = /Package '([^']+)' not found in uploaded files\./g;
 const MANAGED_XACRO_RUNTIME_SUBPATH = path.join(".i-love-urdf", "xacro-runtime");
 const PACKAGE_ROOT_PATH = path.resolve(__dirname, "..", "..");
+const SYSTEM_PYTHON_FALLBACKS = process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python", "py"];
 const getVenvPythonCandidatePaths = (venvPath) => [
     path.join(venvPath, "bin", "python"),
     path.join(venvPath, "Scripts", "python.exe"),
@@ -65,6 +66,19 @@ const getManagedRuntimePythonPath = () => {
             return candidate;
     }
     return undefined;
+};
+const uniqueDefinedValues = (values) => {
+    const seen = new Set();
+    const result = [];
+    for (const value of values) {
+        const normalized = value?.trim();
+        if (!normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        result.push(normalized);
+    }
+    return result;
 };
 const decodeSupportText = (bytes) => {
     try {
@@ -109,12 +123,14 @@ const extractMissingPackageNamesFromXacroError = (error) => {
 const getPythonExecutable = (options) => options?.pythonExecutable?.trim() ||
     process.env.I_LOVE_URDF_XACRO_PYTHON ||
     getManagedRuntimePythonPath() ||
-    "python3";
-const getBootstrapPythonExecutable = (options) => options?.bootstrapPythonExecutable?.trim() ||
-    options?.pythonExecutable?.trim() ||
-    process.env.I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON ||
-    process.env.I_LOVE_URDF_XACRO_PYTHON ||
-    "python3";
+    SYSTEM_PYTHON_FALLBACKS[0];
+const getBootstrapPythonExecutables = (options) => uniqueDefinedValues([
+    options?.bootstrapPythonExecutable?.trim(),
+    options?.pythonExecutable?.trim(),
+    process.env.I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON,
+    process.env.I_LOVE_URDF_XACRO_PYTHON,
+    ...SYSTEM_PYTHON_FALLBACKS,
+]);
 const getHelperScriptPath = (options) => options?.helperScriptPath
     ? path.resolve(options.helperScriptPath)
     : path.resolve(__dirname, "xacro_expand_runtime.py");
@@ -209,6 +225,25 @@ const runProcess = async (executable, args, options = {}) => captureSpawnedProce
         stdout.trim() ||
         `${executable} ${args.join(" ")} failed${code !== null ? ` with exit ${code}` : ""}.`);
 });
+const runProcessWithFallbacks = async (executables, args, options = {}) => {
+    let lastError = null;
+    for (const executable of executables) {
+        try {
+            const result = await runProcess(executable, args, options);
+            return { ...result, executable };
+        }
+        catch (error) {
+            if (!(error instanceof Error)) {
+                throw error;
+            }
+            lastError = error;
+            if (!error.message.startsWith(`Failed to launch ${executable}:`)) {
+                throw error;
+            }
+        }
+    }
+    throw lastError ?? new Error(`Failed to launch any Python bootstrap command: ${executables.join(", ")}`);
+};
 const isMissingXacroRuntimeError = (message) => /no (python |vendored )?xacro runtime available/i.test(message) ||
     /install xacro or provide i_love_urdf_xacrodoc_wheel/i.test(message);
 const getMissingXacroArgumentName = (message) => {
@@ -279,12 +314,13 @@ const probeXacroRuntime = async (options = {}) => {
 };
 exports.probeXacroRuntime = probeXacroRuntime;
 const setupXacroRuntime = async (options = {}) => {
-    const bootstrapPythonExecutable = getBootstrapPythonExecutable(options);
+    const bootstrapPythonExecutables = getBootstrapPythonExecutables(options);
     const venvPath = getManagedVenvPath(options);
     await fs.mkdir(path.dirname(venvPath), { recursive: true });
-    await runProcess(bootstrapPythonExecutable, ["-m", "venv", venvPath], {
+    const bootstrapResult = await runProcessWithFallbacks(bootstrapPythonExecutables, ["-m", "venv", venvPath], {
         env: buildRuntimeEnv(options),
     });
+    const bootstrapPythonExecutable = bootstrapResult.executable;
     const managedPythonExecutable = getExistingVenvPythonPath(venvPath);
     if (!managedPythonExecutable) {
         throw new Error(`Created virtualenv but could not find its Python executable: ${venvPath}`);

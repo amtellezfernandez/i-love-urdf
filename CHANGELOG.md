@@ -10,3 +10,4 @@
 - added shell completion and in-shell slash completion
 - added `!xacro` setup and automatic retry for blocked XACRO loads
 - tightened install verification, smoke coverage, and release checks
+- hardened Windows and macOS support with cross-platform CI and shell-path parsing fixes

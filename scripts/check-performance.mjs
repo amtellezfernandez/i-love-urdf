@@ -5,8 +5,9 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
+import { fileURLToPath } from "node:url";
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(root, "dist", "cli.js");
 const exampleUrdfPath = path.join(
   root,

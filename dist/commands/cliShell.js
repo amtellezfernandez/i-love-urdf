@@ -10,6 +10,7 @@ const process = require("node:process");
 const AdmZip = require("adm-zip");
 const commandCatalog_1 = require("./commandCatalog");
 const cliCompletion_1 = require("./cliCompletion");
+const shellPathInput_1 = require("./shellPathInput");
 const cliUpdate_1 = require("./cliUpdate");
 const githubCliAuth_1 = require("../node/githubCliAuth");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
@@ -1003,30 +1004,6 @@ const clearMutuallyExclusiveArgs = (session, key) => {
         }
     }
 };
-const decodeShellEscapes = (value) => {
-    let decoded = "";
-    let escaping = false;
-    for (const character of value) {
-        if (escaping) {
-            decoded += character;
-            escaping = false;
-            continue;
-        }
-        if (character === "\\") {
-            escaping = true;
-            continue;
-        }
-        decoded += character;
-    }
-    return escaping ? `${decoded}\\` : decoded;
-};
-const stripMatchingQuotes = (value) => {
-    if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-        return value.slice(1, -1);
-    }
-    return value;
-};
-const normalizeShellInput = (rawValue) => decodeShellEscapes(stripMatchingQuotes(rawValue.trim()));
 const parseBangInput = (input) => {
     const trimmed = input.trim();
     if (!trimmed.startsWith("!")) {
@@ -1038,23 +1015,18 @@ const parseBangInput = (input) => {
     }
     return null;
 };
-const normalizeFilesystemInput = (rawValue) => {
-    const normalized = normalizeShellInput(rawValue);
-    if (normalized.startsWith("~")) {
-        return path.join(process.env.HOME ?? "", normalized.slice(1));
-    }
-    return normalized;
-};
 const looksLikeFilesystemSeed = (rawValue) => {
-    const normalized = normalizeFilesystemInput(rawValue);
+    const normalized = (0, shellPathInput_1.normalizeFilesystemInput)(rawValue);
     return (normalized.startsWith("/") ||
         normalized.startsWith("./") ||
         normalized.startsWith("../") ||
         normalized.startsWith("~/") ||
-        normalized.includes(path.sep));
+        (0, shellPathInput_1.isWindowsAbsolutePath)(normalized) ||
+        normalized.includes("/") ||
+        normalized.includes("\\"));
 };
 const detectLocalPathDrop = (rawValue) => {
-    const inputPath = normalizeFilesystemInput(rawValue);
+    const inputPath = (0, shellPathInput_1.normalizeFilesystemInput)(rawValue);
     if (!inputPath) {
         return null;
     }
@@ -1076,14 +1048,14 @@ const detectLocalPathDrop = (rawValue) => {
     }
 };
 const detectGitHubReferenceInput = (rawValue) => {
-    const normalized = normalizeShellInput(rawValue);
+    const normalized = (0, shellPathInput_1.normalizeShellInput)(rawValue);
     if (!normalized ||
         normalized.startsWith("/") ||
         normalized.startsWith("./") ||
         normalized.startsWith("../") ||
         normalized.startsWith("~/") ||
         detectLocalPathDrop(rawValue) ||
-        /^[A-Za-z]:[\\/]/.test(normalized)) {
+        (0, shellPathInput_1.isWindowsAbsolutePath)(normalized)) {
         return null;
     }
     return (0, githubRepositoryInspection_1.parseGitHubRepositoryReference)(normalized) ? normalized : null;
@@ -1099,9 +1071,9 @@ const isLocalFilesystemKey = (session, key) => {
 };
 const validateOptionValue = (session, key, rawValue) => {
     const trimmed = key === "github"
-        ? normalizeShellInput(rawValue)
+        ? (0, shellPathInput_1.normalizeShellInput)(rawValue)
         : isLocalFilesystemKey(session, key)
-            ? normalizeFilesystemInput(rawValue)
+            ? (0, shellPathInput_1.normalizeFilesystemInput)(rawValue)
             : rawValue.trim();
     if (!trimmed) {
         return null;
@@ -2479,7 +2451,7 @@ const listRecognizedSlashCommands = (state) => {
 };
 const completePathFragment = (fragment) => {
     const raw = fragment.length > 0 ? fragment : ".";
-    const expanded = raw.startsWith("~") ? path.join(process.env.HOME ?? "", raw.slice(1)) : raw;
+    const expanded = (0, shellPathInput_1.expandHomePath)(raw);
     const dirname = path.dirname(expanded);
     const basename = path.basename(expanded);
     const directory = dirname === "." && !expanded.startsWith(".") ? "." : dirname;
@@ -2489,10 +2461,10 @@ const completePathFragment = (fragment) => {
             .filter((entry) => entry.name.startsWith(basename))
             .map((entry) => {
             const fullPath = path.join(directory, entry.name);
-            const rendered = raw.startsWith("~") && fullPath.startsWith(process.env.HOME ?? "")
-                ? `~${fullPath.slice((process.env.HOME ?? "").length)}`
+            const rendered = raw.startsWith("~") && fullPath.startsWith((0, shellPathInput_1.expandHomePath)("~"))
+                ? `~${fullPath.slice((0, shellPathInput_1.expandHomePath)("~").length)}`
                 : fullPath;
-            return entry.isDirectory() ? `${rendered}/` : rendered;
+            return entry.isDirectory() ? `${rendered}${path.sep}` : rendered;
         });
     }
     catch {
@@ -3129,7 +3101,7 @@ const resolveCandidateSelectionInput = (state, rawValue) => {
         }
         return null;
     }
-    return normalizeShellInput(rawValue);
+    return (0, shellPathInput_1.normalizeShellInput)(rawValue);
 };
 const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
     ...entry,
@@ -3645,7 +3617,7 @@ const renderTtyShell = (state, view) => {
 };
 const completeTtyPathInput = (input, state) => {
     if (state.session?.pending && state.session.pending.expectsPath) {
-        const matches = completePathFragment(normalizeFilesystemInput(input));
+        const matches = completePathFragment((0, shellPathInput_1.normalizeFilesystemInput)(input));
         if (matches.length === 1) {
             return { nextInput: matches[0] ?? input, notice: null };
         }
@@ -3657,7 +3629,7 @@ const completeTtyPathInput = (input, state) => {
         }
     }
     if (!state.session?.pending && looksLikeFilesystemSeed(input)) {
-        const matches = completePathFragment(normalizeFilesystemInput(input));
+        const matches = completePathFragment((0, shellPathInput_1.normalizeFilesystemInput)(input));
         if (matches.length === 1) {
             return { nextInput: matches[0] ?? input, notice: null };
         }

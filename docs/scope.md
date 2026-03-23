@@ -48,8 +48,8 @@ It does not guarantee:
 
 ## Current limits
 
-- the release gate currently runs on Linux with Node `20.19.6`
-- Node `22` and `24` are verified in CI, but the interactive shell is release-gated on Linux
+- Linux, macOS, and Windows are all CI-gated for build, install, tests, and smoke coverage
+- the release-grade Linux gate still carries the performance budget, XACRO probe, and real-repository verification
 - private GitHub repos require a token or `gh auth login`
 - XACRO expansion may need `!xacro`
 - very large repos or repos with external ROS package dependencies may still need manual narrowing

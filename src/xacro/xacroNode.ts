@@ -122,6 +122,7 @@ const XACRO_PROCESS_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const XACRO_MISSING_PACKAGE_PATTERN = /Package '([^']+)' not found in uploaded files\./g;
 const MANAGED_XACRO_RUNTIME_SUBPATH = path.join(".i-love-urdf", "xacro-runtime");
 const PACKAGE_ROOT_PATH = path.resolve(__dirname, "..", "..");
+const SYSTEM_PYTHON_FALLBACKS = process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python", "py"];
 
 const getVenvPythonCandidatePaths = (venvPath: string): string[] => [
   path.join(venvPath, "bin", "python"),
@@ -168,6 +169,22 @@ const getManagedRuntimePythonPath = (): string | undefined => {
   }
 
   return undefined;
+};
+
+const uniqueDefinedValues = (values: Array<string | undefined>): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const normalized = value?.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  }
+
+  return result;
 };
 
 const decodeSupportText = (bytes: Uint8Array): string => {
@@ -218,14 +235,16 @@ const getPythonExecutable = (options?: XacroRuntimeOptions): string =>
   options?.pythonExecutable?.trim() ||
   process.env.I_LOVE_URDF_XACRO_PYTHON ||
   getManagedRuntimePythonPath() ||
-  "python3";
+  SYSTEM_PYTHON_FALLBACKS[0];
 
-const getBootstrapPythonExecutable = (options?: SetupXacroRuntimeOptions): string =>
-  options?.bootstrapPythonExecutable?.trim() ||
-  options?.pythonExecutable?.trim() ||
-  process.env.I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON ||
-  process.env.I_LOVE_URDF_XACRO_PYTHON ||
-  "python3";
+const getBootstrapPythonExecutables = (options?: SetupXacroRuntimeOptions): string[] =>
+  uniqueDefinedValues([
+    options?.bootstrapPythonExecutable?.trim(),
+    options?.pythonExecutable?.trim(),
+    process.env.I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON,
+    process.env.I_LOVE_URDF_XACRO_PYTHON,
+    ...SYSTEM_PYTHON_FALLBACKS,
+  ]);
 
 const getHelperScriptPath = (options?: XacroRuntimeOptions): string =>
   options?.helperScriptPath
@@ -355,6 +374,32 @@ const runProcess = async (
     );
   });
 
+const runProcessWithFallbacks = async (
+  executables: readonly string[],
+  args: string[],
+  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}
+): Promise<{ stdout: string; stderr: string; executable: string }> => {
+  let lastError: Error | null = null;
+
+  for (const executable of executables) {
+    try {
+      const result = await runProcess(executable, args, options);
+      return { ...result, executable };
+    } catch (error) {
+      if (!(error instanceof Error)) {
+        throw error;
+      }
+
+      lastError = error;
+      if (!error.message.startsWith(`Failed to launch ${executable}:`)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ?? new Error(`Failed to launch any Python bootstrap command: ${executables.join(", ")}`);
+};
+
 const isMissingXacroRuntimeError = (message: string): boolean =>
   /no (python |vendored )?xacro runtime available/i.test(message) ||
   /install xacro or provide i_love_urdf_xacrodoc_wheel/i.test(message);
@@ -463,13 +508,14 @@ export const probeXacroRuntime = async (
 export const setupXacroRuntime = async (
   options: SetupXacroRuntimeOptions = {}
 ): Promise<SetupXacroRuntimeResult> => {
-  const bootstrapPythonExecutable = getBootstrapPythonExecutable(options);
+  const bootstrapPythonExecutables = getBootstrapPythonExecutables(options);
   const venvPath = getManagedVenvPath(options);
 
   await fs.mkdir(path.dirname(venvPath), { recursive: true });
-  await runProcess(bootstrapPythonExecutable, ["-m", "venv", venvPath], {
+  const bootstrapResult = await runProcessWithFallbacks(bootstrapPythonExecutables, ["-m", "venv", venvPath], {
     env: buildRuntimeEnv(options),
   });
+  const bootstrapPythonExecutable = bootstrapResult.executable;
 
   const managedPythonExecutable = getExistingVenvPythonPath(venvPath);
   if (!managedPythonExecutable) {

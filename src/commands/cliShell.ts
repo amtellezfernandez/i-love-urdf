@@ -11,6 +11,12 @@ import {
   type CompletionCommandSpec,
   type CompletionOptionSpec,
 } from "./cliCompletion";
+import {
+  expandHomePath,
+  isWindowsAbsolutePath,
+  normalizeFilesystemInput,
+  normalizeShellInput,
+} from "./shellPathInput";
 import { checkForUpdateAvailability, runUpdateCommand, type UpdateAvailability } from "./cliUpdate";
 import { readGitHubCliToken } from "../node/githubCliAuth";
 import { parseGitHubRepositoryReference } from "../repository/githubRepositoryInspection";
@@ -1483,38 +1489,6 @@ const clearMutuallyExclusiveArgs = (session: ShellSession, key: string) => {
   }
 };
 
-const decodeShellEscapes = (value: string): string => {
-  let decoded = "";
-  let escaping = false;
-
-  for (const character of value) {
-    if (escaping) {
-      decoded += character;
-      escaping = false;
-      continue;
-    }
-
-    if (character === "\\") {
-      escaping = true;
-      continue;
-    }
-
-    decoded += character;
-  }
-
-  return escaping ? `${decoded}\\` : decoded;
-};
-
-const stripMatchingQuotes = (value: string): string => {
-  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-    return value.slice(1, -1);
-  }
-
-  return value;
-};
-
-const normalizeShellInput = (rawValue: string): string => decodeShellEscapes(stripMatchingQuotes(rawValue.trim()));
-
 const parseBangInput = (input: string): ShellBangCommandName | null => {
   const trimmed = input.trim();
   if (!trimmed.startsWith("!")) {
@@ -1529,14 +1503,6 @@ const parseBangInput = (input: string): ShellBangCommandName | null => {
   return null;
 };
 
-const normalizeFilesystemInput = (rawValue: string): string => {
-  const normalized = normalizeShellInput(rawValue);
-  if (normalized.startsWith("~")) {
-    return path.join(process.env.HOME ?? "", normalized.slice(1));
-  }
-  return normalized;
-};
-
 const looksLikeFilesystemSeed = (rawValue: string): boolean => {
   const normalized = normalizeFilesystemInput(rawValue);
   return (
@@ -1544,7 +1510,9 @@ const looksLikeFilesystemSeed = (rawValue: string): boolean => {
     normalized.startsWith("./") ||
     normalized.startsWith("../") ||
     normalized.startsWith("~/") ||
-    normalized.includes(path.sep)
+    isWindowsAbsolutePath(normalized) ||
+    normalized.includes("/") ||
+    normalized.includes("\\")
   );
 };
 
@@ -1580,7 +1548,7 @@ const detectGitHubReferenceInput = (rawValue: string): string | null => {
     normalized.startsWith("../") ||
     normalized.startsWith("~/") ||
     detectLocalPathDrop(rawValue) ||
-    /^[A-Za-z]:[\\/]/.test(normalized)
+    isWindowsAbsolutePath(normalized)
   ) {
     return null;
   }
@@ -3576,7 +3544,7 @@ const listRecognizedSlashCommands = (state: ShellState): string[] => {
 
 const completePathFragment = (fragment: string): string[] => {
   const raw = fragment.length > 0 ? fragment : ".";
-  const expanded = raw.startsWith("~") ? path.join(process.env.HOME ?? "", raw.slice(1)) : raw;
+  const expanded = expandHomePath(raw);
   const dirname = path.dirname(expanded);
   const basename = path.basename(expanded);
   const directory = dirname === "." && !expanded.startsWith(".") ? "." : dirname;
@@ -3588,10 +3556,10 @@ const completePathFragment = (fragment: string): string[] => {
       .map((entry) => {
         const fullPath = path.join(directory, entry.name);
         const rendered =
-          raw.startsWith("~") && fullPath.startsWith(process.env.HOME ?? "")
-            ? `~${fullPath.slice((process.env.HOME ?? "").length)}`
+          raw.startsWith("~") && fullPath.startsWith(expandHomePath("~"))
+            ? `~${fullPath.slice(expandHomePath("~").length)}`
             : fullPath;
-        return entry.isDirectory() ? `${rendered}/` : rendered;
+        return entry.isDirectory() ? `${rendered}${path.sep}` : rendered;
       });
   } catch {
     return [];

@@ -4,10 +4,45 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import AdmZip from "adm-zip";
 import { installDomGlobals } from "./install-dom-globals.mjs";
 
-const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const resolveBootstrapPythonCommand = () => {
+  const candidates =
+    process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python", "py"];
+
+  for (const command of candidates) {
+    try {
+      execFileSync(command, ["--version"], {
+        cwd: root,
+        stdio: "ignore",
+      });
+      return command;
+    } catch {
+      // Try the next Python launcher candidate.
+    }
+  }
+
+  throw new Error("No usable Python launcher found for the XACRO smoke test.");
+};
+
+const getVenvPythonPath = (venvPath) => {
+  const candidates = [
+    path.join(venvPath, "bin", "python3"),
+    path.join(venvPath, "bin", "python"),
+    path.join(venvPath, "Scripts", "python.exe"),
+  ];
+
+  const match = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!match) {
+    throw new Error(`Could not find a Python executable inside ${venvPath}`);
+  }
+
+  return match;
+};
 
 execFileSync(process.execPath, [path.join(root, "scripts", "build-package.mjs")], {
   stdio: "inherit",
@@ -1283,7 +1318,6 @@ if (
 const shellDropDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-drop-"));
 const droppedUrdfPath = path.join(shellDropDir, "local robot.urdf");
 fs.writeFileSync(droppedUrdfPath, "<robot name=\"drop_robot\"><link name=\"base\"/></robot>", "utf8");
-const escapedDroppedUrdfPath = droppedUrdfPath.replaceAll(" ", "\\ ");
 const multiCandidateDir = path.join(shellDropDir, "multi-candidate");
 fs.mkdirSync(path.join(multiCandidateDir, "robots"), { recursive: true });
 fs.writeFileSync(
@@ -1296,7 +1330,6 @@ fs.writeFileSync(
   "<robot name=\"beta_robot\"><link name=\"base\"/></robot>",
   "utf8"
 );
-const escapedMultiCandidateDir = multiCandidateDir.replaceAll(" ", "\\ ");
 const singleRepoDir = path.join(shellDropDir, "single-repo");
 fs.mkdirSync(path.join(singleRepoDir, "robot"), { recursive: true });
 fs.writeFileSync(
@@ -1304,12 +1337,10 @@ fs.writeFileSync(
   "<robot name=\"single_repo_robot\"><link name=\"base\"/></robot>",
   "utf8"
 );
-const escapedSingleRepoDir = singleRepoDir.replaceAll(" ", "\\ ");
 const droppedZipPath = path.join(shellDropDir, "robot bundle.zip");
 const droppedZip = new AdmZip();
 droppedZip.addLocalFile(droppedUrdfPath, "robot_bundle/urdf", "robot.urdf");
 droppedZip.writeZip(droppedZipPath);
-const escapedDroppedZipPath = droppedZipPath.replaceAll(" ", "\\ ");
 
 const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
@@ -1332,7 +1363,7 @@ if (
 const localDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/exit\n`,
+  input: `${droppedUrdfPath}\n/exit\n`,
 });
 if (
   !localDropTranscript.includes("validation and health check passed") ||
@@ -1346,7 +1377,7 @@ if (
 const loadedFollowUpMenuTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/\n/exit\n`,
+  input: `${droppedUrdfPath}\n/\n/exit\n`,
 });
 if (
   !loadedFollowUpMenuTranscript.includes("context") ||
@@ -1369,7 +1400,7 @@ if (
 const loadedAnalyzeTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/analyze\n/exit\n`,
+  input: `${droppedUrdfPath}\n/analyze\n/exit\n`,
 });
 if (
   !loadedAnalyzeTranscript.includes("investigation") ||
@@ -1389,7 +1420,7 @@ if (
 const loadedValidateTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/validate\n/exit\n`,
+  input: `${droppedUrdfPath}\n/validate\n/exit\n`,
 });
 if (
   !loadedValidateTranscript.includes("validation passed") ||
@@ -1402,7 +1433,7 @@ if (
 const loadedOrientationTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/orientation\n/exit\n`,
+  input: `${droppedUrdfPath}\n/orientation\n/exit\n`,
 });
 if (
   !loadedOrientationTranscript.includes("orientation likely") ||
@@ -1415,7 +1446,7 @@ if (
 const loadedHealthTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedUrdfPath}\n/health\n/exit\n`,
+  input: `${droppedUrdfPath}\n/health\n/exit\n`,
 });
 if (
   !loadedHealthTranscript.includes("looks healthy") ||
@@ -1429,7 +1460,7 @@ if (
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${escapedDroppedZipPath}\n/exit\n`,
+  input: `${droppedZipPath}\n/exit\n`,
 });
 if (
   !zipDropTranscript.includes("validation and health check passed") ||
@@ -1443,7 +1474,7 @@ if (
 const healthShortcutTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `/health\n${escapedDroppedUrdfPath}\n/exit\n`,
+  input: `/health\n${droppedUrdfPath}\n/exit\n`,
 });
 if (
   !healthShortcutTranscript.includes("URDF file path") ||
@@ -1459,7 +1490,7 @@ if (
 const multiCandidateTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `/open\n${escapedMultiCandidateDir}\n2\n/exit\n`,
+  input: `/open\n${multiCandidateDir}\n2\n/exit\n`,
 });
 if (
   !multiCandidateTranscript.includes("choose a candidate") ||
@@ -1487,11 +1518,12 @@ if (
 const xacroRetryCwd = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-xacro-"));
 const xacroRetrySourceDir = path.join(xacroRetryCwd, "xacro-source");
 const xacroRetryPythonVenv = path.join(xacroRetryCwd, "python-without-xacro");
-execFileSync("python3", ["-m", "venv", xacroRetryPythonVenv], {
+const bootstrapPythonCommand = resolveBootstrapPythonCommand();
+execFileSync(bootstrapPythonCommand, ["-m", "venv", xacroRetryPythonVenv], {
   cwd: xacroRetryCwd,
   stdio: "ignore",
 });
-const xacroRetryPython = path.join(xacroRetryPythonVenv, "bin", "python3");
+const xacroRetryPython = getVenvPythonPath(xacroRetryPythonVenv);
 fs.mkdirSync(xacroRetrySourceDir, { recursive: true });
 fs.writeFileSync(
   path.join(xacroRetrySourceDir, "robot.urdf.xacro"),
@@ -1508,7 +1540,7 @@ const xacroRetryTranscript = execFileSync(process.execPath, [cliPath, "shell"], 
   env: {
     ...process.env,
     I_LOVE_URDF_XACRO_PYTHON: xacroRetryPython,
-    I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON: "python3",
+    I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON: bootstrapPythonCommand,
   },
   input: `${xacroRetrySourceDir}\n!xacro\n/exit\n`,
 });

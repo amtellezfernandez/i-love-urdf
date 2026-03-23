@@ -7,7 +7,51 @@ on:
   workflow_dispatch:
 
 jobs:
+  cross-platform-readiness:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.6
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build:package
+
+      - name: Check Dist Is Current
+        run: git diff --exit-code -- dist
+
+      - name: Check Install Paths
+        run: pnpm check:install
+
+      - name: Check Browser Entry
+        run: pnpm check:browser-entry
+
+      - name: Targeted Tests
+        run: pnpm test
+
+      - name: Smoke Test
+        run: pnpm smoke
+
   release-readiness:
+    needs: cross-platform-readiness
     runs-on: ubuntu-latest
 
     steps:
