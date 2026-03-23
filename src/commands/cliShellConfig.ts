@@ -57,15 +57,15 @@ const resolveColorSupport = (): boolean => {
 const createTheme = (enabled: boolean): ShellTheme => ({
   enabled,
   brand: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
-  command: (text) => paint(enabled, text, ANSI.bold, ANSI.magenta),
+  command: (text) => paint(enabled, text, ANSI.brightMagenta),
   icon: (text) => paint(enabled, text, ANSI.gray),
-  muted: (text) => paint(enabled, text, ANSI.dim),
-  section: (text) => paint(enabled, text, ANSI.dim, ANSI.magenta),
-  success: (text) => paint(enabled, text, ANSI.bold, ANSI.green),
+  muted: (text) => paint(enabled, text, ANSI.gray),
+  section: (text) => paint(enabled, text, ANSI.dim, ANSI.gray),
+  success: (text) => paint(enabled, text, ANSI.green),
   accent: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
   warning: (text) => paint(enabled, text, ANSI.bold, ANSI.yellow),
   error: (text) => paint(enabled, text, ANSI.bold, ANSI.red),
-  selected: (text) => paint(enabled, text, ANSI.bold, ANSI.reverse, ANSI.brightMagenta),
+  selected: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
 });
 
 export const SHELL_THEME = createTheme(resolveColorSupport());
@@ -377,7 +377,7 @@ export const SESSION_SLASH_ALIASES: Partial<
 
 export const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
 export const ROOT_GUIDANCE =
-  "paste owner/repo or drop a local folder/file. type / for actions, !xacro for xacro setup, /update for latest, ctrl+c to quit";
+  "paste repo or local path  / actions  !xacro setup  ctrl+c quit";
 
 let cachedGitHubAuthState: boolean | undefined;
 

@@ -182,5 +182,5 @@ ptyTest("TTY shell exits cleanly on Ctrl+C", async () => {
 
   assert.equal(result.code, 0);
   assert.equal(result.signal, null);
-  assert.match(result.sanitizedOutput, /ilu interactive urdf shell/i);
+  assert.match(result.sanitizedOutput, /urdf shell/i);
 });

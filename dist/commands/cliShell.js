@@ -44,7 +44,7 @@ const getLoadedSourceContextRows = (state) => {
                 },
                 {
                     label: "next",
-                    value: "paste owner/repo or drop a local folder/file",
+                    value: "paste repo or local path",
                     tone: "accent",
                 },
             ];
@@ -167,10 +167,10 @@ const getSessionNextText = (session) => {
         return `paste ${session.pending.title.toLowerCase()}`;
     }
     if (session.label === "open" && session.args.size === 0) {
-        return "paste owner/repo or drop a local folder/file";
+        return "paste repo or local path";
     }
     if (session.label === "inspect" && session.args.size === 0) {
-        return "paste owner/repo or drop a local folder";
+        return "paste repo or local folder";
     }
     const requirementStatus = getRequirementStatus(session);
     if (requirementStatus.ready) {
@@ -2918,7 +2918,7 @@ const handleRootTaskSlashCommand = (slashCommand, state, close) => {
         return;
     }
     if (slashCommand === "run") {
-        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("nothing is pending here. paste a source or use one of the direct actions")}\n`);
+        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("nothing is pending here. paste a source or use /")}\n`);
         return;
     }
     const action = findRootTaskAction(task, slashCommand);
@@ -3441,7 +3441,7 @@ const renderNotice = (notice) => {
     const text = notice.text;
     switch (notice.kind) {
         case "success":
-            return cliShellConfig_1.SHELL_THEME.success(text);
+            return cliShellConfig_1.SHELL_THEME.muted(text);
         case "warning":
             return cliShellConfig_1.SHELL_THEME.warning(text);
         case "error":
@@ -3459,9 +3459,7 @@ const renderTimelineEntryLine = (entry, line, first) => {
         ? cliShellConfig_1.SHELL_THEME.error(line)
         : entry.kind === "warning"
             ? cliShellConfig_1.SHELL_THEME.warning(line)
-            : entry.kind === "success" && first
-                ? cliShellConfig_1.SHELL_THEME.success(line)
-                : cliShellConfig_1.SHELL_THEME.muted(line);
+            : cliShellConfig_1.SHELL_THEME.muted(line);
     return `  ${cliShellConfig_1.SHELL_THEME.icon(icon)} ${text}`;
 };
 const shouldRenderInlineNotice = (view) => {
@@ -3491,8 +3489,9 @@ const renderMenuEntry = (entry, selected, width) => {
     const badgeSuffix = badge ? ` ${badge}` : "";
     const availableSummaryWidth = Math.max(12, width - left.length - badgeSuffix.length - 1);
     const summary = truncateText(entry.summary, availableSummaryWidth);
-    const line = `${left}${summary}${badgeSuffix}`;
-    return selected ? cliShellConfig_1.SHELL_THEME.selected(line) : `${cliShellConfig_1.SHELL_THEME.command(left)}${cliShellConfig_1.SHELL_THEME.muted(`${summary}${badgeSuffix}`)}`;
+    return selected
+        ? `${cliShellConfig_1.SHELL_THEME.accent(left)}${cliShellConfig_1.SHELL_THEME.muted(`${summary}${badgeSuffix}`)}`
+        : `${cliShellConfig_1.SHELL_THEME.command(left)}${cliShellConfig_1.SHELL_THEME.muted(`${summary}${badgeSuffix}`)}`;
 };
 const getPromptPlaceholder = (state) => {
     if (!state.session && !state.rootTask && !state.candidatePicker && state.updatePrompt) {
@@ -3505,30 +3504,30 @@ const getPromptPlaceholder = (state) => {
         return state.session.pending.examples[0] ?? state.session.pending.title;
     }
     if (state.session?.label === "open" && state.session.args.size === 0) {
-        return "paste owner/repo or drop a local folder/file";
+        return "paste repo or local path";
     }
     if (state.session?.label === "inspect" && state.session.args.size === 0) {
-        return "paste owner/repo or drop a local folder";
+        return "paste repo or local folder";
     }
     if (!state.session && state.rootTask) {
         switch (state.rootTask) {
             case "open":
-                return "paste owner/repo or drop a local folder, .urdf, .xacro, or .zip";
+                return "paste repo or local path";
             case "inspect":
-                return "paste owner/repo or drop a local folder or .urdf";
+                return "paste repo or local folder or .urdf";
             case "check":
                 return "drop a local .urdf or use /health /validate /orientation";
             case "convert":
                 return "drop a local .xacro or use /xacro /mjcf /usd";
             case "fix":
-                return "paste owner/repo or drop a local folder or .urdf";
+                return "paste repo or local folder or .urdf";
         }
     }
     if (!state.session) {
         if (state.lastUrdfPath) {
             return "use /analyze /health /validate /orientation or paste another source";
         }
-        return "paste owner/repo, drop a folder or .urdf, or type /";
+        return "paste repo or local path  / for actions";
     }
     const requirementStatus = getRequirementStatus(state.session);
     if (requirementStatus.ready) {
@@ -3546,8 +3545,8 @@ const renderTtyShell = (state, view) => {
     const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
     view.menuIndex = menuWindow.selectedIndex;
     const lines = [];
-    lines.push(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)} ${cliShellConfig_1.SHELL_THEME.muted("ilu interactive urdf shell")}`);
-    lines.push(cliShellConfig_1.SHELL_THEME.muted("paste owner/repo or drop a local path  / shows actions  !xacro sets up xacro  ctrl+c exits"));
+    lines.push(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)} ${cliShellConfig_1.SHELL_THEME.muted("urdf shell")}`);
+    lines.push(cliShellConfig_1.SHELL_THEME.muted(cliShellConfig_1.ROOT_GUIDANCE));
     if (state.candidatePicker && state.session) {
         const selectedCandidate = state.candidatePicker.candidates[(0, cliShellConfig_1.clamp)(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
         const rows = getSessionContextRows(state, state.session).filter((row) => row.label !== "next");
@@ -3639,7 +3638,7 @@ const renderTtyShell = (state, view) => {
             const line = `${candidate.path}${details.length > 0 ? `  ${details.join("  ")}` : ""}`;
             const selected = index === state.candidatePicker.selectedIndex;
             lines.push(selected
-                ? `  ${cliShellConfig_1.SHELL_THEME.selected(` ${truncateText(line, columns - 6)} `)}`
+                ? `  ${cliShellConfig_1.SHELL_THEME.accent(">")} ${cliShellConfig_1.SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${cliShellConfig_1.SHELL_THEME.muted(truncateText(details.join("  "), columns - candidate.path.length - 8))}` : ""}`
                 : `  ${cliShellConfig_1.SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${cliShellConfig_1.SHELL_THEME.muted(truncateText(details.join("  "), columns - candidate.path.length - 8))}` : ""}`);
         }
         if (state.candidatePicker.candidates.length > 8) {
@@ -3913,7 +3912,7 @@ const runLineInteractiveShell = async (options = {}) => {
             }
             else {
                 (0, cliShellConfig_1.flushFeedback)(feedback);
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
             }
         }
         else {
@@ -3950,7 +3949,7 @@ const runLineInteractiveShell = async (options = {}) => {
             }
             else {
                 (0, cliShellConfig_1.flushFeedback)(feedback);
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("type /, drop a local path, or paste owner/repo")}\n`);
+                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
             }
         }
         const nextSuggestedAction = getActiveSuggestedAction(state);
@@ -4251,7 +4250,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             (0, cliShellConfig_1.clearCandidatePicker)(state);
             view.notice = {
                 kind: "info",
-                text: "nothing is pending here. paste a source or choose one of the direct actions",
+                text: "nothing is pending here. paste a source or use /",
             };
             pushTimelineUserEntry(view, "/run");
             archiveAssistantStateToTimeline(view);
@@ -4759,7 +4758,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             }
             setNoticeFromFeedback(view, feedback);
         }
-        view.notice = { kind: "info", text: "type /, drop a local path, or paste owner/repo" };
+        view.notice = { kind: "info", text: "paste repo or local path  / for actions" };
         setInput("");
     };
     const render = () => {

@@ -1435,8 +1435,8 @@ const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   input: "ANYbotics/anymal_b_simple_description\n/exit\n",
 });
 if (
-  !shellTranscript.includes("interactive urdf shell") ||
-  !shellTranscript.includes("paste owner/repo or drop a local folder/file") ||
+  !shellTranscript.includes("urdf shell") ||
+  !shellTranscript.includes("paste repo or local path") ||
   !shellTranscript.includes("ANYbotics/anymal_b_simple_description") ||
   !shellTranscript.includes("validation and health check passed") ||
   !shellTranscript.includes("loaded") ||
@@ -1671,7 +1671,7 @@ const openShortcutTranscript = execFileSync(process.execPath, [cliPath, "shell"]
   input: "/open\n/exit\n",
 });
 if (
-  !openShortcutTranscript.includes("paste owner/repo or drop a local folder/file") ||
+  !openShortcutTranscript.includes("paste repo or local path") ||
   openShortcutTranscript.includes("  /repo") ||
   openShortcutTranscript.includes("  /local") ||
   openShortcutTranscript.includes("  /file")

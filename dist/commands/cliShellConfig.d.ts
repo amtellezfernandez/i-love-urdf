@@ -273,7 +273,7 @@ export declare const SESSION_OPTION_ORDER: {
 export declare const MUTUALLY_EXCLUSIVE_OPTION_GROUPS: Partial<Record<SupportedCommandName, readonly (readonly string[])[]>>;
 export declare const SESSION_SLASH_ALIASES: Partial<Record<SupportedCommandName, Readonly<Record<string, string>>>>;
 export declare const CLI_ENTRY_PATH: string;
-export declare const ROOT_GUIDANCE = "paste owner/repo or drop a local folder/file. type / for actions, !xacro for xacro setup, /update for latest, ctrl+c to quit";
+export declare const ROOT_GUIDANCE = "paste repo or local path  / actions  !xacro setup  ctrl+c quit";
 export declare const formatShellPrompt: (_state: ShellState) => string;
 export declare const hasPendingUpdatePrompt: (state: ShellState) => boolean;
 export declare const dismissUpdatePrompt: (state: ShellState) => void;

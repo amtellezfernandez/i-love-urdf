@@ -151,7 +151,6 @@ export const printCommandList = (
 };
 
 export const printRootQuickStart = () => {
-  process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)}\n`);
-  process.stdout.write(`${SHELL_THEME.muted("ilu interactive urdf shell")}\n`);
+  process.stdout.write(`${SHELL_THEME.brand(SHELL_BRAND)} ${SHELL_THEME.muted("urdf shell")}\n`);
   process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
 };
