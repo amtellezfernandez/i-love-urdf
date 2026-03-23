@@ -332,6 +332,11 @@ const CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
 const ROOT_GUIDANCE = "paste owner/repo or drop a local folder/file. type / for actions, !xacro for xacro setup, /update for latest, ctrl+c to quit";
 let cachedGitHubAuthState;
 const formatShellPrompt = (_state) => "/> ";
+const hasPendingUpdatePrompt = (state) => state.updatePrompt !== null;
+const dismissUpdatePrompt = (state) => {
+    state.updatePrompt = null;
+};
+const formatUpdatePromptLine = (update) => `update available ${update.currentVersion} -> ${update.latestVersion}  Enter updates now  Esc skips`;
 const quoteForPreview = (value) => (/\s/.test(value) ? JSON.stringify(value) : value);
 const buildCommandPreview = (command, args) => {
     const serializedArgs = Array.from(args.entries()).flatMap(([key, value]) => {
@@ -3467,6 +3472,9 @@ const renderMenuEntry = (entry, selected, width) => {
     return selected ? SHELL_THEME.selected(line) : `${SHELL_THEME.command(left)}${SHELL_THEME.muted(`${summary}${badgeSuffix}`)}`;
 };
 const getPromptPlaceholder = (state) => {
+    if (!state.session && !state.rootTask && !state.candidatePicker && state.updatePrompt) {
+        return "Enter updates now or Esc skips";
+    }
     if (state.candidatePicker) {
         return "arrows choose a match, Enter loads it";
     }
@@ -3565,6 +3573,9 @@ const renderTtyShell = (state, view) => {
     }
     if (view.busy) {
         lines.push(`  ${SHELL_THEME.icon("…")} ${SHELL_THEME.muted(`${view.busy.title}  ${view.busy.lines.join("  ")}`)}`);
+    }
+    if (state.updatePrompt && !view.busy) {
+        lines.push(`  ${SHELL_THEME.icon("↑")} ${SHELL_THEME.muted(formatUpdatePromptLine(state.updatePrompt))}`);
     }
     if (shouldRenderInlineNotice(view)) {
         lines.push(`  ${renderNotice(view.notice)}`);
@@ -3692,6 +3703,15 @@ const completeSelectedSlashInput = (input, state, selectedIndex) => {
     const selected = menuEntries[clamp(selectedIndex, 0, menuEntries.length - 1)];
     return selected ? `/${selected.name}` : null;
 };
+const startStartupUpdateCheck = (state, onAvailable) => {
+    void (0, cliUpdate_1.checkForUpdateAvailability)().then((update) => {
+        if (!update || state.updatePrompt) {
+            return;
+        }
+        state.updatePrompt = update;
+        onAvailable(update);
+    });
+};
 const runLineInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
@@ -3699,6 +3719,7 @@ const runLineInteractiveShell = async (options = {}) => {
         candidatePicker: null,
         xacroRetry: null,
         loadedSource: null,
+        updatePrompt: null,
     };
     let isClosed = false;
     const rl = readline.createInterface({
@@ -3883,6 +3904,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         candidatePicker: null,
         xacroRetry: null,
         loadedSource: null,
+        updatePrompt: null,
     };
     const view = {
         input: "",
@@ -4022,6 +4044,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "update") {
+            dismissUpdatePrompt(state);
             try {
                 (0, cliUpdate_1.runUpdateCommand)();
                 view.notice = { kind: "success", text: "ilu is up to date." };
@@ -4158,6 +4181,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "update") {
+            dismissUpdatePrompt(state);
             try {
                 (0, cliUpdate_1.runUpdateCommand)();
                 view.notice = { kind: "success", text: "ilu is up to date." };
@@ -4308,6 +4332,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             return true;
         }
         if (slashCommand === "update") {
+            dismissUpdatePrompt(state);
             try {
                 (0, cliUpdate_1.runUpdateCommand)();
                 view.notice = { kind: "success", text: "ilu is up to date." };
@@ -4426,6 +4451,36 @@ const runTtyInteractiveShell = async (options = {}) => {
         const trimmed = view.input.trim();
         const bangCommand = parseBangInput(trimmed);
         const isSlashInput = shouldTreatAsSlashInput(view.input, state);
+        if (state.updatePrompt &&
+            !state.session &&
+            !state.rootTask &&
+            !state.candidatePicker &&
+            trimmed.length === 0) {
+            const update = state.updatePrompt;
+            dismissUpdatePrompt(state);
+            pushTimelineUserEntry(view, "/update");
+            try {
+                runBusyOperation({
+                    title: "updating",
+                    lines: ["installing the latest ilu release...", "restart ilu when the install finishes..."],
+                }, () => (0, cliUpdate_1.runUpdateCommand)());
+                view.notice = {
+                    kind: "success",
+                    text: `updated to ${update.latestVersion}. restart ilu to use the new build`,
+                };
+                view.output = createOutputPanel("update", `updated ${update.currentVersion} -> ${update.latestVersion}\nrestart ilu to use the new build`, "success");
+            }
+            catch (error) {
+                view.notice = {
+                    kind: "error",
+                    text: error instanceof Error ? error.message : String(error),
+                };
+                view.output = null;
+            }
+            archiveAssistantStateToTimeline(view);
+            setInput("");
+            return;
+        }
         if (bangCommand) {
             if (bangCommand === "xacro") {
                 pushTimelineUserEntry(view, "!xacro");
@@ -4649,6 +4704,18 @@ const runTtyInteractiveShell = async (options = {}) => {
             handleRootAction(parsed.slashCommand);
         }
     }
+    startStartupUpdateCheck(state, () => {
+        if (closed ||
+            view.input.length > 0 ||
+            view.timeline.length > 0 ||
+            state.session ||
+            state.rootTask ||
+            state.candidatePicker) {
+            dismissUpdatePrompt(state);
+            return;
+        }
+        queueRender("force");
+    });
     readline.emitKeypressEvents(process.stdin);
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -4716,6 +4783,11 @@ const runTtyInteractiveShell = async (options = {}) => {
             return;
         }
         if (key.name === "escape") {
+            if (state.updatePrompt && view.input.length === 0 && !state.session && !state.rootTask && !state.candidatePicker) {
+                dismissUpdatePrompt(state);
+                queueRender("navigation");
+                return;
+            }
             if (view.input.startsWith("/")) {
                 setInput("");
                 queueRender("navigation");
@@ -4741,6 +4813,9 @@ const runTtyInteractiveShell = async (options = {}) => {
             return;
         }
         if (input && !key.ctrl && !key.meta) {
+            if (state.updatePrompt && !state.session && !state.rootTask && !state.candidatePicker && view.input.length === 0) {
+                dismissUpdatePrompt(state);
+            }
             setInput(`${view.input}${input}`);
             if (view.input.startsWith("/")) {
                 view.menuIndex = 0;
@@ -4781,6 +4856,7 @@ const renderShellHelp = () => {
         "  ./robot.urdf       Run validation and a health check",
         "  ./robot.zip        Unpack and check an uploaded archive",
         "  ./robot-folder/    Load a local repo or folder and auto-run checks",
+        "  update prompt      If a newer release exists, Enter updates and Esc skips",
         "  !xacro            Install or verify the local XACRO runtime",
         "  /                  Open direct actions under the prompt",
         "  up/down            Move through picker options",

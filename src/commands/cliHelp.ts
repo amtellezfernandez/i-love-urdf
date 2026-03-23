@@ -166,8 +166,9 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
         "2. paste `owner/repo` or drop a local folder, `.urdf`, `.xacro`, or `.zip`",
         "3. ilu auto-runs validation and a health check when it can",
         "4. if there are multiple entrypoints, use arrows and Enter to pick one",
-        "5. if XACRO runtime is missing, run `!xacro` inside the shell",
-        "6. use `/` only when you want direct actions like `/analyze` or `/validate`",
+        "5. if a newer release is available, ilu asks whether you want to update",
+        "6. if XACRO runtime is missing, run `!xacro` inside the shell",
+        "7. use `/` only when you want direct actions like `/analyze` or `/validate`",
       ],
       theme
     ),
@@ -180,7 +181,7 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
     "",
     formatBlock(
       "Shell",
-      ["ilu", "ilu shell", "Paste owner/repo or drop a local path directly to start. ilu auto-loads the source and runs validation plus a health check when it can. When a repo has multiple entrypoints, use the picker and press Enter on the one you want. If XACRO runtime is missing, run !xacro in the shell. Use / when you want direct actions like /analyze, /health, /validate, /orientation, /open, or /inspect. Use /show to inspect the current context, /update for latest, and Ctrl+C to quit."],
+      ["ilu", "ilu shell", "Paste owner/repo or drop a local path directly to start. ilu auto-loads the source and runs validation plus a health check when it can. When a repo has multiple entrypoints, use the picker and press Enter on the one you want. If a newer release is available, the shell asks whether you want to update. If XACRO runtime is missing, run !xacro in the shell. Use / when you want direct actions like /analyze, /health, /validate, /orientation, /open, or /inspect. Use /show to inspect the current context, /update for latest, and Ctrl+C to quit."],
       theme
     ),
     "",

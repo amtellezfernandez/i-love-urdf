@@ -11,6 +11,7 @@ Inside `ilu`:
 
 - paste `owner/repo` or drop a local folder, `.urdf`, `.xacro`, or `.zip`
 - `ilu` auto-runs validation and a health check when it can
+- if a newer release is available, `ilu` asks whether you want to update
 - if there are multiple entrypoints, use arrows and `Enter` to pick one
 - press `Tab` to complete the selected slash option
 - run `!xacro` if a source needs the XACRO runtime
