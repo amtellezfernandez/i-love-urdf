@@ -1349,7 +1349,8 @@ const loadedFollowUpMenuTranscript = execFileSync(process.execPath, [cliPath, "s
   input: `${escapedDroppedUrdfPath}\n/\n/exit\n`,
 });
 if (
-  !loadedFollowUpMenuTranscript.includes("ready from") ||
+  !loadedFollowUpMenuTranscript.includes("context") ||
+  !loadedFollowUpMenuTranscript.includes("work with the loaded source or paste another one") ||
   !loadedFollowUpMenuTranscript.includes(droppedUrdfPath) ||
   !loadedFollowUpMenuTranscript.includes("/analyze") ||
   !loadedFollowUpMenuTranscript.includes("/health") ||

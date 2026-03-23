@@ -66,6 +66,14 @@ type ShellTimelineEntry = {
   text: string;
 };
 
+type ShellContextRowTone = "command" | "muted" | "accent";
+
+type ShellContextRow = {
+  label: string;
+  value: string;
+  tone?: ShellContextRowTone;
+};
+
 type ShellOutputPanel = {
   title: string;
   lines: readonly string[];
@@ -739,6 +747,26 @@ const printSectionTitle = (title: string) => {
   process.stdout.write(`\n${SHELL_THEME.section(title)}\n`);
 };
 
+const renderContextValue = (row: ShellContextRow): string => {
+  switch (row.tone) {
+    case "accent":
+      return SHELL_THEME.accent(row.value);
+    case "muted":
+      return SHELL_THEME.muted(row.value);
+    default:
+      return SHELL_THEME.command(row.value);
+  }
+};
+
+const renderContextRow = (row: ShellContextRow): string =>
+  `  ${SHELL_THEME.muted(row.label.padEnd(12))} ${renderContextValue(row)}`;
+
+const printContextRows = (rows: readonly ShellContextRow[]) => {
+  for (const row of rows) {
+    process.stdout.write(`${renderContextRow(row)}\n`);
+  }
+};
+
 const printCommandList = (
   entries: readonly { name: string; summary: string }[],
   prefix = "/",
@@ -763,25 +791,107 @@ const printRootQuickStart = () => {
   process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
 };
 
-const printRootOptions = (state: Pick<ShellState, "lastUrdfPath" | "loadedSource">) => {
-  const readySourceLabel = getReadySourceLabel(state);
-  if (readySourceLabel) {
-    printSectionTitle("ready");
-    process.stdout.write(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(readySourceLabel)}`)}\n`);
+const describeLocalSourceValue = (value: string): string => {
+  const localPath = detectLocalPathDrop(value);
+  if (localPath?.isDirectory) {
+    return `folder ${quoteForPreview(value)}`;
+  }
+  if (localPath?.isZipFile) {
+    return `archive ${quoteForPreview(value)}`;
+  }
+  if (localPath?.isXacroFile) {
+    return `xacro ${quoteForPreview(value)}`;
+  }
+  return `file ${quoteForPreview(value)}`;
+};
 
-    printSectionTitle("next");
-    printCommandList(getLoadedRootCommandList());
+const getLoadedSourceContextRows = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">
+): readonly ShellContextRow[] => {
+  const loadedSource = state.loadedSource;
 
-    printSectionTitle("system");
-    printCommandList(SHELL_BUILTIN_COMMANDS);
-    return;
+  if (!loadedSource) {
+    if (!state.lastUrdfPath) {
+      return [
+        { label: "source", value: "none yet", tone: "muted" },
+        {
+          label: "action",
+          value: "load a repo, folder, or file as the current source",
+          tone: "muted",
+        },
+        {
+          label: "next",
+          value: "paste owner/repo or drop a local folder/file",
+          tone: "accent",
+        },
+      ];
+    }
+
+    return [
+      { label: "source", value: `remembered ${quoteForPreview(state.lastUrdfPath)}` },
+      {
+        label: "action",
+        value: "keep investigating the remembered URDF or paste another source",
+        tone: "muted",
+      },
+      {
+        label: "next",
+        value: "/analyze /health /validate /orientation or paste another source",
+        tone: "accent",
+      },
+    ];
   }
 
-  printSectionTitle("start");
-  process.stdout.write(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file first")}\n`);
+  const rows: ShellContextRow[] = [];
 
-  printSectionTitle("next");
-  printCommandList(START_ROOT_MENU_ENTRIES);
+  if (loadedSource.source === "github") {
+    rows.push({
+      label: "source",
+      value: `GitHub ${quoteForPreview(loadedSource.githubRef ?? loadedSource.urdfPath)}`,
+    });
+  } else if (loadedSource.source === "local-repo") {
+    rows.push({
+      label: "source",
+      value: `folder ${quoteForPreview(loadedSource.localPath ?? loadedSource.urdfPath)}`,
+    });
+  } else {
+    rows.push({
+      label: "source",
+      value: describeLocalSourceValue(loadedSource.localPath ?? loadedSource.urdfPath),
+    });
+  }
+
+  if (loadedSource.repositoryUrdfPath) {
+    rows.push({ label: "entry", value: loadedSource.repositoryUrdfPath });
+  }
+
+  if (
+    loadedSource.urdfPath &&
+    (loadedSource.source !== "local-file" || loadedSource.localPath !== loadedSource.urdfPath)
+  ) {
+    rows.push({ label: "working urdf", value: quoteForPreview(loadedSource.urdfPath) });
+  }
+
+  rows.push({
+    label: "action",
+    value: "work with the loaded source or paste another one",
+    tone: "muted",
+  });
+  rows.push({
+    label: "next",
+    value: "/analyze /health /validate /orientation or paste another source",
+    tone: "accent",
+  });
+
+  return rows;
+};
+
+const printRootOptions = (state: Pick<ShellState, "lastUrdfPath" | "loadedSource">) => {
+  printSectionTitle("context");
+  printContextRows(getLoadedSourceContextRows(state));
+
+  printSectionTitle("actions");
+  printCommandList(getReadySourceLabel(state) ? getLoadedRootCommandList() : START_ROOT_MENU_ENTRIES);
 
   printSectionTitle("system");
   printCommandList(SHELL_BUILTIN_COMMANDS);
@@ -839,6 +949,101 @@ const getSessionSourceValue = (
     }
   }
   return null;
+};
+
+const getSessionPurposeText = (session: ShellSession): string => {
+  switch (session.label) {
+    case "open":
+      return "Load a repo, folder, or file as the current source.";
+    case "inspect":
+      return "Preview a repo or folder and suggest the best entrypoint.";
+    case "analyze":
+      return "Run the compact investigation view.";
+    case "health":
+      return "Run validation and the main health check.";
+    case "validate":
+      return "Check URDF structure and required tags.";
+    case "orientation":
+      return "Guess the likely up-axis and forward axis.";
+    default:
+      return getShellCommandSummary(session.command);
+  }
+};
+
+const getSessionNextText = (session: ShellSession): string => {
+  if (session.pending) {
+    return `paste ${session.pending.title.toLowerCase()}`;
+  }
+
+  if (session.label === "open" && session.args.size === 0) {
+    return "paste owner/repo or drop a local folder/file";
+  }
+
+  if (session.label === "inspect" && session.args.size === 0) {
+    return "paste owner/repo or drop a local folder";
+  }
+
+  const requirementStatus = getRequirementStatus(session);
+  if (requirementStatus.ready) {
+    return "press Enter or type /run";
+  }
+
+  return `set ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}`;
+};
+
+const getSessionContextRows = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession
+): readonly ShellContextRow[] => {
+  const rows: ShellContextRow[] = [];
+  const githubSource = getSessionSourceValue(session, ["github"]);
+  const localSource = getSessionSourceValue(session, ["local"]);
+  const pathSource = getSessionSourceValue(session, ["path"]);
+  const xacroSource = getSessionSourceValue(session, ["xacro"]);
+  const urdfSource = getSessionSourceValue(session, ["urdf"]);
+  const canReuseLoadedSource =
+    session.label !== "open" &&
+    session.label !== "inspect" &&
+    !githubSource &&
+    !localSource &&
+    !pathSource &&
+    !xacroSource &&
+    session.inheritedKeys.has("urdf");
+
+  if (githubSource) {
+    rows.push({ label: "source", value: `GitHub ${quoteForPreview(githubSource)}` });
+  } else if (localSource) {
+    rows.push({ label: "source", value: `folder ${quoteForPreview(localSource)}` });
+  } else if (pathSource) {
+    rows.push({ label: "source", value: describeLocalSourceValue(pathSource) });
+  } else if (xacroSource) {
+    rows.push({ label: "source", value: `xacro ${quoteForPreview(xacroSource)}` });
+  } else if (urdfSource && !canReuseLoadedSource) {
+    rows.push({ label: "source", value: describeLocalSourceValue(urdfSource) });
+  } else {
+    rows.push(...getLoadedSourceContextRows(state).filter((row) => row.label === "source" || row.label === "entry"));
+  }
+
+  if (urdfSource) {
+    const sourceValue = rows.find((row) => row.label === "source")?.value ?? "";
+    const inlineUrdfValue = quoteForPreview(urdfSource);
+    if (!sourceValue.includes(inlineUrdfValue)) {
+      rows.push({ label: "working urdf", value: inlineUrdfValue });
+    }
+  }
+
+  rows.push({
+    label: "action",
+    value: getSessionPurposeText(session).replace(/\.$/, ""),
+    tone: "muted",
+  });
+  rows.push({
+    label: "next",
+    value: getSessionNextText(session),
+    tone: getRequirementStatus(session).ready ? "accent" : "command",
+  });
+
+  return rows;
 };
 
 const buildSessionHeadline = (session: ShellSession): string => {
@@ -1142,32 +1347,22 @@ const getRequirementStatus = (
   };
 };
 
-const printSessionStatus = (session: ShellSession) => {
-  if (shouldSuppressSessionOptionMenu(session)) {
-    process.stdout.write("\n");
-    if (session.pending) {
-      process.stdout.write(`${SHELL_THEME.muted("input")} ${SHELL_THEME.command(session.pending.title)}\n`);
-    } else if (session.label === "open") {
-      process.stdout.write(`${SHELL_THEME.muted("input")} ${SHELL_THEME.command("paste owner/repo or drop a local folder/file")}\n`);
-    } else if (session.label === "inspect") {
-      process.stdout.write(`${SHELL_THEME.muted("input")} ${SHELL_THEME.command("paste owner/repo or drop a local folder")}\n`);
-    }
-    process.stdout.write(`${formatStatusTag("flow")} ${SHELL_THEME.command(buildSessionHeadline(session))}\n`);
-    return;
-  }
-
-  const requirementStatus = getRequirementStatus(session);
-  process.stdout.write("\n");
-  process.stdout.write(
-    requirementStatus.ready
-      ? `${formatStatusTag("ready")} ${SHELL_THEME.command("/run")}\n`
-      : `${formatStatusTag("next")} ${requirementStatus.nextSteps.map((step) => SHELL_THEME.command(formatSlashSequence(session, step))).join(SHELL_THEME.muted(" or "))}\n`
-  );
-  process.stdout.write(`${formatStatusTag("flow")} ${SHELL_THEME.command(buildSessionHeadline(session))}\n`);
+const printSessionStatus = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession
+) => {
+  printSectionTitle("context");
+  printContextRows(getSessionContextRows(state, session));
 };
 
-const printSessionPreview = (session: ShellSession) => {
-  printSectionTitle("cmd");
+const printSessionPreview = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession
+) => {
+  printSectionTitle("context");
+  printContextRows(getSessionContextRows(state, session));
+
+  printSectionTitle("command");
   process.stdout.write(`  ${SHELL_THEME.command(buildCommandPreview(session.command, session.args))}\n`);
 
   if (session.args.size > 0) {
@@ -1180,32 +1375,23 @@ const printSessionPreview = (session: ShellSession) => {
     }
   }
 
-  const requirementStatus = getRequirementStatus(session);
-  printSectionTitle(requirementStatus.ready ? "ready" : "next");
-  if (requirementStatus.ready) {
-    process.stdout.write(`  ${SHELL_THEME.command("/run")}\n`);
-    return;
-  }
-
-  for (const step of requirementStatus.nextSteps) {
-    process.stdout.write(`  ${SHELL_THEME.command(formatSlashSequence(session, step))}\n`);
-  }
+  printSectionTitle("next");
+  process.stdout.write(`  ${renderContextValue(getSessionContextRows(state, session).find((row) => row.label === "next") ?? { label: "next", value: getSessionNextText(session) })}\n`);
 };
 
-const printSessionOptions = (session: ShellSession) => {
+const printSessionOptions = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession
+) => {
   if (shouldSuppressSessionOptionMenu(session)) {
     printSectionTitle(`/${session.label}`);
     process.stdout.write(`  ${SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
-    if (session.pending) {
-      printPendingValuePrompt(session.pending);
-    } else if (session.label === "open") {
-      process.stdout.write(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file")}\n`);
-    } else if (session.label === "inspect") {
-      process.stdout.write(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder")}\n`);
-    }
+    printSessionStatus(state, session);
     printSectionTitle("actions");
     printCommandList(SESSION_BUILTIN_COMMANDS);
-    printSessionStatus(session);
+    if (session.pending) {
+      printPendingValuePrompt(session.pending);
+    }
     return;
   }
 
@@ -1216,6 +1402,7 @@ const printSessionOptions = (session: ShellSession) => {
 
   printSectionTitle(`/${session.label}`);
   process.stdout.write(`  ${SHELL_THEME.muted(getShellCommandSummary(session.command))}\n`);
+  printSessionStatus(state, session);
 
   if (requiredEntries.length > 0) {
     printSectionTitle("start");
@@ -1234,7 +1421,6 @@ const printSessionOptions = (session: ShellSession) => {
 
   printSectionTitle("actions");
   printCommandList(SESSION_BUILTIN_COMMANDS);
-  printSessionStatus(session);
 };
 
 const parseSlashInput = (
@@ -3820,7 +4006,7 @@ const handleRootSlashCommand = (
       return;
     }
     if (state.session) {
-      printSessionOptions(state.session);
+      printSessionOptions(state, state.session);
     }
     return;
   }
@@ -3846,7 +4032,7 @@ const handleRootSlashCommand = (
   const feedback: ShellFeedback[] = [];
   state.session = createSession(command, state, slashCommand, feedback);
   flushFeedback(feedback);
-  printSessionOptions(state.session);
+  printSessionOptions(state, state.session);
 };
 
 const handleRootTaskSlashCommand = (
@@ -3916,7 +4102,7 @@ const handleRootTaskSlashCommand = (
       return;
     }
     if (state.session) {
-      printSessionOptions(state.session);
+      printSessionOptions(state, state.session);
       return;
     }
   }
@@ -3932,7 +4118,7 @@ const handleRootTaskSlashCommand = (
   clearXacroRetry(state);
   state.session = createSession(slashCommand as SupportedCommandName, state, slashCommand, feedback);
   flushFeedback(feedback);
-  printSessionOptions(state.session);
+  printSessionOptions(state, state.session);
 };
 
 const handleSessionSlashCommand = (
@@ -3946,7 +4132,7 @@ const handleSessionSlashCommand = (
   }
 
   if (!slashCommand || slashCommand === "help") {
-    printSessionOptions(session);
+    printSessionOptions(state, session);
     return;
   }
 
@@ -3966,12 +4152,12 @@ const handleSessionSlashCommand = (
     clearXacroRetry(state);
     state.session = createSession(session.command, state, session.label, feedback);
     flushFeedback(feedback);
-    printSessionOptions(state.session);
+    printSessionOptions(state, state.session);
     return;
   }
 
   if (slashCommand === "show") {
-    printSessionPreview(session);
+    printSessionPreview(state, session);
     return;
   }
 
@@ -4019,7 +4205,7 @@ const handleSessionSlashCommand = (
     clearCandidatePicker(state);
     toggleSessionFlag(session, target.key, feedback);
     flushFeedback(feedback);
-    printSessionStatus(session);
+    printSessionStatus(state, session);
     return;
   }
 
@@ -4042,11 +4228,11 @@ const handleSessionSlashCommand = (
           state.session = null;
           state.rootTask = null;
         } else if (state.session && !state.candidatePicker) {
-          printSessionStatus(state.session);
+          printSessionStatus(state, state.session);
         }
         return;
       }
-      printSessionStatus(session);
+      printSessionStatus(state, session);
       printOutputPanel(preview);
       if (state.candidatePicker) {
         printCandidatePicker(state.candidatePicker);
@@ -4086,11 +4272,11 @@ const handlePendingValue = (input: string, state: ShellState) => {
         state.session = null;
         state.rootTask = null;
       } else if (state.session && !state.candidatePicker) {
-        printSessionStatus(state.session);
+        printSessionStatus(state, state.session);
       }
       return;
     }
-    printSessionStatus(session);
+    printSessionStatus(state, session);
     printOutputPanel(preview);
     if (state.candidatePicker) {
       printCandidatePicker(state.candidatePicker);
@@ -4414,20 +4600,18 @@ const getMenuWindow = (
   };
 };
 
-const buildSessionPreviewText = (session: ShellSession): string => {
-  const lines = [buildCommandPreview(session.command, session.args)];
+const buildSessionPreviewText = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession
+): string => {
+  const lines = getSessionContextRows(state, session).map((row) => `${row.label} ${row.value}`);
+  lines.push("");
+  lines.push(`command ${buildCommandPreview(session.command, session.args)}`);
   if (session.args.size > 0) {
     for (const [key, value] of session.args.entries()) {
       lines.push(`${getSlashDisplayName(session, key)}${formatInlineValue(value === true ? "enabled" : String(value))}`);
     }
   }
-
-  const requirementStatus = getRequirementStatus(session);
-  lines.push(
-    requirementStatus.ready
-      ? "ready /run"
-      : `next ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}`
-  );
   return lines.join("\n");
 };
 
@@ -4530,12 +4714,12 @@ const getPromptPlaceholder = (state: ShellState): string => {
 
   const requirementStatus = getRequirementStatus(state.session);
   if (requirementStatus.ready) {
-    return "type /run";
+    return "press Enter to run";
   }
 
-  return requirementStatus.nextSteps
+  return `set ${requirementStatus.nextSteps
     .map((step) => formatSlashSequence(state.session as ShellSession, step))
-    .join(" or ");
+    .join(" or ")}`;
 };
 
 const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
@@ -4562,49 +4746,43 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   }
 
   lines.push("");
-  lines.push(SHELL_THEME.section(state.session ? "current" : state.rootTask ? "task" : "start"));
+  lines.push(SHELL_THEME.section("context"));
   if (state.candidatePicker && state.session) {
     const selectedCandidate =
       state.candidatePicker.candidates[clamp(state.candidatePicker.selectedIndex, 0, state.candidatePicker.candidates.length - 1)];
-    lines.push(`  ${SHELL_THEME.accent("choose")} ${SHELL_THEME.muted("a candidate and press Enter")}`);
-    lines.push(`  ${SHELL_THEME.muted("flow")} ${SHELL_THEME.command(buildSessionHeadline(state.session))}`);
+    const rows = getSessionContextRows(state, state.session).filter((row) => row.label !== "next");
+    rows.push({
+      label: "selected",
+      value: selectedCandidate?.path ?? "none yet",
+    });
+    rows.push({
+      label: "next",
+      value: "use up/down, then press Enter to load the highlighted entry",
+      tone: "accent",
+    });
+    for (const row of rows) {
+      lines.push(renderContextRow(row));
+    }
     if (selectedCandidate) {
-      lines.push(`  ${SHELL_THEME.muted("selected")} ${SHELL_THEME.command(selectedCandidate.path)}`);
+      const selectedDetails = getCandidateDetails(selectedCandidate);
+      if (selectedDetails.length > 0) {
+        lines.push(`  ${SHELL_THEME.muted("details".padEnd(12))} ${SHELL_THEME.muted(selectedDetails.join("  "))}`);
+      }
     }
   } else if (state.session) {
-    const requirementStatus = getRequirementStatus(state.session);
-    if (shouldSuppressSessionOptionMenu(state.session)) {
-      lines.push(
-        state.session.pending
-          ? `  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command(state.session.pending.title)}`
-          : state.session.label === "open"
-            ? `  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command("paste owner/repo or drop a local folder/file")}`
-            : `  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command("paste owner/repo or drop a local folder")}`
-      );
-    } else {
-      lines.push(
-        requirementStatus.ready
-          ? `  ${SHELL_THEME.success("ready")} ${SHELL_THEME.command("/run")}`
-          : `  ${SHELL_THEME.accent("next")} ${SHELL_THEME.command(
-              requirementStatus.nextSteps.map((step) => formatSlashSequence(state.session as ShellSession, step)).join(" or ")
-            )}`
-      );
-    }
-    lines.push(`  ${SHELL_THEME.muted("flow")} ${SHELL_THEME.command(buildSessionHeadline(state.session))}`);
-    if (state.session.pending && !shouldSuppressSessionOptionMenu(state.session)) {
-      lines.push(`  ${SHELL_THEME.muted("input")} ${SHELL_THEME.command(state.session.pending.title)}`);
+    for (const row of getSessionContextRows(state, state.session)) {
+      lines.push(renderContextRow(row));
     }
   } else if (state.rootTask) {
-    lines.push(`  ${SHELL_THEME.muted(`task /${state.rootTask}`)} ${SHELL_THEME.muted(getRootTaskSummary(state.rootTask))}`);
-    lines.push(`  ${SHELL_THEME.muted("pick an action below or paste input directly")}`);
+    lines.push(renderContextRow({ label: "source", value: "none yet", tone: "muted" }));
+    lines.push(renderContextRow({ label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" }));
+    lines.push(renderContextRow({ label: "next", value: "paste input directly or type /", tone: "accent" }));
   } else {
-    const readySourceLabel = getReadySourceLabel(state);
-    if (readySourceLabel) {
-      lines.push(`  ${SHELL_THEME.muted(`ready from ${quoteForPreview(readySourceLabel)}`)}`);
-      lines.push(`  ${SHELL_THEME.muted("use /analyze /health /validate /orientation or paste another source")}`);
-    } else {
-      lines.push(`  ${SHELL_THEME.muted("paste owner/repo or drop a local folder/file")}`);
-      lines.push(`  ${SHELL_THEME.muted("/ shows direct actions when you need them")}`);
+    for (const row of getLoadedSourceContextRows(state)) {
+      lines.push(renderContextRow(row));
+    }
+    if (!getReadySourceLabel(state)) {
+      lines.push(renderContextRow({ label: "help", value: "/ shows direct actions when you need them", tone: "muted" }));
     }
   }
 
@@ -4859,11 +5037,15 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       }
     } else if (!trimmed) {
       if (session) {
-        printSessionStatus(session);
+        if (!session.pending && getRequirementStatus(session).ready) {
+          printSessionCommandExecution(executeSessionCommand(state, session), session);
+        } else {
+          printSessionStatus(state, session);
+        }
       } else if (state.rootTask) {
         printRootTaskOptions(state.rootTask);
       } else {
-        process.stdout.write(`${SHELL_THEME.muted(ROOT_GUIDANCE)}\n`);
+        printRootOptions(state);
       }
     } else if (session) {
       const feedback: ShellFeedback[] = [];
@@ -4884,11 +5066,11 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
             state.rootTask = null;
           } else if (state.session) {
             if (!state.candidatePicker) {
-              printSessionStatus(state.session);
+              printSessionStatus(state, state.session);
             }
           }
         } else {
-          printSessionStatus(session);
+          printSessionStatus(state, session);
           printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
           if (state.candidatePicker) {
             printCandidatePicker(state.candidatePicker);
@@ -4917,11 +5099,11 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
             state.rootTask = null;
           } else if (state.session) {
             if (!state.candidatePicker) {
-              printSessionStatus(state.session);
+              printSessionStatus(state, state.session);
             }
           }
         } else {
-          printSessionStatus(state.session);
+          printSessionStatus(state, state.session);
           printOutputPanel(buildAutoPreviewPanel(state, applied.session, applied.key));
           if (state.candidatePicker) {
             printCandidatePicker(state.candidatePicker);
@@ -5368,8 +5550,8 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "show") {
-      view.output = createOutputPanel("current", buildSessionPreviewText(session));
-      view.notice = { kind: "info", text: "showing current command state" };
+      view.output = createOutputPanel("context", buildSessionPreviewText(state, session));
+      view.notice = { kind: "info", text: "showing the current context" };
       pushTimelineEntry(view, "/show");
       return true;
     }
@@ -5624,6 +5806,10 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (trimmed.length === 0) {
+      if (state.session && !state.session.pending && getRequirementStatus(state.session).ready) {
+        handleSessionAction("run", "");
+        return;
+      }
       view.notice = {
         kind: "info",
         text: state.session || state.rootTask ? getPromptPlaceholder(state) : ROOT_GUIDANCE,
@@ -5936,7 +6122,7 @@ export const renderShellHelp = (): string => {
     "  /                  Open direct actions under the prompt",
     "  up/down            Move through picker options",
     "  tab                Complete the selected option or path",
-    "  enter              Select the highlighted option",
+    "  enter              Select the highlighted option or run the ready action",
     "  ctrl+c             Exit immediately",
     "  esc                Close the picker or cancel a pending value",
     "  /open              Load a repo, folder, or file as the current source",
