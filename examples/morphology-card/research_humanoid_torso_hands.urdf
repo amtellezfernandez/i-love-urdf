@@ -1,0 +1,59 @@
+<robot name="research_humanoid_torso_hands">
+  <link name="base_link"/>
+  <link name="torso_link"/>
+  <link name="left_upper_arm_link"/>
+  <link name="left_hand_link"/>
+  <link name="right_upper_arm_link"/>
+  <link name="right_hand_link"/>
+  <link name="left_thigh_link"/>
+  <link name="left_foot_link"/>
+  <link name="right_thigh_link"/>
+  <link name="right_foot_link"/>
+
+  <joint name="torso_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="torso_link"/>
+  </joint>
+
+  <joint name="left_shoulder_joint" type="revolute">
+    <parent link="torso_link"/>
+    <child link="left_upper_arm_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="left_hand_joint" type="revolute">
+    <parent link="left_upper_arm_link"/>
+    <child link="left_hand_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="right_shoulder_joint" type="revolute">
+    <parent link="torso_link"/>
+    <child link="right_upper_arm_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="right_hand_joint" type="revolute">
+    <parent link="right_upper_arm_link"/>
+    <child link="right_hand_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+
+  <joint name="left_hip_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="left_thigh_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="left_knee_joint" type="revolute">
+    <parent link="left_thigh_link"/>
+    <child link="left_foot_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="right_hip_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="right_thigh_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+  <joint name="right_knee_joint" type="revolute">
+    <parent link="right_thigh_link"/>
+    <child link="right_foot_link"/>
+    <limit lower="-1.57" upper="1.57"/>
+  </joint>
+</robot>

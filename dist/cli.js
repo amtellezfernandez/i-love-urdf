@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const process = require("node:process");
+const analysisCommands_1 = require("./commands/analysisCommands");
+const cliArgs_1 = require("./commands/cliArgs");
+const cliCompletion_1 = require("./commands/cliCompletion");
+const cliBugReport_1 = require("./commands/cliBugReport");
+const cliDoctor_1 = require("./commands/cliDoctor");
+const cliHelp_1 = require("./commands/cliHelp");
+const cliShell_1 = require("./commands/cliShell");
+const cliUpdate_1 = require("./commands/cliUpdate");
+const editCommands_1 = require("./commands/editCommands");
+const sourceCommands_1 = require("./commands/sourceCommands");
+const nodeDomRuntime_1 = require("./node/nodeDomRuntime");
+const sharedSession_1 = require("./session/sharedSession");
+const cliHelpers = (0, cliArgs_1.createCliCommandHelpers)();
+const run = async () => {
+    const { rawCommand, command, args, positionals } = (0, cliArgs_1.parseArgs)(process.argv);
+    (0, nodeDomRuntime_1.installNodeDomGlobals)();
+    if (process.argv.length <= 2) {
+        await (0, cliShell_1.runInteractiveShell)();
+        return;
+    }
+    if (rawCommand === "shell") {
+        if (args.has("help")) {
+            console.log((0, cliShell_1.renderShellHelp)());
+            return;
+        }
+        await (0, cliShell_1.runInteractiveShell)({
+            initialSlashCommand: positionals[0]?.startsWith("/") ? positionals[0] : undefined,
+        });
+        return;
+    }
+    if (rawCommand === "attach") {
+        if (args.has("help")) {
+            console.log((0, cliHelp_1.renderAttachHelp)());
+            return;
+        }
+        const sessionId = positionals[0]?.trim();
+        if (!sessionId) {
+            cliHelpers.fail((0, cliHelp_1.renderAttachHelp)());
+        }
+        await (0, cliShell_1.runInteractiveShell)({
+            attachSessionId: sessionId,
+        });
+        return;
+    }
+    if (rawCommand === "resume") {
+        if (args.has("help")) {
+            console.log((0, cliHelp_1.renderResumeHelp)());
+            return;
+        }
+        const snapshot = (0, sharedSession_1.readLatestIluSharedSession)();
+        if (!snapshot) {
+            cliHelpers.fail("No recent ilu session found. Start a robot with `ilu` first.");
+        }
+        await (0, cliShell_1.runInteractiveShell)({
+            attachSessionId: snapshot.sessionId,
+        });
+        return;
+    }
+    if (rawCommand === "help" || rawCommand === "--help" || rawCommand === "-h") {
+        if (positionals[0] === "shell") {
+            console.log((0, cliShell_1.renderShellHelp)());
+            return;
+        }
+        if (positionals[0] === "attach") {
+            console.log((0, cliHelp_1.renderAttachHelp)());
+            return;
+        }
+        if (positionals[0] === "resume") {
+            console.log((0, cliHelp_1.renderResumeHelp)());
+            return;
+        }
+        if (positionals[0] === "update") {
+            console.log((0, cliUpdate_1.renderUpdateHelp)());
+            return;
+        }
+        if (positionals[0] === "doctor") {
+            console.log((0, cliDoctor_1.renderDoctorHelp)());
+            return;
+        }
+        if (positionals[0] === "bug-report") {
+            console.log((0, cliBugReport_1.renderBugReportHelp)());
+            return;
+        }
+        (0, cliHelp_1.printHelp)();
+        return;
+    }
+    if (rawCommand === "bug-report") {
+        if (args.has("help")) {
+            console.log((0, cliBugReport_1.renderBugReportHelp)());
+            return;
+        }
+        await (0, cliBugReport_1.runBugReportCommand)(args);
+        return;
+    }
+    if (rawCommand === "doctor") {
+        if (args.has("help")) {
+            console.log((0, cliDoctor_1.renderDoctorHelp)());
+            return;
+        }
+        await (0, cliDoctor_1.runDoctorCommand)(args);
+        return;
+    }
+    if (rawCommand === "update") {
+        if (args.has("help")) {
+            console.log((0, cliUpdate_1.renderUpdateHelp)());
+            return;
+        }
+        (0, cliUpdate_1.runUpdateCommand)(args);
+        return;
+    }
+    if (rawCommand === "completion") {
+        if (args.has("help")) {
+            console.log((0, cliCompletion_1.renderCompletionHelp)());
+            return;
+        }
+        const requestedShell = positionals[0];
+        if (!requestedShell) {
+            cliHelpers.fail((0, cliCompletion_1.renderCompletionHelp)());
+        }
+        if (!(0, cliCompletion_1.isCompletionShell)(requestedShell)) {
+            cliHelpers.fail((0, cliCompletion_1.renderCompletionHelp)());
+        }
+        const completionShell = requestedShell;
+        console.log((0, cliCompletion_1.renderCompletionScript)(completionShell));
+        return;
+    }
+    if (args.has("help")) {
+        (0, cliHelp_1.printHelp)();
+        return;
+    }
+    if ((0, sourceCommands_1.isSourceCommand)(command)) {
+        await (0, sourceCommands_1.runSourceCommand)(command, args, cliHelpers);
+        return;
+    }
+    if ((0, analysisCommands_1.isAnalysisCommand)(command)) {
+        await (0, analysisCommands_1.runAnalysisCommand)(command, args, cliHelpers);
+        return;
+    }
+    if ((0, editCommands_1.isEditCommand)(command)) {
+        await (0, editCommands_1.runEditCommand)(command, args, cliHelpers);
+        return;
+    }
+    console.error(`Unknown command: ${rawCommand}`);
+    (0, cliHelp_1.printHelp)();
+    process.exit(2);
+};
+run().catch((error) => {
+    if (error instanceof Error) {
+        cliHelpers.fail(error.message);
+    }
+    cliHelpers.fail("Unknown CLI failure");
+});

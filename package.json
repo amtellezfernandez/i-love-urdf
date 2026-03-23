@@ -1,0 +1,108 @@
+{
+  "name": "i-love-urdf",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "packageManager": "pnpm@10.32.1",
+  "private": false,
+  "description": "OpenAI Robotics interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "ilu": "./dist/cli.js"
+  },
+  "scripts": {
+    "check:security": "node ./scripts/check-security-posture.mjs",
+    "check:vulnerabilities": "node ./scripts/check-vulnerabilities.mjs",
+    "check:browser-entry": "node ./scripts/check-browser-entry.mjs",
+    "check:architecture": "node ./scripts/check-architecture.mjs",
+    "check:install": "node ./scripts/check-install.mjs",
+    "check:performance": "node ./scripts/check-performance.mjs",
+    "refresh:global": "node ./scripts/build-package.mjs && npm install -g .",
+    "ilu": "node ./scripts/run-cli.mjs",
+    "release:notes": "node ./scripts/generate-release-notes.mjs",
+    "release:verify": "node ./scripts/build-package.mjs && npm run check:architecture && npm run check:security && npm run check:vulnerabilities && npm run check:install && npm run check:browser-entry && npm run test && npm run setup:xacro && npm run ilu -- probe-xacro-runtime && npm run smoke && npm run check:performance",
+    "release:verify:full": "npm run release:verify && npm run test:real-repos",
+    "setup:xacro": "node ./scripts/run-cli.mjs setup-xacro-runtime",
+    "smoke": "node ./scripts/smoke-cli.mjs",
+    "test": "node ./scripts/build-package.mjs && node --test",
+    "test:real-repos": "node ./scripts/build-package.mjs && node ./scripts/verify-real-repos.mjs",
+    "build:package": "node ./scripts/build-package.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "linkedom": "^0.18.12",
+    "saxes": "^6.0.0"
+  },
+  "keywords": [
+    "urdf",
+    "robotics",
+    "openai",
+    "cli",
+    "interactive",
+    "xacro",
+    "mjcf",
+    "parser"
+  ],
+  "author": "OpenAI Robotics",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amtellezfernandez/i-love-urdf.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amtellezfernandez/i-love-urdf/issues"
+  },
+  "homepage": "https://github.com/amtellezfernandez/i-love-urdf",
+  "license": "SEE LICENSE IN LICENSE",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": "^20.19.6 || ^22.0.0 || ^24.0.0",
+    "pnpm": ">=10.32.1 <11"
+  },
+  "volta": {
+    "node": "20.19.6",
+    "pnpm": "10.32.1"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/repository/localRepositoryInspection.d.ts",
+      "default": "./dist/repository/localRepositoryInspection.js"
+    },
+    "./xacro-node": {
+      "types": "./dist/xacro/xacroNode.d.ts",
+      "default": "./dist/xacro/xacroNode.js"
+    },
+    "./load-source-node": {
+      "types": "./dist/sources/loadSourceNode.d.ts",
+      "default": "./dist/sources/loadSourceNode.js"
+    },
+    "./mesh-node": {
+      "types": "./dist/mesh/meshNode.d.ts",
+      "default": "./dist/mesh/meshNode.js"
+    },
+    "./urdf-node": {
+      "types": "./dist/node/urdfNode.d.ts",
+      "default": "./dist/node/urdfNode.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.mjs",
+      "require": "./dist/browser.js",
+      "default": "./dist/browser.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
+}

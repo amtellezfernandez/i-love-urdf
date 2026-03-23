@@ -1,0 +1,84 @@
+{
+  "schema": "i-love-urdf/robot-morphology-card",
+  "schemaVersion": "1.0.0",
+  "robotName": "research_humanoid_torso_hands",
+  "nameHints": [
+    "research_humanoid_torso_hands"
+  ],
+  "summary": {
+    "structureLabels": {
+      "linkByName": {
+        "base_link": "base",
+        "torso_link": "body1",
+        "left_upper_arm_link": "arm1",
+        "left_hand_link": "arm1",
+        "right_upper_arm_link": "arm2",
+        "right_hand_link": "arm2",
+        "left_thigh_link": "leg1",
+        "left_foot_link": "leg1",
+        "right_thigh_link": "leg2",
+        "right_foot_link": "leg2"
+      },
+      "jointByName": {
+        "left_shoulder_joint": "arm1",
+        "left_hand_joint": "arm1",
+        "right_shoulder_joint": "arm2",
+        "right_hand_joint": "arm2",
+        "left_hip_joint": "leg1",
+        "left_knee_joint": "leg1",
+        "right_hip_joint": "leg2",
+        "right_knee_joint": "leg2"
+      }
+    },
+    "linkCount": 10,
+    "jointCount": 9,
+    "controllableJointCount": 8,
+    "dofCount": 8,
+    "armCount": 2,
+    "legCount": 2,
+    "wheelCount": 0,
+    "primaryFamily": "humanoid-like",
+    "families": [
+      "humanoid-like"
+    ],
+    "isHumanoidLike": true,
+    "isQuadrupedLike": false,
+    "isWheeledLike": false,
+    "isMobileManipulatorLike": false
+  },
+  "canonicalTags": [
+    "humanoid",
+    "biped",
+    "end-effector"
+  ],
+  "displayTags": [
+    "Humanoid"
+  ],
+  "tags": [
+    {
+      "tag": "humanoid",
+      "confidence": "high",
+      "source": "hybrid",
+      "reasons": [
+        "Detected 2 leg branches and 2 arm branches.",
+        "Name hints matched humanoid tokens in \"research humanoid torso hands\"."
+      ]
+    },
+    {
+      "tag": "biped",
+      "confidence": "high",
+      "source": "structure",
+      "reasons": [
+        "Detected 2 leg branches."
+      ]
+    },
+    {
+      "tag": "end-effector",
+      "confidence": "medium",
+      "source": "name",
+      "reasons": [
+        "Name hints matched end-effector tokens in \"research humanoid torso hands\"."
+      ]
+    }
+  ]
+}

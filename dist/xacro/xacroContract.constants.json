@@ -1,0 +1,14 @@
+{
+    "supportExtensions": [
+        ".xacro",
+        ".urdf",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".srdf",
+        ".sdf",
+        ".gazebo",
+        ".trans"
+    ],
+    "defaultArgs": {}
+}
