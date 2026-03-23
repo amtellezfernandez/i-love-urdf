@@ -1544,6 +1544,36 @@ if (
   throw new Error("ilu shell loaded health shortcut smoke test failed");
 }
 
+const mjcfExportPath = path.join(shellDropDir, "local robot.mjcf.xml");
+const loadedMjcfTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${droppedUrdfPath}\n/mjcf\n\n/exit\n`,
+});
+if (
+  !loadedMjcfTranscript.includes("export target") ||
+  !loadedMjcfTranscript.includes("exported MJCF to") ||
+  !loadedMjcfTranscript.includes("local robot.mjcf.xml") ||
+  !fs.existsSync(mjcfExportPath)
+) {
+  throw new Error("ilu shell MJCF export smoke test failed");
+}
+
+const usdExportPath = path.join(shellDropDir, "local robot.usda");
+const loadedUsdTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${droppedUrdfPath}\n/usd\n\n/exit\n`,
+});
+if (
+  !loadedUsdTranscript.includes("export target") ||
+  !loadedUsdTranscript.includes("exported USD to") ||
+  !loadedUsdTranscript.includes("local robot.usda") ||
+  !fs.existsSync(usdExportPath)
+) {
+  throw new Error("ilu shell USD export smoke test failed");
+}
+
 const suggestedMeshRepairTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",

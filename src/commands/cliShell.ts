@@ -277,6 +277,14 @@ const getSessionSourceValue = (
 };
 
 const getSessionPurposeText = (session: ShellSession): string => {
+  if (session.command === "urdf-to-mjcf") {
+    return "Export the current URDF as MJCF.";
+  }
+
+  if (session.command === "urdf-to-usd") {
+    return "Export the current URDF as USD.";
+  }
+
   switch (session.label) {
     case "open":
       return "Load a repo, folder, or file as the current source.";
@@ -310,6 +318,12 @@ const getSessionNextText = (session: ShellSession): string => {
 
   const requirementStatus = getRequirementStatus(session);
   if (requirementStatus.ready) {
+    if (session.command === "urdf-to-mjcf" || session.command === "urdf-to-usd") {
+      const outPath = session.args.get("out");
+      return typeof outPath === "string" && outPath.trim().length > 0
+        ? `press Enter to export to ${quoteForPreview(outPath)} or type /out`
+        : "press Enter to export or type /out";
+    }
     return "press Enter or type /run";
   }
 
@@ -357,6 +371,13 @@ const getSessionContextRows = (
     }
   }
 
+  if (session.command === "urdf-to-mjcf" || session.command === "urdf-to-usd") {
+    const outPath = session.args.get("out");
+    if (typeof outPath === "string" && outPath.trim().length > 0) {
+      rows.push({ label: "output", value: quoteForPreview(outPath) });
+    }
+  }
+
   rows.push({
     label: "action",
     value: getSessionPurposeText(session).replace(/\.$/, ""),
@@ -380,6 +401,16 @@ const buildSessionNarrativeLines = (
     .map((row) => `${row.label} ${row.value}`);
 
 const buildSessionHeadline = (session: ShellSession): string => {
+  if (session.command === "urdf-to-mjcf") {
+    const source = getSessionSourceValue(session, ["urdf"]);
+    return source ? `export MJCF from ${quoteForPreview(source)}` : "export MJCF";
+  }
+
+  if (session.command === "urdf-to-usd") {
+    const source = getSessionSourceValue(session, ["urdf", "path"]);
+    return source ? `export USD from ${quoteForPreview(source)}` : "export USD";
+  }
+
   switch (session.label) {
     case "open": {
       const source = getSessionSourceValue(session, ["github", "path"]);
@@ -411,6 +442,21 @@ const findRootTaskAction = (
   slashCommand: string
 ): RootTaskActionDefinition | undefined =>
   getRootTaskActionDefinitions(task).find((entry) => entry.name === slashCommand);
+
+const findUniqueRootTaskAction = (
+  slashCommand: string
+): { task: RootTaskName; action: RootTaskActionDefinition } | null => {
+  const matches: Array<{ task: RootTaskName; action: RootTaskActionDefinition }> = [];
+
+  for (const task of ROOT_TASKS.map((entry) => entry.name)) {
+    const action = findRootTaskAction(task, slashCommand);
+    if (action) {
+      matches.push({ task, action });
+    }
+  }
+
+  return matches.length === 1 ? matches[0] ?? null : null;
+};
 
 const getOptionOrderRank = (session: ShellSession, key: string): number => {
   const customOrder = SESSION_OPTION_ORDER[session.command] ?? [];
@@ -452,6 +498,12 @@ const getOptionSummary = (
   }
 
   if (key === "out") {
+    if (session.command === "urdf-to-mjcf") {
+      return "Write the exported MJCF file here.";
+    }
+    if (session.command === "urdf-to-usd") {
+      return "Write the exported USD file here.";
+    }
     return "Write the output to a file.";
   }
 
@@ -878,6 +930,121 @@ const isLocalFilesystemKey = (session: ShellSession, key: string): boolean => {
   return session.command === "load-source" || session.command === "urdf-to-usd";
 };
 
+const getExportFileSuffix = (command: SupportedCommandName): string | null => {
+  if (command === "urdf-to-mjcf") {
+    return ".mjcf.xml";
+  }
+
+  if (command === "urdf-to-usd") {
+    return ".usda";
+  }
+
+  return null;
+};
+
+const getExportFileStem = (value: string): string => {
+  const normalized = value.replace(/\\/g, "/");
+  const baseName = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (/\.urdf\.xacro$/i.test(baseName)) {
+    return baseName.replace(/\.urdf\.xacro$/i, "");
+  }
+  if (/\.urdf$/i.test(baseName)) {
+    return baseName.replace(/\.urdf$/i, "");
+  }
+  if (/\.xacro$/i.test(baseName)) {
+    return baseName.replace(/\.xacro$/i, "");
+  }
+  if (path.extname(baseName)) {
+    return baseName.slice(0, -path.extname(baseName).length);
+  }
+  return baseName || "robot";
+};
+
+const buildDefaultExportFilename = (command: SupportedCommandName, sourceName: string): string => {
+  const suffix = getExportFileSuffix(command);
+  return `${getExportFileStem(sourceName) || "robot"}${suffix || ""}`;
+};
+
+const deriveSuggestedExportOutPath = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession
+): string | null => {
+  const suffix = getExportFileSuffix(session.command);
+  if (!suffix) {
+    return null;
+  }
+
+  const source = state.loadedSource;
+  if (source?.source === "local-repo" && source.localPath && source.repositoryUrdfPath) {
+    return path.join(
+      source.localPath,
+      path.dirname(source.repositoryUrdfPath),
+      buildDefaultExportFilename(session.command, source.repositoryUrdfPath)
+    );
+  }
+
+  if (source?.source === "github" && source.repositoryUrdfPath) {
+    return path.resolve(process.cwd(), buildDefaultExportFilename(session.command, source.repositoryUrdfPath));
+  }
+
+  if (source?.source === "local-file" && source.localPath) {
+    const localPath = source.localPath;
+    if (localPath.toLowerCase().endsWith(".zip")) {
+      return path.resolve(process.cwd(), buildDefaultExportFilename(session.command, localPath));
+    }
+    return path.join(path.dirname(localPath), buildDefaultExportFilename(session.command, localPath));
+  }
+
+  const directUrdfPath = session.args.get("urdf");
+  if (typeof directUrdfPath === "string" && directUrdfPath.trim().length > 0) {
+    return path.join(path.dirname(directUrdfPath), buildDefaultExportFilename(session.command, directUrdfPath));
+  }
+
+  const sourcePath = session.args.get("path");
+  if (typeof sourcePath === "string" && sourcePath.trim().length > 0) {
+    const localPath = detectLocalPathDrop(sourcePath);
+    if (localPath?.isDirectory) {
+      const entryPath = session.args.get("entry");
+      const sourceName =
+        typeof entryPath === "string" && entryPath.trim().length > 0 ? entryPath : path.basename(sourcePath);
+      return path.join(path.resolve(sourcePath), path.dirname(String(sourceName)), buildDefaultExportFilename(session.command, String(sourceName)));
+    }
+    return path.join(path.dirname(path.resolve(sourcePath)), buildDefaultExportFilename(session.command, sourcePath));
+  }
+
+  const lastUrdfPath = state.lastUrdfPath;
+  if (lastUrdfPath) {
+    return path.join(path.dirname(lastUrdfPath), buildDefaultExportFilename(session.command, lastUrdfPath));
+  }
+
+  return null;
+};
+
+const syncSuggestedExportOutPath = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession,
+  feedback?: ShellFeedback[]
+) => {
+  const suggestedOutPath = deriveSuggestedExportOutPath(state, session);
+  if (!suggestedOutPath) {
+    return;
+  }
+
+  const currentOutPath = session.args.get("out");
+  if (typeof currentOutPath === "string" && currentOutPath.trim().length > 0 && !session.inheritedKeys.has("out")) {
+    return;
+  }
+
+  if (currentOutPath === suggestedOutPath) {
+    session.inheritedKeys.add("out");
+    return;
+  }
+
+  session.args.set("out", suggestedOutPath);
+  session.inheritedKeys.add("out");
+  pushFeedback(feedback, "info", `export target ${quoteForPreview(suggestedOutPath)}`);
+};
+
 const validateOptionValue = (session: ShellSession, key: string, rawValue: string): string | null => {
   const trimmed =
     key === "github"
@@ -897,6 +1064,7 @@ const validateOptionValue = (session: ShellSession, key: string, rawValue: strin
 };
 
 const getPendingValuePrompt = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
   session: ShellSession,
   key: string,
   slashName: string
@@ -984,11 +1152,12 @@ const getPendingValuePrompt = (
   }
 
   if (key === "out") {
+    const suggestedOutPath = deriveSuggestedExportOutPath(state, session);
     return {
       key,
       slashName,
       title: "Output file path",
-      examples: ["./robot.fixed.urdf"],
+      examples: suggestedOutPath ? [suggestedOutPath] : ["./robot.fixed.urdf"],
       notes: [],
       expectsPath: true,
     };
@@ -1048,6 +1217,7 @@ const isPathLikeOption = (session: ShellSession, key: string): boolean =>
   getOptionSpecByKey(session, key)?.isFilesystemPath === true;
 
 const setSessionValue = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
   session: ShellSession,
   key: string,
   rawValue: string,
@@ -1066,6 +1236,7 @@ const setSessionValue = (
   clearMutuallyExclusiveArgs(session, key);
   session.args.set(key, value);
   session.inheritedKeys.delete(key);
+  syncSuggestedExportOutPath(state, session, feedback);
   pushFeedback(feedback, "success", `[set] --${key} ${quoteForPreview(value)}`);
   return true;
 };
@@ -1744,6 +1915,105 @@ const summarizeOrientationResult = (
   return {
     title: "orientation",
     kind: (payload.confidence ?? 0) >= 0.8 ? "success" : "info",
+    lines,
+  };
+};
+
+const summarizeMjcfExportResult = (
+  urdfPath: string,
+  payload: {
+    outPath?: string | null;
+    warnings: string[];
+    stats: {
+      bodiesCreated: number;
+      jointsConverted: number;
+      geometriesConverted: number;
+    };
+  }
+): AutoPreviewPanel => {
+  const lines = [`source ${quoteForPreview(urdfPath)}`];
+
+  if (payload.outPath) {
+    lines.push(`exported MJCF to ${quoteForPreview(payload.outPath)}`);
+  } else {
+    lines.push("MJCF export ready");
+    lines.push("set /out if you want to write the file");
+  }
+
+  lines.push(
+    `${formatCount(payload.stats.bodiesCreated, "body")}  ${formatCount(payload.stats.jointsConverted, "joint")}  ${formatCount(payload.stats.geometriesConverted, "geometry")}`
+  );
+
+  for (const warning of payload.warnings.slice(0, 2)) {
+    lines.push(warning);
+  }
+
+  return {
+    title: "convert",
+    kind: payload.warnings.length > 0 ? "info" : "success",
+    lines,
+  };
+};
+
+const summarizeUsdExportResult = (
+  session: ShellSession,
+  payload: {
+    outputPath: string | null;
+    entryPath: string | null;
+    warnings: string[];
+    stats: {
+      linksConverted: number;
+      jointsConverted: number;
+      visualsConverted: number;
+      collisionsConverted: number;
+      inlineMeshesConverted: number;
+      unsupportedMeshes: number;
+    };
+  }
+): AutoPreviewPanel => {
+  const lines: string[] = [];
+  const directUrdfPath = session.args.get("urdf");
+  const sourcePath = session.args.get("path");
+  const sourceValue =
+    typeof directUrdfPath === "string" && directUrdfPath.trim().length > 0
+      ? directUrdfPath
+      : typeof sourcePath === "string" && sourcePath.trim().length > 0
+        ? sourcePath
+        : null;
+
+  if (sourceValue) {
+    lines.push(`source ${quoteForPreview(sourceValue)}`);
+  }
+
+  if (payload.entryPath) {
+    lines.push(`entry ${payload.entryPath}`);
+  }
+
+  if (payload.outputPath) {
+    lines.push(`exported USD to ${quoteForPreview(payload.outputPath)}`);
+  } else {
+    lines.push("USD export ready");
+    lines.push("set /out if you want to write the file");
+  }
+
+  lines.push(
+    `${formatCount(payload.stats.linksConverted, "link")}  ${formatCount(payload.stats.jointsConverted, "joint")}  ${formatCount(payload.stats.visualsConverted, "visual")}  ${formatCount(payload.stats.collisionsConverted, "collision")}`
+  );
+
+  if (payload.stats.inlineMeshesConverted > 0) {
+    lines.push(`${formatCount(payload.stats.inlineMeshesConverted, "mesh")} converted inline`);
+  }
+  if (payload.stats.unsupportedMeshes > 0) {
+    lines.push(`${formatCount(payload.stats.unsupportedMeshes, "mesh")} still need attention`);
+  }
+
+  for (const warning of payload.warnings.slice(0, 2)) {
+    lines.push(warning);
+  }
+
+  return {
+    title: "convert",
+    kind: payload.warnings.length > 0 || payload.stats.unsupportedMeshes > 0 ? "info" : "success",
     lines,
   };
 };
@@ -3084,6 +3354,35 @@ const getShellExecutionSuccessPanel = (
       const urdfPath = session.args.get("urdf");
       return payload && typeof urdfPath === "string" ? summarizeOrientationResult(payload, urdfPath) : null;
     }
+    case "urdf-to-mjcf": {
+      const payload = parseExecutionJson<{
+        outPath?: string | null;
+        warnings: string[];
+        stats: {
+          bodiesCreated: number;
+          jointsConverted: number;
+          geometriesConverted: number;
+        };
+      }>(execution);
+      const urdfPath = session.args.get("urdf");
+      return payload && typeof urdfPath === "string" ? summarizeMjcfExportResult(urdfPath, payload) : null;
+    }
+    case "urdf-to-usd": {
+      const payload = parseExecutionJson<{
+        outputPath: string | null;
+        entryPath: string | null;
+        warnings: string[];
+        stats: {
+          linksConverted: number;
+          jointsConverted: number;
+          visualsConverted: number;
+          collisionsConverted: number;
+          inlineMeshesConverted: number;
+          unsupportedMeshes: number;
+        };
+      }>(execution);
+      return payload ? summarizeUsdExportResult(session, payload) : null;
+    }
     default:
       return null;
   }
@@ -3251,6 +3550,8 @@ const createSession = (
     }
   }
 
+  syncSuggestedExportOutPath(state, session, feedback);
+
   return session;
 };
 
@@ -3280,6 +3581,11 @@ const listAvailableSlashCommands = (state: ShellState): string[] => {
   return [
     ...new Set([
       ...getRootMenuEntries(state).map((entry) => entry.name),
+      ...ROOT_TASKS.flatMap((task) =>
+        getRootTaskActionDefinitions(task.name)
+          .map((entry) => entry.name)
+          .filter((name, index, array) => array.indexOf(name) === index)
+      ),
       ...SHELL_BUILTIN_COMMANDS.map((entry) => entry.name),
       ...HIDDEN_SHELL_COMMAND_NAMES,
       ...CLI_HELP_SECTIONS.flatMap((section) => section.commands),
@@ -3365,6 +3671,7 @@ const createCompleter = (state: ShellState) => {
 };
 
 const openPendingForSession = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
   session: ShellSession,
   pending: RootTaskActionDefinition["openPending"] | undefined
 ) => {
@@ -3374,7 +3681,7 @@ const openPendingForSession = (
   if (pending.onlyIfMissing && session.args.has(pending.key)) {
     return;
   }
-  session.pending = getPendingValuePrompt(session, pending.key, pending.slashName);
+  session.pending = getPendingValuePrompt(state, session, pending.key, pending.slashName);
 };
 
 const inferFreeformSessionTarget = (
@@ -3677,7 +3984,7 @@ const startRootTaskAction = (
   clearXacroRetry(state);
   state.session = createSession(action.command, state, action.sessionLabel, feedback);
   if (state.session) {
-    openPendingForSession(state.session, action.openPending);
+    openPendingForSession(state, state.session, action.openPending);
   }
 };
 
@@ -3691,7 +3998,7 @@ const startRootShellCommand = (
   clearXacroRetry(state);
   state.session = createSession(entry.command, state, entry.sessionLabel, feedback);
   if (state.session) {
-    openPendingForSession(state.session, entry.openPending);
+    openPendingForSession(state, state.session, entry.openPending);
   }
 };
 
@@ -3748,6 +4055,21 @@ const handleRootSlashCommand = (
       state.rootTask = null;
       return;
     }
+    if (state.session?.pending) {
+      printPendingValuePrompt(state.session.pending);
+      return;
+    }
+    if (state.session) {
+      printSessionOptions(state, state.session);
+    }
+    return;
+  }
+
+  const rootTaskAction = findUniqueRootTaskAction(slashCommand);
+  if (rootTaskAction) {
+    const feedback: ShellFeedback[] = [];
+    startRootTaskAction(rootTaskAction.task, rootTaskAction.action, state, feedback);
+    flushFeedback(feedback);
     if (state.session?.pending) {
       printPendingValuePrompt(state.session.pending);
       return;
@@ -3972,7 +4294,7 @@ const handleSessionSlashCommand = (
 
   if (inlineValue) {
     const feedback: ShellFeedback[] = [];
-    if (setSessionValue(session, target.key, inlineValue, feedback)) {
+    if (setSessionValue(state, session, target.key, inlineValue, feedback)) {
       session.pending = null;
       flushFeedback(feedback);
       const { automation, preview } = applyValueChangeEffects(state, session, target.key);
@@ -4004,7 +4326,7 @@ const handleSessionSlashCommand = (
     return;
   }
 
-  session.pending = getPendingValuePrompt(session, target.key, slashCommand);
+  session.pending = getPendingValuePrompt(state, session, target.key, slashCommand);
   printPendingValuePrompt(session.pending);
 };
 
@@ -4015,7 +4337,7 @@ const handlePendingValue = (input: string, state: ShellState) => {
   }
 
   const feedback: ShellFeedback[] = [];
-  if (setSessionValue(session, session.pending.key, input, feedback)) {
+  if (setSessionValue(state, session, session.pending.key, input, feedback)) {
     const changedKey = session.pending.key;
     session.pending = null;
     flushFeedback(feedback);
@@ -4050,6 +4372,7 @@ const handlePendingValue = (input: string, state: ShellState) => {
 };
 
 const applyFreeformInputToSession = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
   session: ShellSession,
   rawValue: string,
   feedback?: ShellFeedback[]
@@ -4059,7 +4382,7 @@ const applyFreeformInputToSession = (
     return null;
   }
 
-  if (!setSessionValue(session, target.key, target.value, feedback)) {
+  if (!setSessionValue(state, session, target.key, target.value, feedback)) {
     return null;
   }
 
@@ -4081,7 +4404,7 @@ const applyFreeformInputToRootState = (
 
   state.rootTask = null;
   state.session = createSession(plan.command, state, plan.label, feedback);
-  if (!state.session || !setSessionValue(state.session, plan.key, plan.value, feedback)) {
+  if (!state.session || !setSessionValue(state, state.session, plan.key, plan.value, feedback)) {
     state.session = null;
     return null;
   }
@@ -5020,7 +5343,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       }
     } else if (session) {
       const feedback: ShellFeedback[] = [];
-      const applied = applyFreeformInputToSession(session, line, feedback);
+      const applied = applyFreeformInputToSession(state, session, line, feedback);
       if (applied) {
         const automated = runDirectInputAutomation(state, applied.session, applied.key);
         if (automated) {
@@ -5698,7 +6021,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if (inlineValue) {
       const feedback: ShellFeedback[] = [];
-      if (setSessionValue(session, target.key, inlineValue, feedback)) {
+      if (setSessionValue(state, session, target.key, inlineValue, feedback)) {
         session.pending = null;
         const { automation, preview } = runBusyOperation(
           getBusyStateForSession(session, target.key),
@@ -5726,7 +6049,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return true;
     }
 
-    session.pending = getPendingValuePrompt(session, target.key, slashCommand);
+    session.pending = getPendingValuePrompt(state, session, target.key, slashCommand);
     view.notice = {
       kind: session.pending.notes.length > 0 ? "warning" : "info",
       text: [
@@ -5752,7 +6075,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     const feedback: ShellFeedback[] = [];
-    if (setSessionValue(session, session.pending.key, view.input, feedback)) {
+    if (setSessionValue(state, session, session.pending.key, view.input, feedback)) {
       pushTimelineUserEntry(view, `/${session.pending.slashName}${formatInlineValue(view.input)}`);
       const changedKey = session.pending.key;
       session.pending = null;
@@ -5947,7 +6270,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     if (state.session) {
       const feedback: ShellFeedback[] = [];
       const submittedInput = view.input.trim();
-      const applied = applyFreeformInputToSession(state.session, view.input, feedback);
+      const applied = applyFreeformInputToSession(state, state.session, view.input, feedback);
       if (applied) {
         const automated = runBusyOperation(
           getBusyStateForSession(applied.session, applied.key),
