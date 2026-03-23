@@ -1,24 +1,38 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCandidateDetails = exports.detectSuggestedAction = exports.collectAttentionLines = exports.getHealthStatusLine = exports.getValidationStatusLine = exports.appendSuggestedActionLines = exports.formatAttentionDetail = exports.buildFixMeshPathsSuggestion = exports.buildRepairMeshRefsSuggestion = void 0;
+exports.getCandidateDetails = exports.detectSuggestedAction = exports.hasAttentionIssues = exports.collectAttentionLines = exports.getHealthStatusLine = exports.getValidationStatusLine = exports.appendSuggestedActionLines = exports.formatAttentionDetail = exports.buildReviewAttentionSuggestion = exports.buildFixMeshPathsSuggestion = exports.buildRepairMeshRefsSuggestion = void 0;
 const fs = require("node:fs");
 const fixMeshPaths_1 = require("../mesh/fixMeshPaths");
 const buildRepairMeshRefsSuggestion = () => ({
     kind: "repair-mesh-refs",
     summary: "mesh references need attention",
     recommendedLine: "recommended: repair mesh references",
-    prompt: "repair mesh references now?  Enter yes  Esc not now",
+    prompt: "repair mesh references now?",
     acceptLabel: "repair mesh references",
+    acceptOptionLabel: "Repair now",
+    skipOptionLabel: "Not now",
 });
 exports.buildRepairMeshRefsSuggestion = buildRepairMeshRefsSuggestion;
 const buildFixMeshPathsSuggestion = () => ({
     kind: "fix-mesh-paths",
     summary: "mesh paths need attention",
     recommendedLine: "recommended: repair mesh paths",
-    prompt: "repair mesh paths now?  Enter yes  Esc not now",
+    prompt: "repair mesh paths now?",
     acceptLabel: "repair mesh paths",
+    acceptOptionLabel: "Repair now",
+    skipOptionLabel: "Not now",
 });
 exports.buildFixMeshPathsSuggestion = buildFixMeshPathsSuggestion;
+const buildReviewAttentionSuggestion = () => ({
+    kind: "review-attention",
+    summary: "some checks still need attention",
+    recommendedLine: "recommended: review the remaining issues",
+    prompt: "review the remaining issues now?",
+    acceptLabel: "review the remaining issues",
+    acceptOptionLabel: "Review now",
+    skipOptionLabel: "Later",
+});
+exports.buildReviewAttentionSuggestion = buildReviewAttentionSuggestion;
 const formatAttentionDetail = (message, context) => context ? `${context}: ${message}` : message;
 exports.formatAttentionDetail = formatAttentionDetail;
 const appendSuggestedActionLines = (lines, suggestedAction, fallbackLine) => {
@@ -66,6 +80,11 @@ const collectAttentionLines = (validationIssues = [], healthFindings = [], limit
     return lines;
 };
 exports.collectAttentionLines = collectAttentionLines;
+const hasAttentionIssues = (payload) => !payload.validation.isValid ||
+    payload.validation.issues.length > 0 ||
+    payload.health.summary.errors > 0 ||
+    payload.health.summary.warnings > 0;
+exports.hasAttentionIssues = hasAttentionIssues;
 const detectSuggestedAction = (state, options = {}) => {
     const source = state.loadedSource;
     if ((options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 &&

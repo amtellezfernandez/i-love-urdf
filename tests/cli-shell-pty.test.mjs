@@ -111,6 +111,67 @@ ptyTest("TTY shell exposes and accepts the repair recommendation prompt", async 
   }
 });
 
+ptyTest("TTY shell keeps repair recommendations modal until Enter or Esc", async () => {
+  const tempDir = createTempDir("ilu-pty-modal-");
+  const brokenUrdfPath = path.join(tempDir, "broken.urdf");
+  fs.writeFileSync(
+    brokenUrdfPath,
+    '<robot name="broken"><link name="base"><visual><geometry><mesh filename="meshes\\\\part.stl"/></geometry></visual></link></robot>'
+  );
+
+  try {
+    const result = await runPtyShellSession({
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+      },
+      steps: [
+        { delayMs: 150, data: `${brokenUrdfPath}\n` },
+        { delayMs: 1_100, data: "/" },
+        { delayMs: 450, data: "\u0003" },
+      ],
+      timeoutMs: 10_000,
+    });
+
+    assert.equal(result.code, 0);
+    const promptMatches = result.sanitizedOutput.match(/repair mesh paths now\?/gi) ?? [];
+    assert.ok(promptMatches.length >= 2, "expected the repair prompt to persist after typed input");
+    assert.match(result.sanitizedOutput, /\[Enter\]\s+Repair now\s+\[Esc\]\s+Not now/i);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+ptyTest("TTY shell offers a remaining-issues review after a partial repair", async () => {
+  const tempDir = createTempDir("ilu-pty-review-");
+  const brokenUrdfPath = path.join(tempDir, "broken.urdf");
+  fs.writeFileSync(
+    brokenUrdfPath,
+    '<robot name="broken"><link name="base"><inertial><mass value="0"/><origin xyz="0 0 0"/><inertia ixx="1" ixy="0" ixz="0" iyy="1" iyz="0" izz="1"/></inertial><visual><geometry><mesh filename="meshes\\\\part.stl"/></geometry></visual></link></robot>'
+  );
+
+  try {
+    const result = await runPtyShellSession({
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+      },
+      steps: [
+        { delayMs: 150, data: `${brokenUrdfPath}\n` },
+        { delayMs: 1_100, data: "\r" },
+        { delayMs: 1_100, data: "\r" },
+        { delayMs: 1_100, data: "\u0003" },
+      ],
+      timeoutMs: 12_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /review the remaining issues now\?/i);
+    assert.match(result.sanitizedOutput, /\[Enter\]\s+Review now/i);
+    assert.match(result.sanitizedOutput, /reviewing the remaining issues\.\.\./i);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 ptyTest("TTY shell exits cleanly on Ctrl+C", async () => {
   const result = await runPtyShellSession({
     env: {

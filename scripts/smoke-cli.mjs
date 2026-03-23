@@ -1390,6 +1390,12 @@ fs.writeFileSync(
   "<robot name=\"broken_robot\"><link name=\"base\"><visual><geometry><mesh filename=\"meshes\\\\part.stl\"/></geometry></visual></link></robot>",
   "utf8"
 );
+const brokenMeshWithMassUrdfPath = path.join(shellDropDir, "broken-mesh-with-mass.urdf");
+fs.writeFileSync(
+  brokenMeshWithMassUrdfPath,
+  "<robot name=\"broken_robot\"><link name=\"base\"><inertial><mass value=\"0\"/><origin xyz=\"0 0 0\"/><inertia ixx=\"1\" ixy=\"0\" ixz=\"0\" iyy=\"1\" iyz=\"0\" izz=\"1\"/></inertial><visual><geometry><mesh filename=\"meshes\\\\part.stl\"/></geometry></visual></link></robot>",
+  "utf8"
+);
 const multiCandidateDir = path.join(shellDropDir, "multi-candidate");
 fs.mkdirSync(path.join(multiCandidateDir, "robots"), { recursive: true });
 fs.writeFileSync(
@@ -1547,7 +1553,8 @@ if (
   !suggestedMeshRepairTranscript.includes("mesh paths need attention") ||
   !suggestedMeshRepairTranscript.includes("recommended: repair mesh paths") ||
   !suggestedMeshRepairTranscript.includes("repair mesh paths now?") ||
-  !suggestedMeshRepairTranscript.includes("applying the recommended fix") ||
+  !suggestedMeshRepairTranscript.includes("[Enter] Repair now  [n] Not now") ||
+  !suggestedMeshRepairTranscript.includes("repairing mesh paths...") ||
   !suggestedMeshRepairTranscript.includes("mesh paths repaired") ||
   !suggestedMeshRepairTranscript.includes("repaired mesh paths")
 ) {
@@ -1563,10 +1570,25 @@ if (
   !suggestedRepoRepairTranscript.includes("mesh references need attention") ||
   !suggestedRepoRepairTranscript.includes("recommended: repair mesh references") ||
   !suggestedRepoRepairTranscript.includes("repair mesh references now?") ||
+  !suggestedRepoRepairTranscript.includes("[Enter] Repair now  [n] Not now") ||
   !suggestedRepoRepairTranscript.includes("mesh references repaired") ||
   !suggestedRepoRepairTranscript.includes("repaired mesh references")
 ) {
   throw new Error("ilu shell suggested repo mesh repair smoke test failed");
+}
+
+const remainingIssuesTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+  cwd: root,
+  encoding: "utf8",
+  input: `${brokenMeshWithMassUrdfPath}\n\n\n/exit\n`,
+});
+if (
+  !remainingIssuesTranscript.includes("review the remaining issues now?") ||
+  !remainingIssuesTranscript.includes("[Enter] Review now  [n] Later") ||
+  !remainingIssuesTranscript.includes("remaining issues reviewed") ||
+  !remainingIssuesTranscript.includes("investigation")
+) {
+  throw new Error("ilu shell remaining-issues review smoke test failed");
 }
 
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {

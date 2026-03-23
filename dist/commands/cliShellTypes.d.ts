@@ -28,11 +28,13 @@ export type LoadedSourceContext = {
     repositoryUrdfPath?: string;
 };
 export type SuggestedActionPrompt = {
-    kind: "repair-mesh-refs" | "fix-mesh-paths";
+    kind: "repair-mesh-refs" | "fix-mesh-paths" | "review-attention";
     summary: string;
     recommendedLine: string;
     prompt: string;
     acceptLabel: string;
+    acceptOptionLabel: string;
+    skipOptionLabel: string;
 };
 export type ShellState = {
     session: ShellSession | null;

@@ -10,16 +10,30 @@ export const buildRepairMeshRefsSuggestion = (): SuggestedActionPrompt => ({
   kind: "repair-mesh-refs",
   summary: "mesh references need attention",
   recommendedLine: "recommended: repair mesh references",
-  prompt: "repair mesh references now?  Enter yes  Esc not now",
+  prompt: "repair mesh references now?",
   acceptLabel: "repair mesh references",
+  acceptOptionLabel: "Repair now",
+  skipOptionLabel: "Not now",
 });
 
 export const buildFixMeshPathsSuggestion = (): SuggestedActionPrompt => ({
   kind: "fix-mesh-paths",
   summary: "mesh paths need attention",
   recommendedLine: "recommended: repair mesh paths",
-  prompt: "repair mesh paths now?  Enter yes  Esc not now",
+  prompt: "repair mesh paths now?",
   acceptLabel: "repair mesh paths",
+  acceptOptionLabel: "Repair now",
+  skipOptionLabel: "Not now",
+});
+
+export const buildReviewAttentionSuggestion = (): SuggestedActionPrompt => ({
+  kind: "review-attention",
+  summary: "some checks still need attention",
+  recommendedLine: "recommended: review the remaining issues",
+  prompt: "review the remaining issues now?",
+  acceptLabel: "review the remaining issues",
+  acceptOptionLabel: "Review now",
+  skipOptionLabel: "Later",
 });
 
 export const formatAttentionDetail = (message: string, context?: string): string =>
@@ -88,6 +102,20 @@ export const collectAttentionLines = (
 
   return lines;
 };
+
+export const hasAttentionIssues = (payload: {
+  validation: {
+    isValid: boolean;
+    issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
+  };
+  health: {
+    summary: { errors: number; warnings: number; infos: number };
+  };
+}): boolean =>
+  !payload.validation.isValid ||
+  payload.validation.issues.length > 0 ||
+  payload.health.summary.errors > 0 ||
+  payload.health.summary.warnings > 0;
 
 export const detectSuggestedAction = (
   state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,

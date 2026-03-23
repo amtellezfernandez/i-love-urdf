@@ -51,12 +51,14 @@ import {
 } from "./cliShellConfig";
 import {
   appendSuggestedActionLines,
+  buildReviewAttentionSuggestion,
   collectAttentionLines,
   detectSuggestedAction,
   formatAttentionDetail,
   getCandidateDetails,
   getHealthStatusLine,
   getValidationStatusLine,
+  hasAttentionIssues,
 } from "./cliShellRecommendations";
 import type {
   AppliedFreeformInput,
@@ -1822,6 +1824,7 @@ const summarizeRepairResult = (
   },
   options: {
     unresolvedMeshRefs?: number;
+    suggestedAction?: SuggestedActionPrompt | null;
   } = {}
 ): AutoPreviewPanel => {
   const lines = [actionLine, "working copy ready", getValidationStatusLine(validation), getHealthStatusLine(health)];
@@ -1839,7 +1842,11 @@ const summarizeRepairResult = (
     lines.push("some mesh references still need attention");
   }
 
-  lines.push("next /analyze or paste another source");
+  appendSuggestedActionLines(
+    lines,
+    options.suggestedAction ?? null,
+    "next /analyze or paste another source"
+  );
 
   return {
     title: "repair",
@@ -1855,6 +1862,154 @@ const summarizeRepairResult = (
   };
 };
 
+const getActiveSuggestedAction = (
+  state: Pick<ShellState, "suggestedAction" | "session" | "rootTask" | "candidatePicker">
+): SuggestedActionPrompt | null =>
+  !state.session && !state.rootTask && !state.candidatePicker ? state.suggestedAction : null;
+
+const getSuggestedActionDecisionHint = (
+  suggestedAction: SuggestedActionPrompt,
+  mode: "tty" | "line" = "tty"
+): string =>
+  mode === "tty"
+    ? `Enter ${suggestedAction.acceptOptionLabel.toLowerCase()}. Esc skips.`
+    : `Press Enter to ${suggestedAction.acceptOptionLabel.toLowerCase()}. Type n to ${suggestedAction.skipOptionLabel.toLowerCase()}.`;
+
+const getSuggestedActionSkipMessage = (suggestedAction: SuggestedActionPrompt): string =>
+  suggestedAction.kind === "review-attention" ? "kept the current summary" : "kept the current working copy";
+
+const getFollowUpSuggestedAction = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  options: {
+    urdfPath: string;
+    selectedCandidate?: RepositoryPreviewCandidate;
+    validation: {
+      isValid: boolean;
+      issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
+    };
+    health: {
+      summary: { errors: number; warnings: number; infos: number };
+    };
+  }
+): SuggestedActionPrompt | null =>
+  detectSuggestedAction(state, {
+    selectedCandidate: options.selectedCandidate,
+    urdfPath: options.urdfPath,
+  }) ??
+  (hasAttentionIssues({
+    validation: options.validation,
+    health: options.health,
+  })
+    ? buildReviewAttentionSuggestion()
+    : null);
+
+const renderSuggestedActionChoiceLine = (
+  suggestedAction: SuggestedActionPrompt,
+  mode: "tty" | "line"
+): string =>
+  mode === "tty"
+    ? `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted(suggestedAction.acceptOptionLabel)}  ${SHELL_THEME.command("[Esc]")} ${SHELL_THEME.muted(suggestedAction.skipOptionLabel)}`
+    : `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted(suggestedAction.acceptOptionLabel)}  ${SHELL_THEME.command("[n]")} ${SHELL_THEME.muted(suggestedAction.skipOptionLabel)}`;
+
+const summarizeRemainingAttention = (
+  state: ShellState,
+  urdfPath: string
+): AutoAutomationResult => {
+  const validationExecution = executeCliCommand("validate", new Map([["urdf", urdfPath]]));
+  if (validationExecution.status !== 0) {
+    const panel = buildPreviewErrorPanel("investigation", validationExecution);
+    return {
+      panel,
+      notice: buildShellFailureNotice(panel, "could not review the remaining issues"),
+      clearSession: false,
+    };
+  }
+
+  const healthExecution = executeCliCommand("health-check", new Map([["urdf", urdfPath]]));
+  if (healthExecution.status !== 0) {
+    const panel = buildPreviewErrorPanel("investigation", healthExecution);
+    return {
+      panel,
+      notice: buildShellFailureNotice(panel, "could not review the remaining issues"),
+      clearSession: false,
+    };
+  }
+
+  const orientationExecution = executeCliCommand("guess-orientation", new Map([["urdf", urdfPath]]));
+  if (orientationExecution.status !== 0) {
+    const panel = buildPreviewErrorPanel("investigation", orientationExecution);
+    return {
+      panel,
+      notice: buildShellFailureNotice(panel, "could not review the remaining issues"),
+      clearSession: false,
+    };
+  }
+
+  const analysisExecution = executeCliCommand("analyze", new Map([["urdf", urdfPath]]));
+  if (analysisExecution.status !== 0) {
+    const panel = buildPreviewErrorPanel("investigation", analysisExecution);
+    return {
+      panel,
+      notice: buildShellFailureNotice(panel, "could not review the remaining issues"),
+      clearSession: false,
+    };
+  }
+
+  const validationPayload = parseExecutionJson<{
+    isValid: boolean;
+    issues: Array<{ level: "error" | "warning"; message: string; context?: string }>;
+  }>(validationExecution);
+  const healthPayload = parseExecutionJson<{
+    ok: boolean;
+    summary: { errors: number; warnings: number; infos: number };
+    findings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }>;
+    orientationGuess?: {
+      likelyUpAxis?: string | null;
+      likelyForwardAxis?: string | null;
+    };
+  }>(healthExecution);
+  const orientationPayload = parseExecutionJson<{
+    isValid: boolean;
+    likelyUpAxis?: string | null;
+    likelyForwardAxis?: string | null;
+    confidence?: number;
+    report?: { conflicts?: string[] };
+  }>(orientationExecution);
+  const analysisPayload = parseExecutionJson<{
+    isValid: boolean;
+    error?: string;
+    robotName: string | null;
+    linkNames: string[];
+    rootLinks: string[];
+    meshReferences: string[];
+    sensors?: unknown[];
+    jointHierarchy?: { orderedJoints?: unknown[] };
+  }>(analysisExecution);
+
+  if (!validationPayload || !healthPayload || !orientationPayload || !analysisPayload) {
+    const panel = buildPreviewErrorPanel("investigation", analysisExecution);
+    return {
+      panel,
+      notice: buildShellFailureNotice(panel, "could not review the remaining issues"),
+      clearSession: false,
+    };
+  }
+
+  state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+  return {
+    panel: summarizeInvestigateResult(
+      urdfPath,
+      validationPayload,
+      healthPayload,
+      analysisPayload,
+      orientationPayload,
+      state.suggestedAction
+    ),
+    notice: { kind: "info", text: "remaining issues reviewed" },
+    clearSession: false,
+  };
+};
+
 const getSuggestedActionBusyState = (
   suggestedAction: SuggestedActionPrompt
 ): {
@@ -1866,10 +2021,15 @@ const getSuggestedActionBusyState = (
         title: "repairing",
         lines: ["repairing mesh references...", "rerunning validation and health check..."],
       }
-    : {
-        title: "repairing",
-        lines: ["repairing mesh paths...", "rerunning validation and health check..."],
-      };
+    : suggestedAction.kind === "fix-mesh-paths"
+      ? {
+          title: "repairing",
+          lines: ["repairing mesh paths...", "rerunning validation and health check..."],
+        }
+      : {
+          title: "reviewing",
+          lines: ["reviewing the remaining issues...", "summarizing what to fix next..."],
+        };
 
 const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
   const suggestedAction = state.suggestedAction;
@@ -1881,6 +2041,19 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       notice: { kind: "info", text: getRootIdleMessage(state) },
       clearSession: false,
     };
+  }
+
+  if (suggestedAction.kind === "review-attention") {
+    const activeUrdfPath = state.loadedSource?.urdfPath || state.lastUrdfPath;
+    if (!activeUrdfPath) {
+      return {
+        panel: createOutputPanel("investigation", "could not find a loaded URDF", "error"),
+        notice: { kind: "error", text: "review could not start" },
+        clearSession: false,
+      };
+    }
+
+    return summarizeRemainingAttention(state, activeUrdfPath);
   }
 
   if (suggestedAction.kind === "repair-mesh-refs") {
@@ -1945,9 +2118,19 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       };
     }
 
+    state.suggestedAction =
+      detectSuggestedAction(state, { urdfPath: workingUrdfPath }) ??
+      (hasAttentionIssues({
+        validation: validationPayload,
+        health: healthPayload,
+      })
+        ? buildReviewAttentionSuggestion()
+        : null);
+
     return {
       panel: summarizeRepairResult("repaired mesh references", validationPayload, healthPayload, {
         unresolvedMeshRefs: repairPayload.unresolved.length,
+        suggestedAction: state.suggestedAction,
       }),
       notice: {
         kind:
@@ -1994,8 +2177,19 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       };
     }
 
+    state.suggestedAction =
+      detectSuggestedAction(state, { urdfPath: workingUrdfPath }) ??
+      (hasAttentionIssues({
+        validation: validationPayload,
+        health: healthPayload,
+      })
+        ? buildReviewAttentionSuggestion()
+        : null);
+
     return {
-      panel: summarizeRepairResult("repaired mesh paths", validationPayload, healthPayload),
+      panel: summarizeRepairResult("repaired mesh paths", validationPayload, healthPayload, {
+        suggestedAction: state.suggestedAction,
+      }),
       notice: {
         kind:
           validationPayload.isValid &&
@@ -2211,9 +2405,11 @@ const executeLoadSourceChecks = (
     };
   }
 
-  state.suggestedAction = detectSuggestedAction(state, {
+  state.suggestedAction = getFollowUpSuggestedAction(state, {
     selectedCandidate: options.selectedCandidate,
     urdfPath: loadPayload.outPath,
+    validation: validationPayload,
+    health: healthPayload,
   });
   const panel = summarizeAutoLoadChecks(loadPayload, validationPayload, healthPayload, {
     extractedArchivePath: options.extractedArchivePath,
@@ -2521,7 +2717,11 @@ const runDirectInputAutomation = (
       };
     }
 
-    state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+    state.suggestedAction = getFollowUpSuggestedAction(state, {
+      urdfPath,
+      validation: validationPayload,
+      health: healthPayload,
+    });
     const panel = summarizeDirectUrdfChecks(urdfPath, validationPayload, healthPayload, state.suggestedAction);
     return {
       panel,
@@ -2639,7 +2839,14 @@ const buildAutoPreviewPanel = (
     if (payload && urdfPath) {
       state.lastUrdfPath = urdfPath;
       rememberDirectUrdfSource(state, urdfPath);
-      state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+      state.suggestedAction = getFollowUpSuggestedAction(state, {
+        urdfPath,
+        validation: {
+          isValid: true,
+          issues: [],
+        },
+        health: payload,
+      });
       return summarizeHealthPreview(payload, urdfPath, state.suggestedAction);
     }
     return buildPreviewErrorPanel("health", execution);
@@ -2765,7 +2972,11 @@ const executeSessionCommand = (
       }
 
       updateRememberedUrdfPath(state, session);
-      state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+      state.suggestedAction = getFollowUpSuggestedAction(state, {
+        urdfPath,
+        validation: validationPayload,
+        health: healthPayload,
+      });
       return {
         preview: analysisExecution.preview,
         stdout: "",
@@ -4382,10 +4593,6 @@ const getPromptPlaceholder = (state: ShellState): string => {
     return "Enter updates now or Esc skips";
   }
 
-  if (!state.session && !state.rootTask && !state.candidatePicker && state.suggestedAction) {
-    return "Enter accepts the recommendation";
-  }
-
   if (state.candidatePicker) {
     return "arrows choose a match, Enter loads it";
   }
@@ -4437,6 +4644,7 @@ const getPromptPlaceholder = (state: ShellState): string => {
 const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   const columns = process.stdout.columns ?? 100;
   const rows = process.stdout.rows ?? 24;
+  const activeSuggestedAction = getActiveSuggestedAction(state);
   const menuEntries = getSlashMenuEntries(state, view.input);
   const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
   view.menuIndex = menuWindow.selectedIndex;
@@ -4499,8 +4707,9 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     lines.push(`  ${SHELL_THEME.icon("↑")} ${SHELL_THEME.muted(formatUpdatePromptLine(state.updatePrompt))}`);
   }
 
-  if (state.suggestedAction && !view.busy && !state.session && !state.rootTask && !state.candidatePicker) {
-    lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(state.suggestedAction.prompt)}`);
+  if (activeSuggestedAction && !view.busy) {
+    lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(activeSuggestedAction.prompt)}`);
+    lines.push(`  ${renderSuggestedActionChoiceLine(activeSuggestedAction, "tty")}`);
   }
 
   if (shouldRenderInlineNotice(view)) {
@@ -4512,6 +4721,7 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   const shouldShowPlaceholder =
     view.input.length === 0 &&
     !view.busy &&
+    !activeSuggestedAction &&
     (view.timeline.length === 0 || Boolean(state.session) || Boolean(state.candidatePicker));
   const placeholder = shouldShowPlaceholder ? getPromptPlaceholder(state) : "";
   lines.push(
@@ -4715,9 +4925,42 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     const session = state.session;
     const isSlashInput = shouldTreatAsSlashInput(line, state);
     const bangCommand = parseBangInput(line);
+    const activeSuggestedAction = getActiveSuggestedAction(state);
 
-    if (state.suggestedAction && trimmed.length > 0) {
-      clearSuggestedAction(state);
+    if (activeSuggestedAction) {
+      const normalizedDecision = trimmed.toLowerCase();
+      if (!trimmed || normalizedDecision === "y" || normalizedDecision === "yes") {
+        process.stdout.write(`${SHELL_THEME.muted(getSuggestedActionBusyState(activeSuggestedAction).lines[0])}\n`);
+        const result = runSuggestedAction(state);
+        if (result.notice) {
+          writeFeedback(result.notice);
+        }
+        printOutputPanel(result.panel);
+      } else if (
+        normalizedDecision === "n" ||
+        normalizedDecision === "no" ||
+        normalizedDecision === "later" ||
+        normalizedDecision === "not now"
+      ) {
+        clearSuggestedAction(state);
+        writeFeedback({ kind: "info", text: getSuggestedActionSkipMessage(activeSuggestedAction) });
+      } else {
+        process.stdout.write(`${SHELL_THEME.muted(getSuggestedActionDecisionHint(activeSuggestedAction, "line"))}\n`);
+      }
+
+      const nextSuggestedAction = getActiveSuggestedAction(state);
+      if (!isClosed && nextSuggestedAction) {
+        process.stdout.write(`${SHELL_THEME.muted(nextSuggestedAction.prompt)}\n`);
+        process.stdout.write(`  ${renderSuggestedActionChoiceLine(nextSuggestedAction, "line")}\n`);
+      }
+
+      if (isClosed) {
+        break;
+      }
+
+      rl.setPrompt(formatShellPrompt(state));
+      rl.prompt();
+      continue;
     }
 
     if (bangCommand) {
@@ -4764,14 +5007,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
         }
       }
     } else if (!trimmed) {
-      if (!state.session && !state.rootTask && !state.candidatePicker && state.suggestedAction) {
-        process.stdout.write(`${SHELL_THEME.muted("applying the recommended fix...")}\n`);
-        const result = runSuggestedAction(state);
-        if (result.notice) {
-          writeFeedback(result.notice);
-        }
-        printOutputPanel(result.panel);
-      } else if (session) {
+      if (session) {
         if (!session.pending && getRequirementStatus(session).ready) {
           printSessionCommandExecution(state, executeSessionCommand(state, session), session);
         } else {
@@ -4850,8 +5086,10 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       }
     }
 
-    if (!isClosed && state.suggestedAction && !state.session && !state.rootTask && !state.candidatePicker) {
-      process.stdout.write(`${SHELL_THEME.muted(state.suggestedAction.prompt)}\n`);
+    const nextSuggestedAction = getActiveSuggestedAction(state);
+    if (!isClosed && nextSuggestedAction) {
+      process.stdout.write(`${SHELL_THEME.muted(nextSuggestedAction.prompt)}\n`);
+      process.stdout.write(`  ${renderSuggestedActionChoiceLine(nextSuggestedAction, "line")}\n`);
     }
 
     if (isClosed) {
@@ -5587,16 +5825,17 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return;
     }
 
-    if (
-      state.suggestedAction &&
-      !state.session &&
-      !state.rootTask &&
-      !state.candidatePicker &&
-      trimmed.length === 0
-    ) {
-      const acceptedAction = state.suggestedAction.acceptLabel;
+    const activeSuggestedAction = getActiveSuggestedAction(state);
+    if (activeSuggestedAction) {
+      if (trimmed.length !== 0) {
+        view.notice = { kind: "info", text: getSuggestedActionDecisionHint(activeSuggestedAction) };
+        setInput("");
+        return;
+      }
+
+      const acceptedAction = activeSuggestedAction.acceptLabel;
       pushTimelineUserEntry(view, `yes, ${acceptedAction}`);
-      const result = runBusyOperation(getSuggestedActionBusyState(state.suggestedAction), () => runSuggestedAction(state));
+      const result = runBusyOperation(getSuggestedActionBusyState(activeSuggestedAction), () => runSuggestedAction(state));
       view.notice = result.notice;
       view.output = result.panel;
       archiveAssistantStateToTimeline(view);
@@ -5891,6 +6130,8 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return;
     }
 
+    const activeSuggestedAction = getActiveSuggestedAction(state);
+
     if ((key.ctrl && key.name === "c") || input === "\u0003") {
       close();
       return;
@@ -5962,8 +6203,9 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return;
       }
 
-      if (state.suggestedAction && view.input.length === 0 && !state.session && !state.rootTask && !state.candidatePicker) {
+      if (activeSuggestedAction && view.input.length === 0) {
         clearSuggestedAction(state);
+        view.notice = { kind: "info", text: getSuggestedActionSkipMessage(activeSuggestedAction) };
         queueRender("navigation");
         return;
       }
@@ -6000,8 +6242,10 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       if (state.updatePrompt && !state.session && !state.rootTask && !state.candidatePicker && view.input.length === 0) {
         dismissUpdatePrompt(state);
       }
-      if (state.suggestedAction && !state.session && !state.rootTask && !state.candidatePicker) {
-        clearSuggestedAction(state);
+      if (activeSuggestedAction) {
+        view.notice = { kind: "info", text: getSuggestedActionDecisionHint(activeSuggestedAction) };
+        queueRender("navigation");
+        return;
       }
       setInput(`${view.input}${input}`);
       if (view.input.startsWith("/")) {
