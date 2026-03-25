@@ -55,6 +55,7 @@ exports.XACRO_RUNTIME_NOTICE = "xacro runtime not set. run !xacro, then retry";
 exports.SHELL_BUILTIN_COMMANDS = [
     { name: "help", summary: "Show slash commands for the current context." },
     { name: "visualize", summary: "Open the current ilu session in URDF Studio." },
+    { name: "visualize-stop", summary: "Stop the local URDF Studio started by ilu." },
     { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
     { name: "update", summary: "Install the latest ilu release." },
     { name: "clear", summary: "Clear the terminal." },
@@ -65,6 +66,7 @@ exports.SESSION_BUILTIN_COMMANDS = [
     { name: "show", summary: "Show the current command, values, and next step." },
     { name: "run", summary: "Run the current command." },
     { name: "visualize", summary: "Open the current ilu session in URDF Studio." },
+    { name: "visualize-stop", summary: "Stop the local URDF Studio started by ilu." },
     { name: "doctor", summary: "Show runtime, auth, and xacro diagnostics." },
     { name: "update", summary: "Install the latest ilu release." },
     { name: "reset", summary: "Clear the current command state." },

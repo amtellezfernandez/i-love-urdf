@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCandidateDetails = exports.detectSuggestedAction = exports.hasAttentionIssues = exports.collectAttentionLines = exports.getHealthStatusLine = exports.getValidationStatusLine = exports.appendSuggestedActionLines = exports.formatAttentionDetail = exports.buildAlignOrientationSuggestion = exports.buildReviewAttentionSuggestion = exports.buildFixMeshPathsSuggestion = exports.buildRepairMeshRefsSuggestion = void 0;
+exports.getCandidateDetails = exports.detectSuggestedAction = exports.hasAttentionIssues = exports.collectAttentionLines = exports.getHealthStatusLine = exports.getValidationStatusLine = exports.appendSuggestedActionLines = exports.formatAttentionDetail = exports.buildInstallVisualizerSuggestion = exports.buildOpenVisualizerSuggestion = exports.shouldPromptVisualizerBeforeSuggestedAction = exports.buildAlignOrientationSuggestion = exports.buildReviewAttentionSuggestion = exports.buildFixMeshPathsSuggestion = exports.buildRepairMeshRefsSuggestion = void 0;
 const fs = require("node:fs");
 const fixMeshPaths_1 = require("../mesh/fixMeshPaths");
 const buildRepairMeshRefsSuggestion = () => ({
@@ -45,6 +45,61 @@ const buildAlignOrientationSuggestion = (plan) => ({
     orientationPlan: plan,
 });
 exports.buildAlignOrientationSuggestion = buildAlignOrientationSuggestion;
+const describeVisualizerPreflightTarget = (suggestedAction) => suggestedAction.kind === "repair-mesh-refs"
+    ? "repairing mesh references"
+    : suggestedAction.kind === "fix-mesh-paths"
+        ? "repairing mesh paths"
+        : suggestedAction.kind === "align-orientation"
+            ? "aligning orientation"
+            : suggestedAction.kind === "apply-repo-fixes"
+                ? "applying shared repo fixes"
+                : "editing the working copy";
+const shouldPromptVisualizerBeforeSuggestedAction = (suggestedAction) => suggestedAction.kind !== "review-attention" && suggestedAction.kind !== "open-visualizer";
+exports.shouldPromptVisualizerBeforeSuggestedAction = shouldPromptVisualizerBeforeSuggestedAction;
+const buildOpenVisualizerSuggestion = (followUpAction = null) => followUpAction
+    ? {
+        kind: "open-visualizer",
+        summary: followUpAction.summary,
+        recommendedLine: `recommended: open URDF Studio before ${describeVisualizerPreflightTarget(followUpAction)}`,
+        prompt: `open URDF Studio before ${describeVisualizerPreflightTarget(followUpAction)}?`,
+        acceptLabel: "open URDF Studio",
+        acceptOptionLabel: "Open Studio",
+        skipOptionLabel: "Continue here",
+        followUpAction,
+    }
+    : {
+        kind: "open-visualizer",
+        summary: "review the robot in URDF Studio",
+        recommendedLine: "recommended: open URDF Studio for this robot",
+        prompt: "open URDF Studio for this robot now?",
+        acceptLabel: "open URDF Studio",
+        acceptOptionLabel: "Open Studio",
+        skipOptionLabel: "Not now",
+        followUpAction: null,
+    };
+exports.buildOpenVisualizerSuggestion = buildOpenVisualizerSuggestion;
+const buildInstallVisualizerSuggestion = (mode, followUpAction = null) => mode === "install"
+    ? {
+        kind: "install-visualizer",
+        summary: "URDF Studio is not installed yet",
+        recommendedLine: "recommended: install URDF Studio to visualize your modifications",
+        prompt: "install URDF Studio to visualize your modifications?",
+        acceptLabel: "install URDF Studio",
+        acceptOptionLabel: "Install Studio",
+        skipOptionLabel: "Not now",
+        followUpAction,
+    }
+    : {
+        kind: "install-visualizer",
+        summary: "URDF Studio still needs setup",
+        recommendedLine: "recommended: finish URDF Studio setup to visualize your modifications",
+        prompt: "finish URDF Studio setup to visualize your modifications?",
+        acceptLabel: "finish URDF Studio setup",
+        acceptOptionLabel: "Set Up Studio",
+        skipOptionLabel: "Not now",
+        followUpAction,
+    };
+exports.buildInstallVisualizerSuggestion = buildInstallVisualizerSuggestion;
 const formatAttentionDetail = (message, context) => context ? `${context}: ${message}` : message;
 exports.formatAttentionDetail = formatAttentionDetail;
 const appendSuggestedActionLines = (lines, suggestedAction, fallbackLine) => {

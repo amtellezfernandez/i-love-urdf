@@ -12,6 +12,9 @@ export declare const SHELL_BUILTIN_COMMANDS: readonly [{
     readonly name: "visualize";
     readonly summary: "Open the current ilu session in URDF Studio.";
 }, {
+    readonly name: "visualize-stop";
+    readonly summary: "Stop the local URDF Studio started by ilu.";
+}, {
     readonly name: "doctor";
     readonly summary: "Show runtime, auth, and xacro diagnostics.";
 }, {
@@ -34,6 +37,9 @@ export declare const SESSION_BUILTIN_COMMANDS: readonly [{
 }, {
     readonly name: "visualize";
     readonly summary: "Open the current ilu session in URDF Studio.";
+}, {
+    readonly name: "visualize-stop";
+    readonly summary: "Stop the local URDF Studio started by ilu.";
 }, {
     readonly name: "doctor";
     readonly summary: "Show runtime, auth, and xacro diagnostics.";

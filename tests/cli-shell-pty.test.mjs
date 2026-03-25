@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -12,6 +13,25 @@ import { rootDir } from "./helpers/loadDist.mjs";
 const ptyTest = supportsPtyShellTests ? test : test.skip;
 
 const createTempDir = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+const missingStudioRepoPath = path.join(os.tmpdir(), "ilu-missing-studio-repo");
+
+const isProcessAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const startHttpServer = () =>
+  new Promise((resolve) => {
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("ok");
+    });
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
 
 ptyTest("TTY shell keeps slash completion on Tab", async () => {
   const result = await runPtyShellSession({
@@ -46,6 +66,7 @@ ptyTest("TTY shell lets arrows pick a candidate entrypoint", async () => {
     const result = await runPtyShellSession({
       env: {
         ILU_DISABLE_UPDATE_CHECK: "1",
+        URDF_STUDIO_REPO: missingStudioRepoPath,
       },
       steps: [
         { delayMs: 150, data: `${tempDir}\n` },
@@ -194,7 +215,7 @@ ptyTest("TTY shell resumes the most recent session on startup", async () => {
   }
 });
 
-ptyTest("TTY shell exposes and accepts the repair recommendation prompt", async () => {
+ptyTest("TTY shell asks to open URDF Studio before the repair recommendation", async () => {
   const tempDir = createTempDir("ilu-pty-repair-");
   const brokenUrdfPath = path.join(tempDir, "broken.urdf");
   fs.writeFileSync(
@@ -206,9 +227,11 @@ ptyTest("TTY shell exposes and accepts the repair recommendation prompt", async 
     const result = await runPtyShellSession({
       env: {
         ILU_DISABLE_UPDATE_CHECK: "1",
+        URDF_STUDIO_REPO: missingStudioRepoPath,
       },
       steps: [
         { delayMs: 150, data: `${brokenUrdfPath}\n` },
+        { delayMs: 1_100, data: "\u001b" },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\u0003" },
       ],
@@ -216,9 +239,11 @@ ptyTest("TTY shell exposes and accepts the repair recommendation prompt", async 
     });
 
     assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /open URDF Studio before repairing mesh paths\?/i);
     assert.match(result.sanitizedOutput, /repair mesh paths now\?/i);
     assert.match(result.sanitizedOutput, /repairing mesh paths/i);
     assert.match(result.sanitizedOutput, /working urdf .*broken\.urdf/i);
+    assert.doesNotMatch(result.sanitizedOutput, /health check passed/i);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -245,6 +270,133 @@ ptyTest("TTY shell lets slash commands bypass recommendation prompts", async () 
   assert.match(result.sanitizedOutput, /press Enter or type \/run/i);
 });
 
+ptyTest("TTY shell offers Studio install when the visualizer is missing", async () => {
+  const yUpUrdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
+  const result = await runPtyShellSession({
+    env: {
+      ILU_DISABLE_UPDATE_CHECK: "1",
+      URDF_STUDIO_REPO: missingStudioRepoPath,
+      URDF_STUDIO_URL: "http://127.0.0.1:65534/",
+      URDF_STUDIO_API_URL: "http://127.0.0.1:65535/health",
+    },
+    steps: [
+      { delayMs: 150, data: `${yUpUrdfPath}\n` },
+      { delayMs: 1_100, data: "\r" },
+      { delayMs: 1_100, data: "\u0003" },
+    ],
+    timeoutMs: 12_000,
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.sanitizedOutput, /open URDF Studio before aligning orientation\?/i);
+  assert.match(result.sanitizedOutput, /install URDF Studio to visualize your modifications\?/i);
+  assert.doesNotMatch(result.sanitizedOutput, /loaded the source|source loaded\. review the checks/i);
+});
+
+ptyTest("TTY shell accepts the suggested orientation fix after skipping URDF Studio", async () => {
+  const yUpUrdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
+  const result = await runPtyShellSession({
+    env: {
+      ILU_DISABLE_UPDATE_CHECK: "1",
+      URDF_STUDIO_REPO: missingStudioRepoPath,
+    },
+    steps: [
+      { delayMs: 150, data: `${yUpUrdfPath}\n` },
+      { delayMs: 1_100, data: "\u001b" },
+      { delayMs: 1_100, data: "\r" },
+      { delayMs: 1_100, data: "\u0003" },
+    ],
+    timeoutMs: 12_000,
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.sanitizedOutput, /open URDF Studio before aligning orientation\?/i);
+  assert.match(result.sanitizedOutput, /align orientation to \+z-up \/ \+x-forward now\?/i);
+  assert.match(result.sanitizedOutput, /aligning orientation/i);
+  assert.match(result.sanitizedOutput, /working urdf .*research_wheeled_y_up\.urdf/i);
+  assert.doesNotMatch(result.sanitizedOutput, /loaded the source|source loaded\. review the checks/i);
+  assert.doesNotMatch(result.sanitizedOutput, /updated the working copy|working copy ready/i);
+});
+
+ptyTest("TTY shell asks whether to quit URDF Studio on Ctrl+C when Studio is open", async () => {
+  const tempDir = createTempDir("ilu-pty-visualizer-exit-");
+  const runtimeFile = path.join(tempDir, "studio-runtime.json");
+  const managedStudio = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000);"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  managedStudio.unref();
+  fs.writeFileSync(
+    runtimeFile,
+    `${JSON.stringify(
+      {
+        pid: managedStudio.pid,
+        studioRoot: tempDir,
+        webUrl: "http://127.0.0.1:1/",
+        apiHealthUrl: "http://127.0.0.1:2/health",
+        startedAt: new Date().toISOString(),
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  const webServer = await startHttpServer();
+  const apiServer = await startHttpServer();
+  const webAddress = webServer.address();
+  const apiAddress = apiServer.address();
+  const yUpUrdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
+
+  try {
+    assert.equal(typeof webAddress === "object" && webAddress ? webAddress.port > 0 : false, true);
+    assert.equal(typeof apiAddress === "object" && apiAddress ? apiAddress.port > 0 : false, true);
+
+    const result = await runPtyShellSession({
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+        ILU_STUDIO_RUNTIME_FILE: runtimeFile,
+        URDF_STUDIO_URL: `http://127.0.0.1:${webAddress.port}/`,
+        URDF_STUDIO_API_URL: `http://127.0.0.1:${apiAddress.port}/health`,
+      },
+      steps: [
+        { delayMs: 150, data: `${yUpUrdfPath}\n` },
+        { delayMs: 1_100, data: "\r" },
+        { delayMs: 1_100, data: "\u0003" },
+        { delayMs: 900, data: "\u001b" },
+      ],
+      timeoutMs: 12_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /quit URDF Studio/i);
+    assert.match(result.sanitizedOutput, /\[Enter\]\s+Keep Studio/i);
+    assert.match(result.sanitizedOutput, /\[Esc\]\s+Quit Studio/i);
+    assert.match(result.sanitizedOutput, /stopped URDF Studio/i);
+
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline && isProcessAlive(managedStudio.pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(isProcessAlive(managedStudio.pid), false);
+  } finally {
+    await new Promise((resolve) => webServer.close(resolve));
+    await new Promise((resolve) => apiServer.close(resolve));
+    if (isProcessAlive(managedStudio.pid)) {
+      try {
+        process.kill(-managedStudio.pid, "SIGKILL");
+      } catch {
+        try {
+          process.kill(managedStudio.pid, "SIGKILL");
+        } catch {
+          // Ignore final cleanup failures in tests.
+        }
+      }
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 ptyTest("TTY shell applies /align without opening the URDF manually", async () => {
   const yUpUrdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
   const result = await runPtyShellSession({
@@ -264,6 +416,7 @@ ptyTest("TTY shell applies /align without opening the URDF manually", async () =
   assert.match(result.sanitizedOutput, /aligning orientation/i);
   assert.match(result.sanitizedOutput, /\/align/i);
   assert.match(result.sanitizedOutput, /working urdf .*research_wheeled_y_up\.urdf/i);
+  assert.doesNotMatch(result.sanitizedOutput, /updated the working copy|working copy ready/i);
 });
 
 ptyTest("TTY shell offers a remaining-issues review after a partial repair", async () => {
@@ -278,9 +431,11 @@ ptyTest("TTY shell offers a remaining-issues review after a partial repair", asy
     const result = await runPtyShellSession({
       env: {
         ILU_DISABLE_UPDATE_CHECK: "1",
+        URDF_STUDIO_REPO: missingStudioRepoPath,
       },
       steps: [
         { delayMs: 150, data: `${brokenUrdfPath}\n` },
+        { delayMs: 1_100, data: "\u001b" },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\u0003" },
@@ -308,4 +463,5 @@ ptyTest("TTY shell exits cleanly on Ctrl+C", async () => {
   assert.equal(result.code, 0);
   assert.equal(result.signal, null);
   assert.match(result.sanitizedOutput, /urdf shell/i);
+  assert.doesNotMatch(result.output, /\u001b\[H\u001b\[J\n?$/);
 });

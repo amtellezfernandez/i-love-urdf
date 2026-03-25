@@ -119,6 +119,18 @@ test("four quarter turns recover the original joint axis and origin numerically"
   assertCloseVector(readJointOrigin(rotated), [1, 2, 3]);
 });
 
+test("orientation application honors negative source axis signs", () => {
+  const oriented = lib.applyOrientationToRobot(rotationInvariantUrdf, {
+    sourceUpAxis: "+z",
+    sourceForwardAxis: "-y",
+    targetUpAxis: "+z",
+    targetForwardAxis: "+x",
+  });
+
+  assertCloseVector(readJointAxis(oriented), [0, 1, 0]);
+  assertCloseVector(readJointOrigin(oriented), [-2, 1, 3]);
+});
+
 test("orientation application and normalize-robot agree on the repaired up-axis", () => {
   const oriented = lib.applyOrientationToRobot(wheeledRobotYUp, {
     sourceUpAxis: "y",

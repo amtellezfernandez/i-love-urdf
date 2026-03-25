@@ -15,7 +15,9 @@ export declare const writeIluSharedSession: (params: {
     loadedSource: IluSharedLoadedSource | null;
     lastUrdfPath: string;
 }) => IluSharedSessionSnapshot;
-export declare const applySharedSessionSnapshotToState: (state: ShellState, snapshot: IluSharedSessionSnapshot) => void;
+export declare const applySharedSessionSnapshotToState: (state: ShellState, snapshot: IluSharedSessionSnapshot, options?: {
+    resetVisualizerPrompt?: boolean;
+}) => void;
 export declare const persistShellSharedSession: (state: ShellState, options?: {
     sourceUrdfPath?: string;
     urdfContent?: string;
@@ -23,4 +25,4 @@ export declare const persistShellSharedSession: (state: ShellState, options?: {
 }) => IluSharedSessionSnapshot | null;
 export declare const attachShellToSharedSession: (state: ShellState, sessionId: string) => IluSharedSessionSnapshot;
 export declare const buildStudioSessionUrl: (sessionId: string) => string;
-export declare const openVisualizerForShellState: (state: ShellState) => AutoAutomationResult;
+export declare const openVisualizerForShellState: (state: ShellState) => Promise<AutoAutomationResult>;

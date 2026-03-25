@@ -7,7 +7,7 @@ exports.rotateRobot90Degrees = rotateRobot90Degrees;
 const xmlDom_1 = require("../xmlDom");
 const rotationMath_1 = require("./rotationMath");
 function axisSpecToVector(axis) {
-    const normalized = axis.startsWith("+") ? axis.slice(1) : axis;
+    const normalized = axis.startsWith("+") || axis.startsWith("-") ? axis.slice(1) : axis;
     const sign = axis.startsWith("-") ? -1 : 1;
     switch (normalized) {
         case "x":

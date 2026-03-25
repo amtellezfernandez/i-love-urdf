@@ -3,6 +3,9 @@ export declare const buildRepairMeshRefsSuggestion: () => SuggestedActionPrompt;
 export declare const buildFixMeshPathsSuggestion: () => SuggestedActionPrompt;
 export declare const buildReviewAttentionSuggestion: () => SuggestedActionPrompt;
 export declare const buildAlignOrientationSuggestion: (plan: OrientationSuggestedActionPlan) => SuggestedActionPrompt;
+export declare const shouldPromptVisualizerBeforeSuggestedAction: (suggestedAction: SuggestedActionPrompt) => boolean;
+export declare const buildOpenVisualizerSuggestion: (followUpAction?: SuggestedActionPrompt | null) => SuggestedActionPrompt;
+export declare const buildInstallVisualizerSuggestion: (mode: "install" | "setup", followUpAction?: SuggestedActionPrompt | null) => SuggestedActionPrompt;
 export declare const formatAttentionDetail: (message: string, context?: string) => string;
 export declare const appendSuggestedActionLines: (lines: string[], suggestedAction: SuggestedActionPrompt | null, fallbackLine: string) => void;
 export declare const getValidationStatusLine: (payload: {

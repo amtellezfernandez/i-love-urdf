@@ -1,13 +1,10 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as process from "node:process";
 import { buildStudioSessionUrl } from "../session/sharedSession";
+import { ensureStudioRunning, type StudioHandle } from "../studio/studioRuntime";
 
-const DEFAULT_STUDIO_ROOT = path.resolve(__dirname, "..", "..", "..", "..", "urdf-studio");
-const DEFAULT_WEB_URL = process.env.URDF_STUDIO_URL?.trim() || "http://127.0.0.1:5173/";
-const DEFAULT_API_URL = process.env.URDF_STUDIO_API_URL?.trim() || "http://127.0.0.1:8000/health";
-const STUDIO_START_TIMEOUT_MS = 60_000;
 const THUMB_READY_TIMEOUT_MS = 45_000;
 const THUMB_WINDOW_SIZE = "1400,1000";
 
@@ -57,36 +54,6 @@ const resolveChromeBinary = (): string | null => {
 const canUseStudioThumbnails = (): boolean =>
   !/^(1|true|yes)$/i.test(process.env.ILU_DISABLE_STUDIO_THUMBNAILS || "");
 
-const fetchOk = async (url: string): Promise<boolean> => {
-  try {
-    const response = await fetch(url, { redirect: "follow" });
-    return response.ok;
-  } catch {
-    return false;
-  }
-};
-
-const waitForUrl = async (url: string, timeoutMs: number): Promise<boolean> => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await fetchOk(url)) {
-      return true;
-    }
-    await sleep(500);
-  }
-  return false;
-};
-
-const resolveStudioRoot = (): string | null => {
-  const explicit = process.env.URDF_STUDIO_REPO?.trim();
-  if (explicit) {
-    const resolved = path.resolve(explicit);
-    return fs.existsSync(path.join(resolved, "package.json")) ? resolved : null;
-  }
-
-  return fs.existsSync(path.join(DEFAULT_STUDIO_ROOT, "package.json")) ? DEFAULT_STUDIO_ROOT : null;
-};
-
 const ensureDir = (dirPath: string) => {
   fs.mkdirSync(dirPath, { recursive: true });
 };
@@ -114,7 +81,7 @@ const waitForThumbReadyMarker = async (
         stdio: ["ignore", "pipe", "pipe"],
       }
     );
-    const output = `${result.stdout || ""}${result.stderr || ""}`;
+    const output = (result.stdout || "") + (result.stderr || "");
     if (result.status === 0 && /data-urdf-thumb-ready="1"/i.test(output)) {
       return true;
     }
@@ -122,88 +89,6 @@ const waitForThumbReadyMarker = async (
   }
 
   return false;
-};
-
-type StudioHandle = {
-  startedHere: boolean;
-  process: ChildProcess | null;
-  close: () => void;
-};
-
-const startStudioIfNeeded = async (): Promise<
-  | {
-      ok: true;
-      handle: StudioHandle;
-    }
-  | {
-      ok: false;
-      reason: string;
-    }
-> => {
-  if (await fetchOk(DEFAULT_WEB_URL) && await fetchOk(DEFAULT_API_URL)) {
-    return {
-      ok: true,
-      handle: {
-        startedHere: false,
-        process: null,
-        close: () => {},
-      },
-    };
-  }
-
-  const studioRoot = resolveStudioRoot();
-  if (!studioRoot) {
-    return {
-      ok: false,
-      reason: "URDF Studio repo not found. Set URDF_STUDIO_REPO or start URDF Studio manually.",
-    };
-  }
-
-  const runScript = path.join(studioRoot, "tools", "scripts", "run.js");
-  if (!fs.existsSync(runScript)) {
-    return {
-      ok: false,
-      reason: `URDF Studio launcher not found: ${runScript}`,
-    };
-  }
-
-  const child = spawn("node", [runScript], {
-    cwd: studioRoot,
-    env: {
-      ...process.env,
-      URDF_WEB_HOST: "127.0.0.1",
-      URDF_WEB_BIND_HOST: "127.0.0.1",
-      URDF_API_HOST: "127.0.0.1",
-      URDF_API_BIND_HOST: "127.0.0.1",
-    },
-    stdio: "ignore",
-    detached: false,
-  });
-
-  const close = () => {
-    if (!child.killed) {
-      child.kill("SIGTERM");
-    }
-  };
-
-  const webReady = await waitForUrl(DEFAULT_WEB_URL, STUDIO_START_TIMEOUT_MS);
-  const apiReady = await waitForUrl(DEFAULT_API_URL, STUDIO_START_TIMEOUT_MS);
-  if (!webReady || !apiReady) {
-    close();
-    return {
-      ok: false,
-      reason: "URDF Studio did not become ready in time.",
-    };
-  }
-
-  return {
-    ok: true,
-    handle: {
-      startedHere: true,
-      process: child,
-      close,
-    },
-  };
 };
 
 export class StudioThumbnailClient {
@@ -253,15 +138,14 @@ export class StudioThumbnailClient {
     }
 
     if (!this.handle) {
-      const started = await startStudioIfNeeded();
-      if (!started.ok) {
-        const reason = "reason" in started ? started.reason : "URDF Studio did not start.";
-        this.startupError = reason;
+      const started = await ensureStudioRunning();
+      if (started.ok === false) {
+        this.startupError = started.reason;
         return {
           captured: false,
           outputPath: null,
           reviewUrl,
-          skippedReason: reason,
+          skippedReason: started.reason,
         };
       }
       this.handle = started.handle;
@@ -285,9 +169,9 @@ export class StudioThumbnailClient {
         "--disable-gpu",
         "--hide-scrollbars",
         "--run-all-compositor-stages-before-draw",
-        `--window-size=${THUMB_WINDOW_SIZE}`,
+        "--window-size=" + THUMB_WINDOW_SIZE,
         "--default-background-color=00000000",
-        `--screenshot=${outputPath}`,
+        "--screenshot=" + outputPath,
         "--virtual-time-budget=12000",
         reviewUrl,
       ],
@@ -303,7 +187,7 @@ export class StudioThumbnailClient {
         outputPath: null,
         reviewUrl,
         skippedReason:
-          `${capture.stderr || capture.stdout || "thumbnail capture failed"}`.trim() ||
+          ((capture.stderr || capture.stdout || "thumbnail capture failed") as string).trim() ||
           "thumbnail capture failed",
       };
     }

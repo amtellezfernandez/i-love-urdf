@@ -48,7 +48,14 @@ export type OrientationSuggestedActionPlan = {
 };
 
 export type SuggestedActionPrompt = {
-  kind: "repair-mesh-refs" | "fix-mesh-paths" | "align-orientation" | "review-attention" | "apply-repo-fixes";
+  kind:
+    | "repair-mesh-refs"
+    | "fix-mesh-paths"
+    | "align-orientation"
+    | "review-attention"
+    | "apply-repo-fixes"
+    | "open-visualizer"
+    | "install-visualizer";
   summary: string;
   recommendedLine: string;
   prompt: string;
@@ -56,6 +63,7 @@ export type SuggestedActionPrompt = {
   acceptOptionLabel: string;
   skipOptionLabel: string;
   orientationPlan?: OrientationSuggestedActionPlan;
+  followUpAction?: SuggestedActionPrompt | null;
 };
 
 export type ShellState = {
@@ -70,6 +78,12 @@ export type ShellState = {
   resumePrompt: ResumePromptState | null;
   updatePrompt: UpdateAvailability | null;
   suggestedAction: SuggestedActionPrompt | null;
+  visualizerPromptResolved: boolean;
+  visualizerOpened: boolean;
+  exitPrompt: {
+    canStopVisualizer: boolean;
+    sessionId: string | null;
+  } | null;
   lastUrdfPath?: string;
 };
 
@@ -196,6 +210,7 @@ export type AutoAutomationResult = {
   panel: AutoPreviewPanel;
   notice: ShellFeedback | null;
   clearSession: boolean;
+  visualizerFailureCode?: "missing-repo" | "needs-setup" | "startup-failed";
 };
 
 export type RepositoryPreviewCandidate = {

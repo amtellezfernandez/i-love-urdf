@@ -9,6 +9,7 @@ const path = require("node:path");
 const process = require("node:process");
 const cliShellConfig_1 = require("../commands/cliShellConfig");
 const cliShellUi_1 = require("../commands/cliShellUi");
+const studioRuntime_1 = require("../studio/studioRuntime");
 const sharedSessionContract_1 = require("./sharedSessionContract");
 const ILU_STATE_ROOT = path.join(os.homedir(), ".i-love-urdf");
 const ILU_SESSION_ROOT = path.join(ILU_STATE_ROOT, "sessions");
@@ -150,9 +151,12 @@ const writeIluSharedSession = (params) => {
     return snapshot;
 };
 exports.writeIluSharedSession = writeIluSharedSession;
-const applySharedSessionSnapshotToState = (state, snapshot) => {
+const applySharedSessionSnapshotToState = (state, snapshot, options = {}) => {
     state.sharedSessionId = snapshot.sessionId;
     state.lastUrdfPath = snapshot.workingUrdfPath;
+    if (options.resetVisualizerPrompt !== false) {
+        state.visualizerPromptResolved = false;
+    }
     state.loadedSource = snapshot.loadedSource
         ? {
             source: snapshot.loadedSource.source,
@@ -199,7 +203,7 @@ const persistShellSharedSession = (state, options = {}) => {
         loadedSource: getSharedSessionLoadedSource(state),
         lastUrdfPath: sourceUrdfPath || state.lastUrdfPath || "",
     });
-    (0, exports.applySharedSessionSnapshotToState)(state, snapshot);
+    (0, exports.applySharedSessionSnapshotToState)(state, snapshot, { resetVisualizerPrompt: false });
     return snapshot;
 };
 exports.persistShellSharedSession = persistShellSharedSession;
@@ -216,9 +220,8 @@ const attachShellToSharedSession = (state, sessionId) => {
     return snapshot;
 };
 exports.attachShellToSharedSession = attachShellToSharedSession;
-const getStudioBaseUrl = () => process.env.URDF_STUDIO_URL?.trim() || "http://127.0.0.1:5173/";
 const buildStudioSessionUrl = (sessionId) => {
-    const studioUrl = new URL(getStudioBaseUrl());
+    const studioUrl = new URL((0, studioRuntime_1.getStudioWebUrl)());
     studioUrl.searchParams.set("ilu_session", sessionId);
     return studioUrl.toString();
 };
@@ -236,7 +239,7 @@ const openExternalUrl = (url) => {
     });
     return result.status === 0;
 };
-const openVisualizerForShellState = (state) => {
+const openVisualizerForShellState = async (state) => {
     const snapshot = (0, exports.persistShellSharedSession)(state);
     if (!snapshot) {
         return {
@@ -245,17 +248,42 @@ const openVisualizerForShellState = (state) => {
             clearSession: false,
         };
     }
+    state.visualizerPromptResolved = true;
     const studioUrl = (0, exports.buildStudioSessionUrl)(snapshot.sessionId);
+    const started = await (0, studioRuntime_1.ensureStudioRunning)({ detached: true });
+    const panelLines = [
+        `session ${snapshot.sessionId}`,
+        `working urdf ${(0, cliShellConfig_1.quoteForPreview)(snapshot.workingUrdfPath)}`,
+        `urdf studio ${studioUrl}`,
+    ];
+    if (started.ok === false) {
+        panelLines.push(`launcher ${started.reason}`);
+        panelLines.push("start URDF Studio manually, then open the URL above");
+        return {
+            panel: (0, cliShellUi_1.createOutputPanel)("visualizer", panelLines.join("\n"), "info"),
+            notice: {
+                kind: "warning",
+                text: `could not start URDF Studio: ${started.reason}`,
+            },
+            clearSession: false,
+            visualizerFailureCode: started.code,
+        };
+    }
+    state.visualizerOpened = true;
+    state.exitPrompt = null;
+    if (started.handle.startedHere && started.studioRoot) {
+        panelLines.push(`studio repo ${(0, cliShellConfig_1.quoteForPreview)(started.studioRoot)}`);
+    }
     const opened = openExternalUrl(studioUrl);
     return {
-        panel: (0, cliShellUi_1.createOutputPanel)("visualizer", [
-            `session ${snapshot.sessionId}`,
-            `working urdf ${(0, cliShellConfig_1.quoteForPreview)(snapshot.workingUrdfPath)}`,
-            `urdf studio ${studioUrl}`,
-        ].join("\n"), opened ? "success" : "info"),
+        panel: (0, cliShellUi_1.createOutputPanel)("visualizer", panelLines.join("\n"), opened ? "success" : "info"),
         notice: {
             kind: opened ? "success" : "info",
-            text: opened ? "opened URDF Studio for the current session" : "open the visualizer URL in URDF Studio",
+            text: opened
+                ? started.handle.startedHere
+                    ? "started and opened URDF Studio for the current session"
+                    : "opened URDF Studio for the current session"
+                : "URDF Studio is ready. Open the visualizer URL in your browser",
         },
         clearSession: false,
     };

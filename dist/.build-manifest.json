@@ -182,6 +182,8 @@
     "sources/loadSourceNode.js",
     "spatial/axisFrame.d.ts",
     "spatial/axisFrame.js",
+    "studio/studioRuntime.d.ts",
+    "studio/studioRuntime.js",
     "tasks/loadedSourceTasks.d.ts",
     "tasks/loadedSourceTasks.js",
     "transforms/canonicalizeJointFrames.d.ts",

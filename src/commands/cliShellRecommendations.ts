@@ -54,6 +54,73 @@ export const buildAlignOrientationSuggestion = (
   orientationPlan: plan,
 });
 
+const describeVisualizerPreflightTarget = (suggestedAction: SuggestedActionPrompt): string =>
+  suggestedAction.kind === "repair-mesh-refs"
+    ? "repairing mesh references"
+    : suggestedAction.kind === "fix-mesh-paths"
+      ? "repairing mesh paths"
+      : suggestedAction.kind === "align-orientation"
+        ? "aligning orientation"
+        : suggestedAction.kind === "apply-repo-fixes"
+          ? "applying shared repo fixes"
+          : "editing the working copy";
+
+export const shouldPromptVisualizerBeforeSuggestedAction = (
+  suggestedAction: SuggestedActionPrompt
+): boolean =>
+  suggestedAction.kind !== "review-attention" && suggestedAction.kind !== "open-visualizer";
+
+export const buildOpenVisualizerSuggestion = (
+  followUpAction: SuggestedActionPrompt | null = null
+): SuggestedActionPrompt =>
+  followUpAction
+    ? {
+        kind: "open-visualizer",
+        summary: followUpAction.summary,
+        recommendedLine: `recommended: open URDF Studio before ${describeVisualizerPreflightTarget(followUpAction)}`,
+        prompt: `open URDF Studio before ${describeVisualizerPreflightTarget(followUpAction)}?`,
+        acceptLabel: "open URDF Studio",
+        acceptOptionLabel: "Open Studio",
+        skipOptionLabel: "Continue here",
+        followUpAction,
+      }
+    : {
+        kind: "open-visualizer",
+        summary: "review the robot in URDF Studio",
+        recommendedLine: "recommended: open URDF Studio for this robot",
+        prompt: "open URDF Studio for this robot now?",
+        acceptLabel: "open URDF Studio",
+        acceptOptionLabel: "Open Studio",
+        skipOptionLabel: "Not now",
+        followUpAction: null,
+      };
+
+export const buildInstallVisualizerSuggestion = (
+  mode: "install" | "setup",
+  followUpAction: SuggestedActionPrompt | null = null
+): SuggestedActionPrompt =>
+  mode === "install"
+    ? {
+        kind: "install-visualizer",
+        summary: "URDF Studio is not installed yet",
+        recommendedLine: "recommended: install URDF Studio to visualize your modifications",
+        prompt: "install URDF Studio to visualize your modifications?",
+        acceptLabel: "install URDF Studio",
+        acceptOptionLabel: "Install Studio",
+        skipOptionLabel: "Not now",
+        followUpAction,
+      }
+    : {
+        kind: "install-visualizer",
+        summary: "URDF Studio still needs setup",
+        recommendedLine: "recommended: finish URDF Studio setup to visualize your modifications",
+        prompt: "finish URDF Studio setup to visualize your modifications?",
+        acceptLabel: "finish URDF Studio setup",
+        acceptOptionLabel: "Set Up Studio",
+        skipOptionLabel: "Not now",
+        followUpAction,
+      };
+
 export const formatAttentionDetail = (message: string, context?: string): string =>
   context ? `${context}: ${message}` : message;
 

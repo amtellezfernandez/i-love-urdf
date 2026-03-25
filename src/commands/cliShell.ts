@@ -51,6 +51,8 @@ import {
 } from "./cliShellConfig";
 import {
   appendSuggestedActionLines,
+  buildInstallVisualizerSuggestion,
+  buildOpenVisualizerSuggestion,
   buildReviewAttentionSuggestion,
   collectAttentionLines,
   detectSuggestedAction,
@@ -134,6 +136,12 @@ import {
   type GalleryRepoSource,
 } from "../gallery/galleryGeneration";
 import { buildApplyRepoFixesSuggestion, summarizeRepoFixesPreviewPanel } from "../gallery/repoBatchGuidance";
+import {
+  getPreferredStudioInstallRoot,
+  installStudio,
+  isManagedStudioRunning,
+  stopManagedStudio,
+} from "../studio/studioRuntime";
 
 type ShellValidationIssue = {
   level: "error" | "warning";
@@ -194,9 +202,106 @@ const clearInteractiveFlowState = (state: ShellState) => {
   clearCandidatePicker(state);
   clearRepoIntentPrompt(state);
   clearRepoSourceContext(state);
+  state.visualizerPromptResolved = false;
   clearXacroRetry(state);
   state.session = null;
   state.rootTask = null;
+};
+
+const clearExitPrompt = (state: Pick<ShellState, "exitPrompt">) => {
+  state.exitPrompt = null;
+};
+
+const shouldPromptOnShellExit = (state: Pick<ShellState, "visualizerOpened">): boolean => state.visualizerOpened;
+
+const beginVisualizerExitPrompt = (state: Pick<ShellState, "exitPrompt" | "sharedSessionId" | "visualizerOpened">) => {
+  if (!shouldPromptOnShellExit(state)) {
+    return false;
+  }
+
+  state.exitPrompt = {
+    canStopVisualizer: isManagedStudioRunning(),
+    sessionId: state.sharedSessionId?.trim() || null,
+  };
+  return true;
+};
+
+const getVisualizerExitPrompt = (
+  state: Pick<ShellState, "exitPrompt" | "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">
+) =>
+  !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker ? state.exitPrompt : null;
+
+const getVisualizerExitPromptText = (
+  exitPrompt: NonNullable<ShellState["exitPrompt"]>
+): string =>
+  exitPrompt.canStopVisualizer
+    ? exitPrompt.sessionId
+      ? `quit URDF Studio for session ${exitPrompt.sessionId}?`
+      : "quit URDF Studio before leaving ilu?"
+    : exitPrompt.sessionId
+      ? `leave ilu and keep URDF Studio on session ${exitPrompt.sessionId}?`
+      : "leave ilu and keep URDF Studio running?";
+
+const getVisualizerExitChoiceLine = (
+  exitPrompt: NonNullable<ShellState["exitPrompt"]>,
+  mode: "tty" | "line"
+): string =>
+  exitPrompt.canStopVisualizer
+    ? mode === "tty"
+      ? `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Keep Studio")}  ${SHELL_THEME.command("[Esc]")} ${SHELL_THEME.muted("Quit Studio")}`
+      : `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Keep Studio")}  ${SHELL_THEME.command("[n]")} ${SHELL_THEME.muted("Quit Studio")}`
+    : mode === "tty"
+      ? `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Exit shell")}  ${SHELL_THEME.command("[Esc]")} ${SHELL_THEME.muted("Stay here")}`
+      : `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Exit shell")}  ${SHELL_THEME.command("[n]")} ${SHELL_THEME.muted("Stay here")}`;
+
+const getVisualizerExitDecisionHint = (
+  exitPrompt: NonNullable<ShellState["exitPrompt"]>,
+  mode: "tty" | "line" = "tty"
+): string =>
+  exitPrompt.canStopVisualizer
+    ? mode === "tty"
+      ? "Enter exits ilu and keeps Studio open. Esc stops Studio first."
+      : "Press Enter to exit ilu and keep Studio open. Type n to stop Studio first."
+    : mode === "tty"
+      ? "Enter exits ilu. Esc stays in the shell."
+      : "Press Enter to exit ilu. Type n to stay in the shell.";
+
+const getVisualizerDisconnectNotice = (state: Pick<ShellState, "sharedSessionId">): ShellFeedback => ({
+  kind: "info",
+  text: state.sharedSessionId
+    ? `ilu terminal disconnected. URDF Studio kept session ${state.sharedSessionId}`
+    : "ilu terminal disconnected. URDF Studio kept running",
+});
+
+const runStopVisualizerAction = async (state: ShellState): Promise<AutoAutomationResult> => {
+  const stopResult = await stopManagedStudio();
+  if (stopResult.ok) {
+    state.visualizerOpened = false;
+    clearExitPrompt(state);
+    const lines = ["stopped URDF Studio"];
+    if (state.sharedSessionId) {
+      lines.push(`session ${state.sharedSessionId} kept on disk`);
+    }
+    return {
+      panel: createOutputPanel("visualizer", lines.join("\n"), "success"),
+      notice: { kind: "success", text: "stopped URDF Studio" },
+      clearSession: false,
+    };
+  }
+
+  if (stopResult.ok === false) {
+    return {
+      panel: createOutputPanel("visualizer", stopResult.reason, "info"),
+      notice: { kind: "info", text: stopResult.reason },
+      clearSession: false,
+    };
+  }
+
+  return {
+    panel: createOutputPanel("visualizer", "URDF Studio stop state is unavailable", "info"),
+    notice: { kind: "info", text: "URDF Studio stop state is unavailable" },
+    clearSession: false,
+  };
 };
 
 const describeLocalSourceValue = (value: string): string => {
@@ -258,6 +363,17 @@ const getLoadedSourceContextRows = (
   }
 
   const rows: ShellContextRow[] = [];
+  const formatEntryPathForDisplay = (entryPath: string): string => {
+    const normalized = entryPath.replace(/\\/g, "/");
+    if (normalized.length <= 40) {
+      return normalized;
+    }
+    const segments = normalized.split("/").filter((segment) => segment.length > 0);
+    if (segments.length <= 2) {
+      return normalized;
+    }
+    return `.../${segments.slice(-2).join("/")}`;
+  };
 
   if (state.sharedSessionId) {
     rows.push({
@@ -285,7 +401,7 @@ const getLoadedSourceContextRows = (
   }
 
   if (loadedSource.repositoryUrdfPath) {
-    rows.push({ label: "entry", value: loadedSource.repositoryUrdfPath });
+    rows.push({ label: "entry", value: formatEntryPathForDisplay(loadedSource.repositoryUrdfPath) });
   }
 
   if (
@@ -1392,6 +1508,7 @@ const getReadySourceLabel = (
 
 const rememberDirectUrdfSource = (state: ShellState, urdfPath: string) => {
   clearRepoSourceContext(state);
+  state.visualizerPromptResolved = false;
   state.loadedSource = {
     source: "local-file",
     urdfPath,
@@ -1408,6 +1525,7 @@ const rememberLoadedSource = (
   } = {}
 ) => {
   clearRepoSourceContext(state);
+  state.visualizerPromptResolved = false;
   const normalizedGitHubRef =
     typeof options.githubRef === "string" && options.githubRef.trim().length > 0
       ? options.githubRef.trim()
@@ -1812,9 +1930,7 @@ const summarizeHealthPreview = (
   lines.push(getHealthStatusLine(payload));
 
   if (payload.orientationGuess?.likelyUpAxis && payload.orientationGuess?.likelyForwardAxis) {
-    lines.push(
-      `orientation likely ${payload.orientationGuess.likelyUpAxis}-up / ${payload.orientationGuess.likelyForwardAxis}-forward`
-    );
+    lines.push(`orientation likely ${formatOrientationGuessSummary(payload.orientationGuess)}`);
   }
 
   for (const finding of payload.findings.filter((entry) => entry.level !== "info").slice(0, 2)) {
@@ -1829,6 +1945,17 @@ const summarizeHealthPreview = (
     lines,
   };
 };
+
+function formatOrientationGuessSummary(payload: {
+  likelyUpAxis?: string | null;
+  likelyUpDirection?: string | null;
+  likelyForwardAxis?: string | null;
+  likelyForwardDirection?: string | null;
+}): string {
+  const up = payload.likelyUpDirection || payload.likelyUpAxis;
+  const forward = payload.likelyForwardDirection || payload.likelyForwardAxis;
+  return `${up}-up / ${forward}-forward`;
+}
 
 const summarizeAnalysisPreview = (
   payload: {
@@ -1911,7 +2038,7 @@ const summarizeInvestigateResult = (
       typeof orientation.confidence === "number" && Number.isFinite(orientation.confidence)
         ? `  ${Math.round(orientation.confidence * 100)}%`
         : "";
-    lines.push(`orientation likely ${orientation.likelyUpAxis}-up / ${orientation.likelyForwardAxis}-forward${confidence}`);
+    lines.push(`orientation likely ${formatOrientationGuessSummary(orientation)}${confidence}`);
   }
 
   if (analysis.rootLinks.length > 0) {
@@ -1923,7 +2050,7 @@ const summarizeInvestigateResult = (
   }
 
   const attentionLines: string[] = [];
-  const hasOrientationSuggestion = suggestedAction?.kind === "align-orientation";
+  const hasOrientationSuggestion = getAlignOrientationSuggestedAction(suggestedAction) !== null;
   const needsAttention =
     !validation.isValid ||
     health.summary.errors > 0 ||
@@ -2001,7 +2128,7 @@ const summarizeOrientationResult = (
     };
   }
 
-  lines.push(`orientation likely ${payload.likelyUpAxis}-up / ${payload.likelyForwardAxis}-forward`);
+  lines.push(`orientation likely ${formatOrientationGuessSummary(payload)}`);
   if (typeof payload.confidence === "number" && Number.isFinite(payload.confidence)) {
     lines.push(`confidence ${Math.round(payload.confidence * 100)}%`);
   }
@@ -2242,9 +2369,7 @@ const summarizeRepairResult = (
 ): AutoPreviewPanel => {
   const lines = [actionLine, "working copy ready", getValidationStatusLine(validation), getHealthStatusLine(health)];
   if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
-    lines.push(
-      `orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`
-    );
+    lines.push(`orientation likely ${formatOrientationGuessSummary(health.orientationGuess)}`);
   }
 
   for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
@@ -2282,6 +2407,61 @@ const getActiveSuggestedAction = (
     ? state.suggestedAction
     : null;
 
+const getUnderlyingSuggestedAction = (
+  suggestedAction: SuggestedActionPrompt | null | undefined
+): SuggestedActionPrompt | null =>
+  suggestedAction?.kind === "open-visualizer" || suggestedAction?.kind === "install-visualizer"
+    ? getUnderlyingSuggestedAction(suggestedAction.followUpAction ?? null)
+    : suggestedAction ?? null;
+
+const getAlignOrientationSuggestedAction = (
+  suggestedAction: SuggestedActionPrompt | null | undefined
+): SuggestedActionPrompt | null => {
+  const underlyingSuggestedAction = getUnderlyingSuggestedAction(suggestedAction);
+  return underlyingSuggestedAction?.kind === "align-orientation" ? underlyingSuggestedAction : null;
+};
+
+const prepareSuggestedAction = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath" | "visualizerPromptResolved">,
+  suggestedAction: SuggestedActionPrompt | null
+): SuggestedActionPrompt | null => {
+  if (
+    state.visualizerPromptResolved ||
+    (!state.loadedSource?.urdfPath && !state.lastUrdfPath) ||
+    suggestedAction?.kind === "open-visualizer" ||
+    suggestedAction?.kind === "install-visualizer"
+  ) {
+    return suggestedAction;
+  }
+
+  return buildOpenVisualizerSuggestion(getUnderlyingSuggestedAction(suggestedAction));
+};
+
+const setPreparedSuggestedAction = (state: ShellState, suggestedAction: SuggestedActionPrompt | null) => {
+  state.suggestedAction = prepareSuggestedAction(state, suggestedAction);
+};
+
+const skipSuggestedAction = (state: ShellState, suggestedAction: SuggestedActionPrompt): ShellFeedback => {
+  if (suggestedAction.kind === "open-visualizer" || suggestedAction.kind === "install-visualizer") {
+    state.visualizerPromptResolved = true;
+    state.suggestedAction = suggestedAction.followUpAction ?? null;
+  } else {
+    clearSuggestedAction(state);
+  }
+
+  return {
+    kind: "info",
+    text: getSuggestedActionSkipMessage(suggestedAction),
+  };
+};
+
+const bypassSuggestedAction = (state: ShellState, suggestedAction: SuggestedActionPrompt) => {
+  if (suggestedAction.kind === "open-visualizer" || suggestedAction.kind === "install-visualizer") {
+    state.visualizerPromptResolved = true;
+    state.suggestedAction = suggestedAction.followUpAction ?? null;
+  }
+};
+
 const getSuggestedActionDecisionHint = (
   suggestedAction: SuggestedActionPrompt,
   mode: "tty" | "line" = "tty"
@@ -2297,28 +2477,34 @@ const getSuggestedActionSkipMessage = (suggestedAction: SuggestedActionPrompt): 
       ? "kept the current orientation"
       : suggestedAction.kind === "apply-repo-fixes"
         ? "kept the repo unchanged"
-      : "kept the current working copy";
+        : suggestedAction.kind === "open-visualizer" || suggestedAction.kind === "install-visualizer"
+          ? "continuing in the shell"
+          : "kept the current working copy";
 
 const getFollowUpSuggestedAction = (
-  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath" | "visualizerPromptResolved">,
   options: {
     urdfPath: string;
     selectedCandidate?: RepositoryPreviewCandidate;
     validation: ShellValidationPayload;
     health: ShellHealthPayload;
   }
-): SuggestedActionPrompt | null =>
-  detectSuggestedAction(state, {
-    selectedCandidate: options.selectedCandidate,
-    urdfPath: options.urdfPath,
-    orientationGuess: options.health.orientationGuess,
-  }) ??
-  (hasAttentionIssues({
-    validation: options.validation,
-    health: options.health,
-  })
-    ? buildReviewAttentionSuggestion()
-    : null);
+): SuggestedActionPrompt | null => {
+  const rawSuggestedAction =
+    detectSuggestedAction(state, {
+      selectedCandidate: options.selectedCandidate,
+      urdfPath: options.urdfPath,
+      orientationGuess: options.health.orientationGuess,
+    }) ??
+    (hasAttentionIssues({
+      validation: options.validation,
+      health: options.health,
+    })
+      ? buildReviewAttentionSuggestion()
+      : null);
+
+  return prepareSuggestedAction(state, rawSuggestedAction);
+};
 
 const renderSuggestedActionChoiceLine = (
   suggestedAction: SuggestedActionPrompt,
@@ -2386,10 +2572,13 @@ const summarizeRemainingAttention = (
     };
   }
 
-  state.suggestedAction = detectSuggestedAction(state, {
-    urdfPath,
-    orientationGuess: healthPayload.orientationGuess ?? orientationPayload,
-  });
+  setPreparedSuggestedAction(
+    state,
+    detectSuggestedAction(state, {
+      urdfPath,
+      orientationGuess: healthPayload.orientationGuess ?? orientationPayload,
+    })
+  );
   return {
     panel: summarizeInvestigateResult(
       urdfPath,
@@ -2430,13 +2619,26 @@ const getSuggestedActionBusyState = (
               title: "repo fixes",
               lines: ["applying shared safe fixes across the repo...", "checking what still needs review..."],
             }
-      : {
-          title: "reviewing",
-          lines: ["reviewing the remaining issues...", "summarizing what to fix next..."],
-        };
+          : suggestedAction.kind === "install-visualizer"
+            ? {
+                title: "visualizer",
+                lines: ["installing URDF Studio...", "opening the visualizer when setup is ready..."],
+              }
+          : suggestedAction.kind === "open-visualizer"
+            ? {
+                title: "visualizer",
+                lines: ["opening URDF Studio...", "keeping the current fix ready in the shell..."],
+              }
+            : {
+                title: "reviewing",
+                lines: ["reviewing the remaining issues...", "summarizing what to fix next..."],
+              };
 
 const runAlignOrientationAction = (state: ShellState): AutoAutomationResult => {
-  if (state.suggestedAction?.kind === "align-orientation") {
+  const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
+  if (alignSuggestedAction) {
+    state.visualizerPromptResolved = true;
+    state.suggestedAction = alignSuggestedAction;
     return runSuggestedAction(state);
   }
 
@@ -2475,8 +2677,9 @@ const runAlignOrientationAction = (state: ShellState): AutoAutomationResult => {
     urdfPath,
     orientationGuess: orientationPayload,
   });
-  if (!suggestedAction || suggestedAction.kind !== "align-orientation") {
-    state.suggestedAction = previousSuggestedAction?.kind === "align-orientation" ? null : previousSuggestedAction;
+  const nextAlignSuggestedAction = getAlignOrientationSuggestedAction(suggestedAction);
+  if (!nextAlignSuggestedAction) {
+    state.suggestedAction = getAlignOrientationSuggestedAction(previousSuggestedAction) ? null : previousSuggestedAction;
     const matchesTarget =
       typeof orientationPayload.targetUpAxis === "string" &&
       typeof orientationPayload.targetForwardAxis === "string" &&
@@ -2492,7 +2695,8 @@ const runAlignOrientationAction = (state: ShellState): AutoAutomationResult => {
     };
   }
 
-  state.suggestedAction = suggestedAction;
+  state.visualizerPromptResolved = true;
+  state.suggestedAction = nextAlignSuggestedAction;
   return runSuggestedAction(state);
 };
 
@@ -2504,6 +2708,16 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
     return {
       panel: null,
       notice: { kind: "info", text: getRootIdleMessage(state) },
+      clearSession: false,
+    };
+  }
+
+  if (suggestedAction.kind === "open-visualizer" || suggestedAction.kind === "install-visualizer") {
+    state.visualizerPromptResolved = true;
+    state.suggestedAction = suggestedAction.followUpAction ?? null;
+    return {
+      panel: createOutputPanel("visualizer", "open the visualizer through the async shell action", "error"),
+      notice: { kind: "error", text: "visualizer action could not start" },
       clearSession: false,
     };
   }
@@ -2592,17 +2806,11 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       };
     }
 
-    state.suggestedAction =
-      detectSuggestedAction(state, {
-        urdfPath: sharedUrdfPath,
-        orientationGuess: healthPayload.orientationGuess,
-      }) ??
-      (hasAttentionIssues({
-        validation: validationPayload,
-        health: healthPayload,
-      })
-        ? buildReviewAttentionSuggestion()
-        : null);
+    state.suggestedAction = getFollowUpSuggestedAction(state, {
+      urdfPath: sharedUrdfPath,
+      validation: validationPayload,
+      health: healthPayload,
+    });
 
     return {
       panel: summarizeRepairResult("repaired mesh references", validationPayload, healthPayload, {
@@ -2677,17 +2885,25 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       };
     }
 
-    state.suggestedAction =
-      detectSuggestedAction(state, {
-        urdfPath: sharedUrdfPath,
-        orientationGuess: healthPayload.orientationGuess,
-      }) ??
-      (hasAttentionIssues({
-        validation: validationPayload,
-        health: healthPayload,
-      })
-        ? buildReviewAttentionSuggestion()
-        : null);
+    state.suggestedAction = getFollowUpSuggestedAction(state, {
+      urdfPath: sharedUrdfPath,
+      validation: validationPayload,
+      health: healthPayload,
+    });
+
+    const orientationAlignedCleanly =
+      validationPayload.isValid &&
+      healthPayload.ok &&
+      healthPayload.summary.errors === 0 &&
+      healthPayload.summary.warnings === 0 &&
+      !state.suggestedAction;
+    if (orientationAlignedCleanly) {
+      return {
+        panel: null,
+        notice: { kind: "success", text: "orientation aligned" },
+        clearSession: false,
+      };
+    }
 
     return {
       panel: summarizeRepairResult("aligned orientation", validationPayload, healthPayload, {
@@ -2748,17 +2964,11 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       };
     }
 
-    state.suggestedAction =
-      detectSuggestedAction(state, {
-        urdfPath: workingUrdfPath,
-        orientationGuess: healthPayload.orientationGuess,
-      }) ??
-      (hasAttentionIssues({
-        validation: validationPayload,
-        health: healthPayload,
-      })
-        ? buildReviewAttentionSuggestion()
-        : null);
+    state.suggestedAction = getFollowUpSuggestedAction(state, {
+      urdfPath: sharedUrdfPath,
+      validation: validationPayload,
+      health: healthPayload,
+    });
 
     return {
       panel: summarizeRepairResult("repaired mesh paths", validationPayload, healthPayload, {
@@ -2783,6 +2993,81 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       clearSession: false,
     };
   }
+};
+
+const getVisualizerInstallSuggestion = (
+  mode: "install" | "setup",
+  followUpAction: SuggestedActionPrompt | null | undefined
+): SuggestedActionPrompt =>
+  buildInstallVisualizerSuggestion(mode, followUpAction ?? null);
+
+const runInstallVisualizerAction = async (
+  state: ShellState,
+  suggestedAction: SuggestedActionPrompt
+): Promise<AutoAutomationResult> => {
+  const installRoot = getPreferredStudioInstallRoot();
+  const installResult = installStudio();
+  if (installResult.ok === false) {
+    state.visualizerPromptResolved = true;
+    state.suggestedAction = suggestedAction.followUpAction ?? null;
+    const lines = [
+      installResult.reason,
+      `studio repo ${quoteForPreview(installResult.studioRoot)}`,
+      `clone ${quoteForPreview(`git clone --depth 1 https://github.com/urdf-studio/urdf-studio-unprod.git ${installRoot}`)}`,
+      `setup ${quoteForPreview(`cd ${installResult.studioRoot} && npm run setup`)}`,
+      ...installResult.outputLines,
+    ];
+    return {
+      panel: createOutputPanel("visualizer", lines.join("\n"), "error"),
+      notice: { kind: "error", text: "URDF Studio install failed" },
+      clearSession: false,
+    };
+  }
+
+  const openResult = await openVisualizerForShellState(state);
+  state.visualizerPromptResolved = true;
+  state.suggestedAction = suggestedAction.followUpAction ?? null;
+  const installLines = [
+    installResult.cloned ? "installed URDF Studio" : "finished URDF Studio setup",
+    `studio repo ${quoteForPreview(installResult.studioRoot)}`,
+    ...installResult.outputLines,
+  ];
+  const panelLines = [...installLines, ...(openResult.panel?.lines ?? [])];
+  return {
+    panel: createOutputPanel("visualizer", panelLines.join("\n"), openResult.panel?.kind ?? "success"),
+    notice:
+      openResult.notice?.kind === "warning" || openResult.notice?.kind === "error"
+        ? openResult.notice
+        : {
+            kind: "success",
+            text: openResult.notice?.text || "installed and opened URDF Studio for the current session",
+          },
+    clearSession: false,
+    visualizerFailureCode: openResult.visualizerFailureCode,
+  };
+};
+
+const runSuggestedActionAsync = async (state: ShellState): Promise<AutoAutomationResult> => {
+  const suggestedAction = state.suggestedAction;
+  if (suggestedAction?.kind === "open-visualizer") {
+    clearSuggestedAction(state);
+    const result = await openVisualizerForShellState(state);
+    state.visualizerPromptResolved = true;
+    state.suggestedAction =
+      result.visualizerFailureCode === "missing-repo"
+        ? getVisualizerInstallSuggestion("install", suggestedAction.followUpAction)
+        : result.visualizerFailureCode === "needs-setup"
+          ? getVisualizerInstallSuggestion("setup", suggestedAction.followUpAction)
+          : suggestedAction.followUpAction ?? null;
+    return result;
+  }
+
+  if (suggestedAction?.kind === "install-visualizer") {
+    clearSuggestedAction(state);
+    return runInstallVisualizerAction(state, suggestedAction);
+  }
+
+  return runSuggestedAction(state);
 };
 
 const resolveLoadableSourcePath = (
@@ -2986,13 +3271,7 @@ const executeLoadSourceChecks = (
 
   return {
     panel,
-    notice: {
-      kind: panel.kind === "success" ? "success" : "info",
-      text:
-        panel.kind === "success"
-          ? "validation and health check passed"
-          : "source loaded. review the checks",
-    },
+    notice: null,
     clearSession: true,
   };
 };
@@ -3034,45 +3313,33 @@ const summarizeAutoLoadChecks = (
   } = {}
 ): AutoPreviewPanel => {
   const lines: string[] = [];
+  const underlyingSuggestedAction = getUnderlyingSuggestedAction(options.suggestedAction ?? null);
+  const isMeshAction =
+    underlyingSuggestedAction?.kind === "repair-mesh-refs" || underlyingSuggestedAction?.kind === "fix-mesh-paths";
+  const attentionLines = collectAttentionLines(validation.issues, health.findings, isMeshAction ? 3 : 2);
+  const meshAttentionLines = attentionLines.filter((line) => /mesh/i.test(line));
 
-  if (options.extractedArchivePath) {
-    lines.push(`opened archive ${quoteForPreview(options.extractedArchivePath)}`);
-  }
-
-  if (loadResult.repositoryUrl) {
-    lines.push(`source ${loadResult.repositoryUrl}`);
+  if (isMeshAction) {
+    if (meshAttentionLines.length > 0) {
+      lines.push(...meshAttentionLines.slice(0, 2));
+    } else if (underlyingSuggestedAction?.summary) {
+      lines.push(underlyingSuggestedAction.summary);
+    }
+    for (const line of attentionLines.filter((entry) => !meshAttentionLines.includes(entry)).slice(0, 1)) {
+      lines.push(line);
+    }
   } else {
-    lines.push(`source ${quoteForPreview(loadResult.inspectedPath)}`);
+    lines.push(getValidationStatusLine(validation));
+    lines.push(getHealthStatusLine(health));
+
+    if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
+      lines.push(`orientation likely ${formatOrientationGuessSummary(health.orientationGuess)}`);
+    }
+
+    for (const line of attentionLines) {
+      lines.push(line);
+    }
   }
-
-  lines.push(`loaded ${loadResult.entryPath}`);
-
-  if ((loadResult.candidateCount ?? 0) > 1) {
-    lines.push(
-      options.requestedEntryPath === loadResult.entryPath
-        ? `selected ${loadResult.entryPath} from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`
-        : `picked best match from ${formatCount(loadResult.candidateCount ?? 0, "candidate")}`
-    );
-  }
-
-  lines.push(getValidationStatusLine(validation));
-  lines.push(getHealthStatusLine(health));
-
-  if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
-    lines.push(
-      `orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`
-    );
-  }
-
-  for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
-    lines.push(line);
-  }
-
-  appendSuggestedActionLines(
-    lines,
-    options.suggestedAction ?? null,
-    "next /align /analyze /health /validate /orientation or paste another source"
-  );
 
   return {
     title: "loaded",
@@ -3217,7 +3484,7 @@ const previewRepoFixesAction = (state: ShellState): AutoAutomationResult => {
   }
 
   clearRepoIntentPrompt(state);
-  state.suggestedAction = buildApplyRepoFixesSuggestion();
+  setPreparedSuggestedAction(state, buildApplyRepoFixesSuggestion());
   return {
     panel: summarizeRepoFixesPreviewPanel(repoContext),
     notice: { kind: "info", text: "review the shared repo fixes, then choose apply or not now" },
@@ -3459,7 +3726,9 @@ const summarizeDirectUrdfChecks = (
     findings: Array<{ level: "error" | "warning" | "info"; message: string; context?: string }>;
     orientationGuess?: {
       likelyUpAxis?: string | null;
+      likelyUpDirection?: string | null;
       likelyForwardAxis?: string | null;
+      likelyForwardDirection?: string | null;
     };
   },
   suggestedAction: SuggestedActionPrompt | null = null
@@ -3470,9 +3739,7 @@ const summarizeDirectUrdfChecks = (
   lines.push(getHealthStatusLine(health));
 
   if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
-    lines.push(
-      `orientation likely ${health.orientationGuess.likelyUpAxis}-up / ${health.orientationGuess.likelyForwardAxis}-forward`
-    );
+    lines.push(`orientation likely ${formatOrientationGuessSummary(health.orientationGuess)}`);
   }
 
   for (const line of collectAttentionLines(validation.issues, health.findings, 2)) {
@@ -3774,10 +4041,13 @@ const buildAutoPreviewPanel = (
       rememberDirectUrdfSource(state, urdfPath);
       const healthPreviewExecution = executeCliCommand("health-check", new Map([["urdf", urdfPath]]));
       const healthPreviewPayload = parseExecutionJson<ShellHealthPayload>(healthPreviewExecution);
-      state.suggestedAction = detectSuggestedAction(state, {
-        urdfPath,
-        orientationGuess: healthPreviewPayload?.orientationGuess,
-      });
+      setPreparedSuggestedAction(
+        state,
+        detectSuggestedAction(state, {
+          urdfPath,
+          orientationGuess: healthPreviewPayload?.orientationGuess,
+        })
+      );
       return summarizeAnalysisPreview(payload, urdfPath, state.suggestedAction);
     }
     return buildPreviewErrorPanel("preview", execution);
@@ -3892,18 +4162,24 @@ const executeSessionCommand = (
       if (typeof urdfPath === "string" && urdfPath.trim().length > 0) {
         if (session.command === "health-check") {
           const payload = parseExecutionJson<ShellHealthPayload>(result);
-          state.suggestedAction = detectSuggestedAction(state, {
-            urdfPath,
-            orientationGuess: payload?.orientationGuess,
-          });
+          setPreparedSuggestedAction(
+            state,
+            detectSuggestedAction(state, {
+              urdfPath,
+              orientationGuess: payload?.orientationGuess,
+            })
+          );
         } else if (session.command === "guess-orientation") {
           const payload = parseExecutionJson<ShellOrientationPayload>(result);
-          state.suggestedAction = detectSuggestedAction(state, {
-            urdfPath,
-            orientationGuess: payload,
-          });
+          setPreparedSuggestedAction(
+            state,
+            detectSuggestedAction(state, {
+              urdfPath,
+              orientationGuess: payload,
+            })
+          );
         } else {
-          state.suggestedAction = detectSuggestedAction(state, { urdfPath });
+          setPreparedSuggestedAction(state, detectSuggestedAction(state, { urdfPath }));
         }
       } else {
         state.suggestedAction = null;
@@ -4612,6 +4888,31 @@ const startRootShellCommand = (
   }
 };
 
+const printVisualizerShellAction = async (state: ShellState) => {
+  process.stdout.write(`${SHELL_THEME.muted("starting URDF Studio if needed...")}\n`);
+  const result = await openVisualizerForShellState(state);
+  if (result.notice) {
+    writeFeedback(result.notice);
+  }
+  printOutputPanel(result.panel);
+};
+
+const printVisualizerStopShellAction = async (state: ShellState) => {
+  process.stdout.write(`${SHELL_THEME.muted("stopping URDF Studio...")}\n`);
+  const result = await runStopVisualizerAction(state);
+  if (result.notice) {
+    writeFeedback(result.notice);
+  }
+  printOutputPanel(result.panel);
+};
+
+const closeLineShell = (state: ShellState, close: () => void) => {
+  if (shouldPromptOnShellExit(state)) {
+    writeFeedback(getVisualizerDisconnectNotice(state));
+  }
+  close();
+};
+
 const handleRootSlashCommand = async (
   slashCommand: string,
   state: ShellState,
@@ -4641,7 +4942,7 @@ const handleRootSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    close();
+    closeLineShell(state, close);
     return;
   }
 
@@ -4673,10 +4974,10 @@ const handleRootSlashCommand = async (
   }
 
   if (slashCommand === "align") {
-    const busyLine =
-      state.suggestedAction?.kind === "align-orientation"
-        ? getSuggestedActionBusyState(state.suggestedAction).lines[0]
-        : "checking orientation...";
+    const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
+    const busyLine = alignSuggestedAction
+      ? getSuggestedActionBusyState(alignSuggestedAction).lines[0]
+      : "checking orientation...";
     process.stdout.write(`${SHELL_THEME.muted(busyLine)}\n`);
     const result = runAlignOrientationAction(state);
     if (result.notice) {
@@ -4732,6 +5033,16 @@ const handleRootSlashCommand = async (
     if (state.repoIntentPrompt) {
       printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
     }
+    return;
+  }
+
+  if (slashCommand === "visualize") {
+    await printVisualizerShellAction(state);
+    return;
+  }
+
+  if (slashCommand === "visualize-stop") {
+    await printVisualizerStopShellAction(state);
     return;
   }
 
@@ -4820,7 +5131,7 @@ const handleRootTaskSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    close();
+    closeLineShell(state, close);
     return;
   }
 
@@ -4854,10 +5165,10 @@ const handleRootTaskSlashCommand = async (
   }
 
   if (slashCommand === "align") {
-    const busyLine =
-      state.suggestedAction?.kind === "align-orientation"
-        ? getSuggestedActionBusyState(state.suggestedAction).lines[0]
-        : "checking orientation...";
+    const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
+    const busyLine = alignSuggestedAction
+      ? getSuggestedActionBusyState(alignSuggestedAction).lines[0]
+      : "checking orientation...";
     process.stdout.write(`${SHELL_THEME.muted(busyLine)}\n`);
     const result = runAlignOrientationAction(state);
     if (result.notice) {
@@ -4916,6 +5227,16 @@ const handleRootTaskSlashCommand = async (
     return;
   }
 
+  if (slashCommand === "visualize") {
+    await printVisualizerShellAction(state);
+    return;
+  }
+
+  if (slashCommand === "visualize-stop") {
+    await printVisualizerStopShellAction(state);
+    return;
+  }
+
   const action = findRootTaskAction(task, slashCommand);
   if (action) {
     const feedback: ShellFeedback[] = [];
@@ -4954,7 +5275,8 @@ const handleRootTaskSlashCommand = async (
 const handleSessionSlashCommand = async (
   slashCommand: string,
   inlineValue: string,
-  state: ShellState
+  state: ShellState,
+  close: () => void
 ) => {
   const session = state.session;
   if (!session) {
@@ -5040,6 +5362,16 @@ const handleSessionSlashCommand = async (
     return;
   }
 
+  if (slashCommand === "visualize") {
+    await printVisualizerShellAction(state);
+    return;
+  }
+
+  if (slashCommand === "visualize-stop") {
+    await printVisualizerStopShellAction(state);
+    return;
+  }
+
   if (slashCommand === "run") {
     clearCandidatePicker(state);
     const requirementStatus = getRequirementStatus(session);
@@ -5077,7 +5409,8 @@ const handleSessionSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    process.exit(0);
+    closeLineShell(state, close);
+    return;
   }
 
   const target = resolveSessionSlashTarget(session, slashCommand);
@@ -5598,6 +5931,7 @@ const buildTimelineResponseLines = (
 } | null => {
   const lines: string[] = [];
   const kind = notice?.kind ?? panel?.kind ?? "info";
+  const suppressLoadedNarrative = panel?.title === "loaded";
   const shouldIncludeNoticeText =
     !panel ||
     !notice?.text ||
@@ -5625,11 +5959,11 @@ const buildTimelineResponseLines = (
                     ? "xacro runtime"
                     : null;
 
-  if (panelNarrative) {
+  if (panelNarrative && !suppressLoadedNarrative) {
     lines.push(panelNarrative);
   }
 
-  if (notice?.text && shouldIncludeNoticeText) {
+  if (notice?.text && shouldIncludeNoticeText && !suppressLoadedNarrative) {
     lines.push(notice.text);
   }
 
@@ -5852,6 +6186,12 @@ const renderMenuEntry = (
 };
 
 const getPromptPlaceholder = (state: ShellState): string => {
+  if (state.exitPrompt) {
+    return state.exitPrompt.canStopVisualizer
+      ? "Enter exits ilu and keeps Studio open. Esc stops Studio first"
+      : "Enter exits ilu. Esc stays in the shell";
+  }
+
   if (!state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && state.resumePrompt) {
     return "Enter resumes the last session or Esc skips";
   }
@@ -5915,10 +6255,11 @@ const getPromptPlaceholder = (state: ShellState): string => {
     .join(" or ")}`;
 };
 
-const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
+const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
   const columns = process.stdout.columns ?? 100;
   const rows = process.stdout.rows ?? 24;
-  const activeSuggestedAction = getActiveSuggestedAction(state);
+  const activeExitPrompt = getVisualizerExitPrompt(state);
+  const activeSuggestedAction = activeExitPrompt ? null : getActiveSuggestedAction(state);
   const menuEntries = getSlashMenuEntries(state, view.input);
   const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
   view.menuIndex = menuWindow.selectedIndex;
@@ -5980,7 +6321,9 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
       lines.push(renderContextRow(row));
     }
   } else {
-    for (const row of getPersistentTtyContextRows(getLoadedSourceContextRows(state), hasHistory)) {
+    for (const row of getPersistentTtyContextRows(getLoadedSourceContextRows(state), hasHistory).filter(
+      (row) => !(hasHistory && row.label === "next")
+    )) {
       lines.push(renderContextRow(row));
     }
     if (!getReadySourceLabel(state) && !hasHistory) {
@@ -6008,7 +6351,10 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     lines.push(`  ${SHELL_THEME.icon("↑")} ${SHELL_THEME.muted(formatUpdatePromptLine(state.updatePrompt))}`);
   }
 
-  if (activeSuggestedAction && !view.busy) {
+  if (activeExitPrompt && !view.busy) {
+    lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(getVisualizerExitPromptText(activeExitPrompt))}`);
+    lines.push(`  ${getVisualizerExitChoiceLine(activeExitPrompt, "tty")}`);
+  } else if (activeSuggestedAction && !view.busy) {
     lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(activeSuggestedAction.prompt)}`);
     lines.push(`  ${renderSuggestedActionChoiceLine(activeSuggestedAction, "tty")}`);
   }
@@ -6022,6 +6368,7 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   const shouldShowPlaceholder =
     view.input.length === 0 &&
     !view.busy &&
+    !activeExitPrompt &&
     !activeSuggestedAction &&
     (view.timeline.length === 0 || Boolean(state.session) || Boolean(state.candidatePicker));
   const placeholder = shouldShowPlaceholder ? getPromptPlaceholder(state) : "";
@@ -6084,6 +6431,16 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
     }
   }
 
+  return {
+    lines,
+    promptLabel,
+    promptLineIndex,
+  };
+};
+
+const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
+  const { lines, promptLabel, promptLineIndex } = buildTtyShellFrame(state, view);
+
   process.stdout.write("\u001b[H\u001b[J");
   process.stdout.write(lines.join("\n"));
 
@@ -6093,6 +6450,13 @@ const renderTtyShell = (state: ShellState, view: TtyShellViewState) => {
   }
   process.stdout.write("\r");
   process.stdout.write(`\u001b[${stripAnsi(`${promptLabel} ${view.input}`).length}C`);
+};
+
+const printTtyShellSnapshot = (state: ShellState, view: TtyShellViewState) => {
+  const { lines } = buildTtyShellFrame(state, view);
+  process.stdout.write("\u001b[H\u001b[J");
+  process.stdout.write(lines.join("\n"));
+  process.stdout.write("\n");
 };
 
 const completeTtyPathInput = (
@@ -6200,6 +6564,9 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     resumePrompt: null,
     updatePrompt: null,
     suggestedAction: null,
+    visualizerPromptResolved: false,
+    visualizerOpened: false,
+    exitPrompt: null,
   };
   let isClosed = false;
 
@@ -6255,6 +6622,10 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     const activeResumePrompt = getActiveResumePrompt(state);
     const activeSuggestedAction = getActiveSuggestedAction(state);
 
+    if (activeSuggestedAction && (isSlashInput || bangCommand)) {
+      bypassSuggestedAction(state, activeSuggestedAction);
+    }
+
     if (activeResumePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker) {
       const normalizedDecision = trimmed.toLowerCase();
       if (!trimmed) {
@@ -6294,7 +6665,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       const normalizedDecision = trimmed.toLowerCase();
       if (!trimmed || normalizedDecision === "y" || normalizedDecision === "yes") {
         process.stdout.write(`${SHELL_THEME.muted(getSuggestedActionBusyState(activeSuggestedAction).lines[0])}\n`);
-        const result = runSuggestedAction(state);
+        const result = await runSuggestedActionAsync(state);
         if (result.notice) {
           writeFeedback(result.notice);
         }
@@ -6305,8 +6676,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
         normalizedDecision === "later" ||
         normalizedDecision === "not now"
       ) {
-        clearSuggestedAction(state);
-        writeFeedback({ kind: "info", text: getSuggestedActionSkipMessage(activeSuggestedAction) });
+        writeFeedback(skipSuggestedAction(state, activeSuggestedAction));
       } else {
         process.stdout.write(`${SHELL_THEME.muted(getSuggestedActionDecisionHint(activeSuggestedAction, "line"))}\n`);
       }
@@ -6384,7 +6754,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       const parsed = parseSlashInput(trimmed);
       if (parsed) {
         if (session) {
-          await handleSessionSlashCommand(parsed.slashCommand, parsed.inlineValue, state);
+          await handleSessionSlashCommand(parsed.slashCommand, parsed.inlineValue, state, close);
         } else if (state.rootTask) {
           await handleRootTaskSlashCommand(parsed.slashCommand, state, close);
         } else {
@@ -6503,6 +6873,9 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     resumePrompt: null,
     updatePrompt: null,
     suggestedAction: null,
+    visualizerPromptResolved: false,
+    visualizerOpened: false,
+    exitPrompt: null,
   };
   const view: TtyShellViewState = {
     input: "",
@@ -6523,6 +6896,25 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     view.input = nextInput;
     const menuEntries = getSlashMenuEntries(state, view.input);
     view.menuIndex = menuEntries.length === 0 ? 0 : clamp(view.menuIndex, 0, menuEntries.length - 1);
+  };
+
+  const finalizeTtyClose = (notice: ShellFeedback | null) => {
+    clearExitPrompt(state);
+    setInput("");
+    view.output = null;
+    view.notice = notice;
+    close();
+  };
+
+  const requestTtyClose = () => {
+    if (beginVisualizerExitPrompt(state)) {
+      setInput("");
+      view.notice = null;
+      view.output = null;
+      return;
+    }
+
+    close();
   };
 
   const openSession = (command: SupportedCommandName) => {
@@ -6664,7 +7056,32 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     setInput("");
   };
 
-  const handleRootAction = (slashCommand: string): boolean => {
+  const openVisualizerInTty = async () => {
+    const result = await runBusyOperationAsync(
+      {
+        title: "visualizer",
+        lines: ["starting URDF Studio if needed...", "opening the current session..."],
+      },
+      () => openVisualizerForShellState(state)
+    );
+    view.notice = result.notice;
+    view.output = result.panel;
+  };
+
+  const stopVisualizerInTty = async (): Promise<boolean> => {
+    const result = await runBusyOperationAsync(
+      {
+        title: "visualizer",
+        lines: ["stopping URDF Studio...", "keeping the working session on disk..."],
+      },
+      () => runStopVisualizerAction(state)
+    );
+    view.notice = result.notice;
+    view.output = result.panel;
+    return result.panel?.kind === "success";
+  };
+
+  const handleRootAction = async (slashCommand: string): Promise<boolean> => {
     if (!slashCommand || slashCommand === "help") {
       setInput("/");
       return true;
@@ -6696,7 +7113,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "exit" || slashCommand === "quit") {
-      close();
+      requestTtyClose();
       return true;
     }
 
@@ -6726,13 +7143,13 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "align") {
-      const busy =
-        state.suggestedAction?.kind === "align-orientation"
-          ? getSuggestedActionBusyState(state.suggestedAction)
-          : {
-              title: "orientation",
-              lines: ["checking orientation...", "aligning the working copy when needed..."],
-            };
+      const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
+      const busy = alignSuggestedAction
+        ? getSuggestedActionBusyState(alignSuggestedAction)
+        : {
+            title: "orientation",
+            lines: ["checking orientation...", "aligning the working copy when needed..."],
+          };
       const result = runBusyOperation(busy, () => runAlignOrientationAction(state));
       view.notice = result.notice;
       view.output = result.panel;
@@ -6800,10 +7217,15 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "visualize") {
-      const result = openVisualizerForShellState(state);
-      view.notice = result.notice;
-      view.output = result.panel;
+      await openVisualizerInTty();
       pushTimelineUserEntry(view, "/visualize");
+      archiveAssistantStateToTimeline(view);
+      return true;
+    }
+
+    if (slashCommand === "visualize-stop") {
+      await stopVisualizerInTty();
+      pushTimelineUserEntry(view, "/visualize-stop");
       archiveAssistantStateToTimeline(view);
       return true;
     }
@@ -6931,7 +7353,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     return true;
   };
 
-  const handleRootTaskAction = (slashCommand: string): boolean => {
+  const handleRootTaskAction = async (slashCommand: string): Promise<boolean> => {
     const task = state.rootTask;
     if (!task) {
       return handleRootAction(slashCommand);
@@ -6953,7 +7375,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "exit" || slashCommand === "quit") {
-      close();
+      requestTtyClose();
       return true;
     }
 
@@ -6983,13 +7405,13 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "align") {
-      const busy =
-        state.suggestedAction?.kind === "align-orientation"
-          ? getSuggestedActionBusyState(state.suggestedAction)
-          : {
-              title: "orientation",
-              lines: ["checking orientation...", "aligning the working copy when needed..."],
-            };
+      const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
+      const busy = alignSuggestedAction
+        ? getSuggestedActionBusyState(alignSuggestedAction)
+        : {
+            title: "orientation",
+            lines: ["checking orientation...", "aligning the working copy when needed..."],
+          };
       const result = runBusyOperation(busy, () => runAlignOrientationAction(state));
       view.notice = result.notice;
       view.output = result.panel;
@@ -7059,10 +7481,15 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "visualize") {
-      const result = openVisualizerForShellState(state);
-      view.notice = result.notice;
-      view.output = result.panel;
+      await openVisualizerInTty();
       pushTimelineUserEntry(view, "/visualize");
+      archiveAssistantStateToTimeline(view);
+      return true;
+    }
+
+    if (slashCommand === "visualize-stop") {
+      await stopVisualizerInTty();
+      pushTimelineUserEntry(view, "/visualize-stop");
       archiveAssistantStateToTimeline(view);
       return true;
     }
@@ -7161,7 +7588,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     return true;
   };
 
-  const handleSessionAction = (slashCommand: string, inlineValue: string): boolean => {
+  const handleSessionAction = async (slashCommand: string, inlineValue: string): Promise<boolean> => {
     const session = state.session;
     if (!session) {
       return false;
@@ -7319,10 +7746,15 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "visualize") {
-      const result = openVisualizerForShellState(state);
-      view.notice = result.notice;
-      view.output = result.panel;
+      await openVisualizerInTty();
       pushTimelineUserEntry(view, "/visualize");
+      archiveAssistantStateToTimeline(view);
+      return true;
+    }
+
+    if (slashCommand === "visualize-stop") {
+      await stopVisualizerInTty();
+      pushTimelineUserEntry(view, "/visualize-stop");
       archiveAssistantStateToTimeline(view);
       return true;
     }
@@ -7357,7 +7789,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "exit" || slashCommand === "quit") {
-      close();
+      requestTtyClose();
       return true;
     }
 
@@ -7461,11 +7893,23 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     setNoticeFromFeedback(view, feedback);
   };
 
-  const handleEnter = () => {
+  const handleEnter = async () => {
     const trimmed = view.input.trim();
     const bangCommand = parseBangInput(trimmed);
     const isSlashInput = shouldTreatAsSlashInput(view.input, state);
+    const activeExitPrompt = getVisualizerExitPrompt(state);
     const activeResumePrompt = getActiveResumePrompt(state);
+
+    if (activeExitPrompt) {
+      if (trimmed.length !== 0) {
+        view.notice = { kind: "info", text: getVisualizerExitDecisionHint(activeExitPrompt) };
+        setInput("");
+        return;
+      }
+
+      finalizeTtyClose(getVisualizerDisconnectNotice(state));
+      return;
+    }
 
     if (
       activeResumePrompt &&
@@ -7550,7 +7994,10 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
       const acceptedAction = activeSuggestedAction.acceptLabel;
       pushTimelineUserEntry(view, `yes, ${acceptedAction}`);
-      const result = runBusyOperation(getSuggestedActionBusyState(activeSuggestedAction), () => runSuggestedAction(state));
+      const result = await runBusyOperationAsync(
+        getSuggestedActionBusyState(activeSuggestedAction),
+        () => runSuggestedActionAsync(state)
+      );
       view.notice = result.notice;
       view.output = result.panel;
       archiveAssistantStateToTimeline(view);
@@ -7664,11 +8111,11 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
           const selected = menuEntries[clamp(view.menuIndex, 0, menuEntries.length - 1)];
           if (selected) {
             if (state.session) {
-              handleSessionAction(selected.name, "");
+              await handleSessionAction(selected.name, "");
             } else if (state.rootTask) {
-              handleRootTaskAction(selected.name);
+              await handleRootTaskAction(selected.name);
             } else {
-              handleRootAction(selected.name);
+              await handleRootAction(selected.name);
             }
             syncInputAfterSlashAction({ slashCommand: selected.name, inlineValue: "" });
             return;
@@ -7677,11 +8124,11 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       }
 
       if (state.session) {
-        handleSessionAction(parsed.slashCommand, parsed.inlineValue);
+        await handleSessionAction(parsed.slashCommand, parsed.inlineValue);
       } else if (state.rootTask) {
-        handleRootTaskAction(parsed.slashCommand);
+        await handleRootTaskAction(parsed.slashCommand);
       } else {
-        handleRootAction(parsed.slashCommand);
+        await handleRootAction(parsed.slashCommand);
       }
       syncInputAfterSlashAction(parsed);
       return;
@@ -7689,7 +8136,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if (trimmed.length === 0) {
       if (state.session && !state.session.pending && getRequirementStatus(state.session).ready) {
-        handleSessionAction("run", "");
+        await handleSessionAction("run", "");
         return;
       }
       if (state.repoIntentPrompt) {
@@ -7816,6 +8263,24 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
   };
 
+  const runBusyOperationAsync = async <T>(
+    busy: {
+      title: string;
+      lines: readonly string[];
+    },
+    operation: () => Promise<T> | T
+  ): Promise<T> => {
+    setInput("");
+    view.busy = busy;
+    queueRender("force");
+    try {
+      return await operation();
+    } finally {
+      view.busy = null;
+      ignoreKeypressUntilMs = Date.now() + 200;
+    }
+  };
+
   let pendingRenderTimer: NodeJS.Timeout | null = null;
   let renderQueued = false;
   let lastRenderAt = 0;
@@ -7853,7 +8318,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
   if (options.initialSlashCommand) {
     const parsed = parseSlashInput(options.initialSlashCommand);
     if (parsed) {
-      handleRootAction(parsed.slashCommand);
+      await handleRootAction(parsed.slashCommand);
     }
   }
 
@@ -7895,16 +8360,33 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return;
     }
 
-    const activeSuggestedAction = getActiveSuggestedAction(state);
+    const activeExitPrompt = getVisualizerExitPrompt(state);
+    const activeSuggestedAction = activeExitPrompt ? null : getActiveSuggestedAction(state);
 
     if ((key.ctrl && key.name === "c") || input === "\u0003") {
-      close();
+      if (activeExitPrompt) {
+        finalizeTtyClose(getVisualizerDisconnectNotice(state));
+      } else {
+        requestTtyClose();
+        queueRender("force");
+      }
       return;
     }
 
     if (key.name === "return" || key.name === "enter") {
-      handleEnter();
-      queueRender("force");
+      void handleEnter()
+        .then(() => {
+          queueRender("force");
+        })
+        .catch((error) => {
+          view.busy = null;
+          ignoreKeypressUntilMs = Date.now() + 200;
+          view.notice = {
+            kind: "error",
+            text: error instanceof Error ? error.message : String(error),
+          };
+          queueRender("force");
+        });
       return;
     }
 
@@ -7980,6 +8462,35 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (key.name === "escape") {
+      if (activeExitPrompt && view.input.length === 0) {
+        if (!activeExitPrompt.canStopVisualizer) {
+          clearExitPrompt(state);
+          view.notice = { kind: "info", text: "kept the shell open" };
+          queueRender("navigation");
+          return;
+        }
+
+        void stopVisualizerInTty()
+          .then((stopped) => {
+            clearExitPrompt(state);
+            if (stopped) {
+              close();
+            }
+            queueRender("force");
+          })
+          .catch((error) => {
+            clearExitPrompt(state);
+            view.busy = null;
+            ignoreKeypressUntilMs = Date.now() + 200;
+            view.notice = {
+              kind: "error",
+              text: error instanceof Error ? error.message : String(error),
+            };
+            queueRender("force");
+          });
+        return;
+      }
+
       if (state.resumePrompt && view.input.length === 0 && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker) {
         dismissResumePrompt(state);
         view.notice = { kind: "info", text: "starting fresh" };
@@ -8001,8 +8512,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       }
 
       if (activeSuggestedAction && view.input.length === 0) {
-        clearSuggestedAction(state);
-        view.notice = { kind: "info", text: getSuggestedActionSkipMessage(activeSuggestedAction) };
+        view.notice = skipSuggestedAction(state, activeSuggestedAction);
         queueRender("navigation");
         return;
       }
@@ -8036,6 +8546,12 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (input && !key.ctrl && !key.meta) {
+      if (activeExitPrompt) {
+        view.notice = { kind: "info", text: getVisualizerExitDecisionHint(activeExitPrompt) };
+        queueRender("navigation");
+        return;
+      }
+
       if (state.resumePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && view.input.length === 0) {
         dismissResumePrompt(state);
       }
@@ -8052,6 +8568,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
           view.input.startsWith("/") ||
           view.input.startsWith("!");
         if (isBypassingSuggestedAction) {
+          bypassSuggestedAction(state, activeSuggestedAction);
           setInput(`${view.input}${input}`);
           if (view.input.startsWith("/")) {
             view.menuIndex = 0;
@@ -8090,7 +8607,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     process.stdin.off("keypress", onKeypress);
     process.stdin.setRawMode(false);
     process.stdin.pause();
-    process.stdout.write("\u001b[H\u001b[J\n");
+    printTtyShellSnapshot(state, view);
   }
 };
 
@@ -8116,7 +8633,7 @@ export const renderShellHelp = (): string => {
     "  up/down            Move through picker options",
     "  tab                Complete the selected option or path",
     "  enter              Select the highlighted option, run the ready action, or accept a recommended fix",
-    "  ctrl+c             Exit immediately",
+    "  ctrl+c             Exit, or ask about URDF Studio first when it is open",
     "  esc                Close the picker, cancel a pending value, or skip the recommended fix",
     "  /open              Load a repo, folder, or file as the current source",
     "  /inspect           Preview a repo or folder and suggest an entrypoint",
@@ -8126,6 +8643,7 @@ export const renderShellHelp = (): string => {
     "  /orientation       Check the current orientation and suggest a safe fix",
     "  /align             Apply the recommended orientation fix to the loaded source",
     "  /visualize         Open the current shared session in URDF Studio",
+    "  /visualize-stop    Stop the local URDF Studio started by ilu",
     "  /update            Install the latest ilu release",
     "  /doctor            Show runtime, auth, and xacro diagnostics",
     "  /show              Show the current source and next step",

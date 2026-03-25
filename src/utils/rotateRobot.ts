@@ -26,7 +26,7 @@ export type AxisSpec =
   | "-z";
 
 function axisSpecToVector(axis: AxisSpec): Vec3 {
-  const normalized = axis.startsWith("+") ? axis.slice(1) : axis;
+  const normalized = axis.startsWith("+") || axis.startsWith("-") ? axis.slice(1) : axis;
   const sign = axis.startsWith("-") ? -1 : 1;
   switch (normalized) {
     case "x":

@@ -1443,6 +1443,12 @@ const droppedZipPath = path.join(shellDropDir, "robot bundle.zip");
 const droppedZip = new AdmZip();
 droppedZip.addLocalFile(droppedUrdfPath, "robot_bundle/urdf", "robot.urdf");
 droppedZip.writeZip(droppedZipPath);
+const shellNoStudioAutostartEnv = {
+  ...process.env,
+  URDF_STUDIO_REPO: path.join(shellDropDir, "missing-studio-repo"),
+  URDF_STUDIO_URL: "http://127.0.0.1:59999/",
+  URDF_STUDIO_API_URL: "http://127.0.0.1:59998/health",
+};
 
 const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
@@ -1549,8 +1555,8 @@ const suggestedOrientationTranscript = execFileSync(process.execPath, [cliPath, 
 });
 if (
   !suggestedOrientationTranscript.includes("orientation differs from +z-up / +x-forward") ||
-  !suggestedOrientationTranscript.includes("recommended: align orientation to +z-up / +x-forward") ||
-  !suggestedOrientationTranscript.includes("align orientation to +z-up / +x-forward now?")
+  !suggestedOrientationTranscript.includes("recommended: open URDF Studio before aligning orientation") ||
+  !suggestedOrientationTranscript.includes("open URDF Studio before aligning orientation?")
 ) {
   throw new Error("ilu shell suggested orientation repair smoke test failed");
 }
@@ -1558,9 +1564,11 @@ if (
 const acceptedOrientationRepairTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${yUpOrientationSourcePath}\n\n/exit\n`,
+  env: shellNoStudioAutostartEnv,
+  input: `${yUpOrientationSourcePath}\nn\n\n/exit\n`,
 });
 if (
+  !acceptedOrientationRepairTranscript.includes("continuing in the shell") ||
   !acceptedOrientationRepairTranscript.includes("aligning orientation...") ||
   !acceptedOrientationRepairTranscript.includes("orientation aligned") ||
   !acceptedOrientationRepairTranscript.includes("orientation likely z-up / x-forward")
@@ -1628,13 +1636,15 @@ if (
 const suggestedMeshRepairTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${brokenMeshUrdfPath}\n\n/exit\n`,
+  env: shellNoStudioAutostartEnv,
+  input: `${brokenMeshUrdfPath}\nn\n\n/exit\n`,
 });
 if (
   !suggestedMeshRepairTranscript.includes("mesh paths need attention") ||
-  !suggestedMeshRepairTranscript.includes("recommended: repair mesh paths") ||
-  !suggestedMeshRepairTranscript.includes("repair mesh paths now?") ||
-  !suggestedMeshRepairTranscript.includes("[Enter] Repair now  [n] Not now") ||
+  !suggestedMeshRepairTranscript.includes("recommended: open URDF Studio before repairing mesh paths") ||
+  !suggestedMeshRepairTranscript.includes("open URDF Studio before repairing mesh paths?") ||
+  !suggestedMeshRepairTranscript.includes("[Enter] Open Studio  [n] Continue here") ||
+  !suggestedMeshRepairTranscript.includes("continuing in the shell") ||
   !suggestedMeshRepairTranscript.includes("repairing mesh paths...") ||
   !suggestedMeshRepairTranscript.includes("mesh paths repaired") ||
   !suggestedMeshRepairTranscript.includes("repaired mesh paths")
@@ -1645,13 +1655,15 @@ if (
 const suggestedRepoRepairTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${repairableRepoDir}\n\n/exit\n`,
+  env: shellNoStudioAutostartEnv,
+  input: `${repairableRepoDir}\nn\n\n/exit\n`,
 });
 if (
   !suggestedRepoRepairTranscript.includes("mesh references need attention") ||
-  !suggestedRepoRepairTranscript.includes("recommended: repair mesh references") ||
-  !suggestedRepoRepairTranscript.includes("repair mesh references now?") ||
-  !suggestedRepoRepairTranscript.includes("[Enter] Repair now  [n] Not now") ||
+  !suggestedRepoRepairTranscript.includes("recommended: open URDF Studio before repairing mesh references") ||
+  !suggestedRepoRepairTranscript.includes("open URDF Studio before repairing mesh references?") ||
+  !suggestedRepoRepairTranscript.includes("[Enter] Open Studio  [n] Continue here") ||
+  !suggestedRepoRepairTranscript.includes("continuing in the shell") ||
   !suggestedRepoRepairTranscript.includes("mesh references repaired") ||
   !suggestedRepoRepairTranscript.includes("repaired mesh references")
 ) {
@@ -1673,9 +1685,11 @@ if (
 const remainingIssuesTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${brokenMeshWithMassUrdfPath}\n\n\n/exit\n`,
+  env: shellNoStudioAutostartEnv,
+  input: `${brokenMeshWithMassUrdfPath}\nn\n\n\n/exit\n`,
 });
 if (
+  !remainingIssuesTranscript.includes("continuing in the shell") ||
   !remainingIssuesTranscript.includes("review the remaining issues now?") ||
   !remainingIssuesTranscript.includes("[Enter] Review now  [n] Later") ||
   !remainingIssuesTranscript.includes("remaining issues reviewed") ||
