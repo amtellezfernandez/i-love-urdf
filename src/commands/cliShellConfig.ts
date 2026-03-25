@@ -287,7 +287,7 @@ export const COMMAND_SUMMARY_OVERRIDES: Partial<Record<SupportedCommandName, str
   "load-source": "Load from GitHub, a local repo, or a local file.",
   "inspect-repo": "Preview a local or GitHub repo and suggest the right URDF or XACRO entrypoint.",
   "xacro-to-urdf": "Expand a XACRO file, repo, or GitHub source into URDF.",
-  "repair-mesh-refs": "Repair broken mesh references in a local or GitHub repo.",
+  "repair-mesh-refs": "Repair or normalize mesh references in a local or GitHub repo.",
   "health-check": "Check structure, axes, and orientation risks.",
   analyze: "Inspect structure, morphology, and mesh references.",
   validate: "Check whether the current URDF is structurally valid.",

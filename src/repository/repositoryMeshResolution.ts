@@ -202,7 +202,7 @@ export const buildPackageRootsFromRepositoryFiles = <T extends RepositoryFileEnt
 ): Record<string, string[]> => {
   const roots = new Map<string, Set<string>>();
   const addRoot = (packageName: string, rootPath: string) => {
-    if (!packageName || !rootPath) return;
+    if (!packageName) return;
     let entry = roots.get(packageName);
     if (!entry) {
       entry = new Set<string>();
@@ -214,9 +214,8 @@ export const buildPackageRootsFromRepositoryFiles = <T extends RepositoryFileEnt
   files.forEach((file) => {
     if (file.type !== "file") return;
     const lowerPath = file.path.toLowerCase();
-    if (lowerPath.endsWith("/package.xml")) {
+    if (lowerPath === "package.xml" || lowerPath.endsWith("/package.xml")) {
       const rootPath = repositoryDirname(file.path);
-      if (!rootPath) return;
       const parts = rootPath.split("/").filter(Boolean);
       const packageName =
         getPackageNameOverride(options.packageNameByPath, file.path) ?? parts[parts.length - 1];
@@ -287,7 +286,9 @@ const getPackageRootCandidates = (
 ): string[] => {
   const roots = new Set<string>();
   const direct = packageRoots[packageName] ?? [];
-  direct.forEach((root) => roots.add(normalizeMeshPathForMatch(root)));
+  direct.forEach((root) => {
+    roots.add(root === "" ? "" : normalizeMeshPathForMatch(root));
+  });
 
   const urdfParts = normalizeMeshPathForMatch(urdfPath).split("/").filter(Boolean);
   const index = urdfParts.indexOf(packageName);
@@ -295,7 +296,7 @@ const getPackageRootCandidates = (
     roots.add(urdfParts.slice(0, index + 1).join("/"));
   }
 
-  return Array.from(roots).filter(Boolean);
+  return Array.from(roots);
 };
 
 export const resolveRepositoryFileReference = <T extends RepositoryFileEntry>(

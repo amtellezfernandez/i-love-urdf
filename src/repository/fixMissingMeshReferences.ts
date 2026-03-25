@@ -6,6 +6,7 @@ import {
   normalizeRepositoryPath,
   repositoryDirname,
   resolveRepositoryFileReference,
+  type PackageNameByPath,
   type RepositoryFileEntry,
 } from "./repositoryMeshResolution";
 
@@ -27,6 +28,8 @@ export type FixMissingMeshReferencesResult = {
 
 export type FixMissingMeshReferencesOptions = {
   packageRoots?: Record<string, string[]>;
+  packageNameByPath?: PackageNameByPath;
+  normalizeResolvableReferences?: boolean;
 };
 
 const isExternalReference = (value: string) =>
@@ -88,8 +91,11 @@ const findPackageReferenceForPath = (
   let best: { pkg: string; root: string } | null = null;
   const consider = (pkg: string, root: string) => {
     const normalizedRoot = normalizeRepositoryPath(root);
-    if (!normalizedRoot) return;
-    if (normalized === normalizedRoot || normalized.startsWith(`${normalizedRoot}/`)) {
+    const matchesRoot =
+      normalizedRoot === ""
+        ? normalized.length > 0
+        : normalized === normalizedRoot || normalized.startsWith(`${normalizedRoot}/`);
+    if (matchesRoot) {
       if (!best || normalizedRoot.length > best.root.length) {
         best = { pkg, root: normalizedRoot };
       }
@@ -141,6 +147,19 @@ const findUniqueFileByBasename = <T extends RepositoryFileEntry>(
   return matches.length === 1 ? matches[0] : null;
 };
 
+const buildPreferredMeshReference = (
+  resolvedPath: string,
+  urdfDir: string,
+  packageRoots: Record<string, string[]>,
+  preferredPackage?: string
+): string | null => {
+  const packageRef = findPackageReferenceForPath(resolvedPath, packageRoots, preferredPackage);
+  if (packageRef) {
+    return packageRef;
+  }
+  return urdfDir ? makeRelativePath(urdfDir, resolvedPath) : resolvedPath;
+};
+
 export const fixMissingMeshReferencesInRepository = <T extends RepositoryFileEntry>(
   urdfContent: string,
   urdfPath: string,
@@ -169,7 +188,10 @@ export const fixMissingMeshReferencesInRepository = <T extends RepositoryFileEnt
   }
 
   const packageRoots =
-    options.packageRoots ?? buildPackageRootsFromRepositoryFiles(files);
+    options.packageRoots ??
+    buildPackageRootsFromRepositoryFiles(files, {
+      packageNameByPath: options.packageNameByPath,
+    });
   const doc = parsed.document;
   const meshDirOverride = getMeshDirOverride(doc);
   const urdfDir = repositoryDirname(urdfPath);
@@ -186,9 +208,43 @@ export const fixMissingMeshReferencesInRepository = <T extends RepositoryFileEnt
       packageRoots,
       meshDirOverride,
     });
-    if (existing) return;
-
     const refInfo = parseMeshReference(filename);
+    const preferredPackage = refInfo.scheme === "package" ? refInfo.packageName : undefined;
+
+    if (existing) {
+      if (!options.normalizeResolvableReferences) {
+        return;
+      }
+
+      const resolvedExistingPath = normalizeRepositoryPath(existing.path);
+      if (!resolvedExistingPath) {
+        return;
+      }
+
+      const corrected = buildPreferredMeshReference(
+        resolvedExistingPath,
+        urdfDir,
+        packageRoots,
+        preferredPackage
+      );
+      if (!corrected || corrected === filename) {
+        return;
+      }
+
+      mesh.setAttribute("filename", corrected);
+      const context = findLinkContext(mesh);
+      corrections.push({
+        original: filename,
+        corrected,
+        linkName: context.linkName,
+        element: context.element,
+        reason: corrected.startsWith("package://")
+          ? "Normalized to package:// reference"
+          : "Normalized resolvable mesh reference",
+      });
+      return;
+    }
+
     const rawPath = refInfo.path || refInfo.raw;
     const normalizedPath = normalizeMeshPathForMatch(rawPath);
 
@@ -251,18 +307,8 @@ export const fixMissingMeshReferencesInRepository = <T extends RepositoryFileEnt
       return;
     }
 
-    const preferredPackage = refInfo.scheme === "package" ? refInfo.packageName : undefined;
-    const packageRef = findPackageReferenceForPath(
-      resolvedPath,
-      packageRoots,
-      preferredPackage
-    );
-
-    let corrected = packageRef;
-    const reason = packageRef ? "Resolved to package root" : "Resolved to relative path";
-    if (!corrected) {
-      corrected = urdfDir ? makeRelativePath(urdfDir, resolvedPath) : resolvedPath;
-    }
+    const corrected = buildPreferredMeshReference(resolvedPath, urdfDir, packageRoots, preferredPackage);
+    const reason = corrected?.startsWith("package://") ? "Resolved to package root" : "Resolved to relative path";
 
     if (!corrected || corrected === filename) {
       return;

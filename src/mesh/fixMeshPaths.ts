@@ -12,18 +12,23 @@
 
 import { parseURDF, serializeURDF } from "../parsing/urdfParser";
 
-interface PathFixResult {
+export interface PathFixResult {
   urdfContent: string;
   corrections: PathCorrection[];
   packageName: string;
 }
 
-interface PathCorrection {
+export interface PathCorrection {
   element: string; // "visual" or "collision"
   linkName: string;
   original: string;
   corrected: string;
   reason: string;
+}
+
+export interface FixMeshPathsOptions {
+  packageName?: string;
+  convertRelativeToPackage?: boolean;
 }
 
 /**
@@ -141,8 +146,22 @@ function detectMeshFolder(path: string): string {
  * @param packageName - Optional package name to use (auto-detected if not provided)
  * @returns Result with corrected URDF and list of corrections
  */
-export function fixMeshPaths(urdfContent: string, packageName?: string): PathFixResult {
+export function fixMeshPaths(
+  urdfContent: string,
+  packageNameOrOptions?: string | FixMeshPathsOptions
+): PathFixResult {
+  return fixMeshPathsInternal(urdfContent, packageNameOrOptions);
+}
+
+export function fixMeshPathsInternal(
+  urdfContent: string,
+  packageNameOrOptions?: string | FixMeshPathsOptions
+): PathFixResult {
   const parsed = parseURDF(urdfContent);
+  const options =
+    typeof packageNameOrOptions === "string" ? { packageName: packageNameOrOptions } : packageNameOrOptions ?? {};
+  const convertRelativeToPackage = options.convertRelativeToPackage ?? true;
+  let packageName = options.packageName;
 
   const result: PathFixResult = {
     urdfContent: urdfContent,
@@ -162,8 +181,8 @@ export function fixMeshPaths(urdfContent: string, packageName?: string): PathFix
   // Auto-detect package name from robot name if not provided
   if (!packageName) {
     const robotName = robot.getAttribute("name") || "robot";
-    // Common convention: robot name without spaces, lowercase, with _description suffix
-    packageName = robotName.toLowerCase().replace(/\s+/g, "_");
+    // Preserve the original package casing when we only have the robot name as a hint.
+    packageName = robotName.replace(/\s+/g, "_");
     if (!packageName.endsWith("_description")) {
       packageName += "_description";
     }
@@ -214,9 +233,11 @@ export function fixMeshPaths(urdfContent: string, packageName?: string): PathFix
       const normalized = normalizePath(filename);
       if (isPackagePath(filename)) {
         correctedPath = filename.replace(/\\/g, "/");
-      } else {
+      } else if (convertRelativeToPackage) {
         const meshPart = detectMeshFolder(normalized);
         correctedPath = `package://${packageName}/${meshPart}`;
+      } else {
+        correctedPath = normalized;
       }
       reason = "Fixed Windows-style backslashes";
       needsCorrection = true;
@@ -229,20 +250,29 @@ export function fixMeshPaths(urdfContent: string, packageName?: string): PathFix
           const restPath = normalizePath(packageMatch[2]);
           correctedPath = basePath + "/" + restPath;
         }
-      } else {
+      } else if (convertRelativeToPackage) {
         const normalized = normalizePath(filename);
         const meshPart = detectMeshFolder(normalized);
         correctedPath = `package://${packageName}/${meshPart}`;
+      } else {
+        correctedPath = normalizePath(filename);
       }
       reason = "Normalized path segments (removed .. and .)";
       needsCorrection = true;
     } else if (!isPackagePath(filename)) {
       // Relative path without package:// prefix
-      const normalized = normalizePath(filename);
-      const meshPart = detectMeshFolder(normalized);
-      correctedPath = `package://${packageName}/${meshPart}`;
-      reason = "Added package:// prefix to relative path";
-      needsCorrection = true;
+      if (convertRelativeToPackage) {
+        const normalized = normalizePath(filename);
+        const meshPart = detectMeshFolder(normalized);
+        correctedPath = `package://${packageName}/${meshPart}`;
+        reason = "Added package:// prefix to relative path";
+        needsCorrection = true;
+      } else {
+        const normalized = normalizePath(filename);
+        correctedPath = normalized;
+        reason = "Normalized relative mesh path";
+        needsCorrection = correctedPath !== filename;
+      }
     } else if (isPackagePath(filename)) {
       // Already a package path, but check for issues
       const normalized = filename.replace(/\/+/g, "/");

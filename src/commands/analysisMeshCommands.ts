@@ -1,10 +1,10 @@
 import { compressMeshes, inspectMeshes } from "../mesh/meshPrep";
 import {
   emitJson,
-  extractMeshRefs,
   readRequiredUrdfInput,
   type AnalysisCommandHandler,
 } from "./analysisCommandRuntime";
+import { inspectLocalMeshReferences } from "./localMeshReferenceInspection";
 
 export const ANALYSIS_MESH_COMMAND_HANDLERS = {
   "inspect-meshes": (args, helpers) => {
@@ -40,7 +40,7 @@ export const ANALYSIS_MESH_COMMAND_HANDLERS = {
   },
 
   "mesh-refs": (args, helpers) => {
-    const refs = extractMeshRefs(readRequiredUrdfInput(args, helpers).urdfContent);
-    emitJson({ count: refs.length, refs });
+    const { urdfPath, urdfContent } = readRequiredUrdfInput(args, helpers);
+    emitJson(inspectLocalMeshReferences(urdfPath, urdfContent));
   },
 } satisfies Record<"inspect-meshes" | "compress-meshes" | "mesh-refs", AnalysisCommandHandler>;

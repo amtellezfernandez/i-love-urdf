@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ANALYSIS_MESH_COMMAND_HANDLERS = void 0;
 const meshPrep_1 = require("../mesh/meshPrep");
 const analysisCommandRuntime_1 = require("./analysisCommandRuntime");
+const localMeshReferenceInspection_1 = require("./localMeshReferenceInspection");
 exports.ANALYSIS_MESH_COMMAND_HANDLERS = {
     "inspect-meshes": (args, helpers) => {
         const meshDir = helpers.requireStringArg(args, "mesh-dir");
@@ -30,7 +31,7 @@ exports.ANALYSIS_MESH_COMMAND_HANDLERS = {
         }));
     },
     "mesh-refs": (args, helpers) => {
-        const refs = (0, analysisCommandRuntime_1.extractMeshRefs)((0, analysisCommandRuntime_1.readRequiredUrdfInput)(args, helpers).urdfContent);
-        (0, analysisCommandRuntime_1.emitJson)({ count: refs.length, refs });
+        const { urdfPath, urdfContent } = (0, analysisCommandRuntime_1.readRequiredUrdfInput)(args, helpers);
+        (0, analysisCommandRuntime_1.emitJson)((0, localMeshReferenceInspection_1.inspectLocalMeshReferences)(urdfPath, urdfContent));
     },
 };

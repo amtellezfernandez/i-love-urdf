@@ -1,5 +1,6 @@
 import { type FixMissingMeshReferencesOptions, type FixMissingMeshReferencesResult } from "./fixMissingMeshReferences";
 import { type InspectRepositoryFilesOptions, type RepositoryInspectionSummary } from "./repositoryInspection";
+import { type RepositoryScope } from "./repositoryPathScope";
 export type LocalRepositoryReference = {
     path: string;
 };
@@ -25,6 +26,20 @@ export type LocalRepositoryMeshRepairResult = FixMissingMeshReferencesResult & {
     inspectedPath: string;
     urdfPath: string;
 };
+export declare const resolveLocalRepositoryScopedFile: (rootPath: string, scopedBasePath: string, requestedPath: string, messages: {
+    outsideRoot: string;
+    notFile: (absolutePath: string) => string;
+}) => Promise<{
+    filePath: string;
+    absolutePath: string;
+}>;
+export declare const resolveLocalRepositoryReference: (reference: LocalRepositoryReference) => Promise<{
+    inspectedPath: string;
+    scopedBasePath: string;
+    scope: RepositoryScope;
+    stats: import("node:fs").Stats;
+    rootPath: string;
+}>;
 export declare const resolveLocalRepositoryFile: (rootPath: string, requestedPath: string, messages: {
     outsideRoot: string;
     notFile: (absolutePath: string) => string;

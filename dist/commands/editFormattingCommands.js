@@ -3,9 +3,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.EDIT_FORMATTING_COMMAND_HANDLERS = void 0;
 const index_1 = require("../index");
 const editCommandRuntime_1 = require("./editCommandRuntime");
+const localMeshReferenceInspection_1 = require("./localMeshReferenceInspection");
 exports.EDIT_FORMATTING_COMMAND_HANDLERS = {
-    "fix-mesh-paths": ({ args, helpers, urdfContent, outPath }) => {
-        const result = (0, index_1.fixMeshPaths)(urdfContent, helpers.getOptionalStringArg(args, "package"));
+    "fix-mesh-paths": ({ args, helpers, urdfPath, urdfContent, outPath }) => {
+        const explicitPackageName = helpers.getOptionalStringArg(args, "package");
+        const result = (0, localMeshReferenceInspection_1.fixLocalMeshPaths)(urdfPath, urdfContent, { packageName: explicitPackageName });
         (0, editCommandRuntime_1.emitWrittenPayload)(helpers, outPath, result.urdfContent, result);
     },
     "canonical-order": ({ helpers, urdfContent, outPath }) => {

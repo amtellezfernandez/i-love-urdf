@@ -24,6 +24,8 @@ const coerceIluSharedLoadedSource = (raw, fallbackUrdfPath) => {
         githubRef: typeof raw.githubRef === "string" ? raw.githubRef : undefined,
         githubRevision: typeof raw.githubRevision === "string" ? raw.githubRevision : undefined,
         repositoryUrdfPath: typeof raw.repositoryUrdfPath === "string" ? raw.repositoryUrdfPath : undefined,
+        meshReferenceCorrectionCount: typeof raw.meshReferenceCorrectionCount === "number" ? raw.meshReferenceCorrectionCount : undefined,
+        meshReferenceUnresolvedCount: typeof raw.meshReferenceUnresolvedCount === "number" ? raw.meshReferenceUnresolvedCount : undefined,
     };
 };
 exports.coerceIluSharedLoadedSource = coerceIluSharedLoadedSource;

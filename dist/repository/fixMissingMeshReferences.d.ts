@@ -1,4 +1,4 @@
-import { type RepositoryFileEntry } from "./repositoryMeshResolution";
+import { type PackageNameByPath, type RepositoryFileEntry } from "./repositoryMeshResolution";
 export type MeshReferenceCorrection = {
     original: string;
     corrected: string;
@@ -15,5 +15,7 @@ export type FixMissingMeshReferencesResult = {
 };
 export type FixMissingMeshReferencesOptions = {
     packageRoots?: Record<string, string[]>;
+    packageNameByPath?: PackageNameByPath;
+    normalizeResolvableReferences?: boolean;
 };
 export declare const fixMissingMeshReferencesInRepository: <T extends RepositoryFileEntry>(urdfContent: string, urdfPath: string, files: T[], options?: FixMissingMeshReferencesOptions) => FixMissingMeshReferencesResult;

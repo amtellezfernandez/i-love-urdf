@@ -15,7 +15,7 @@ declare const EDIT_COMMAND_HANDLERS: {
     readonly "set-material-color": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "rename-joint": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "rename-link": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
-    readonly "fix-mesh-paths": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
+    readonly "fix-mesh-paths": ({ args, helpers, urdfPath, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "canonical-order": ({ helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "pretty-print": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "normalize-axes": ({ helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;

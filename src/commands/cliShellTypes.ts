@@ -32,6 +32,8 @@ export type LoadedSourceContext = {
   githubRef?: string;
   githubRevision?: string;
   repositoryUrdfPath?: string;
+  meshReferenceCorrectionCount?: number;
+  meshReferenceUnresolvedCount?: number;
 };
 
 export type ResumePromptState = {
@@ -66,6 +68,12 @@ export type SuggestedActionPrompt = {
   followUpAction?: SuggestedActionPrompt | null;
 };
 
+export type SavePromptState = {
+  phase: "confirm" | "path";
+  defaultPath: string;
+  closeAfterSave: boolean;
+};
+
 export type ShellState = {
   session: ShellSession | null;
   rootTask: RootTaskName | null;
@@ -80,6 +88,9 @@ export type ShellState = {
   suggestedAction: SuggestedActionPrompt | null;
   visualizerPromptResolved: boolean;
   visualizerOpened: boolean;
+  savePrompt: SavePromptState | null;
+  saveBaselineHash?: string;
+  saveBaselineUpdatedAt?: string;
   exitPrompt: {
     canStopVisualizer: boolean;
     sessionId: string | null;
@@ -126,6 +137,8 @@ export type TtyShellViewState = {
   input: string;
   timeline: ShellTimelineEntry[];
   menuIndex: number;
+  promptOptionIndex: number;
+  promptSelectionKey: string | null;
   notice: ShellFeedback | null;
   output: ShellOutputPanel;
   busy:
@@ -217,6 +230,7 @@ export type RepositoryPreviewCandidate = {
   path: string;
   inspectionMode?: "urdf" | "xacro-source";
   unresolvedMeshReferenceCount?: number;
+  normalizableMeshReferenceCount?: number;
   xacroArgs?: Array<{
     name: string;
     hasDefault?: boolean;

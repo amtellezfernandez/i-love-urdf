@@ -1,7 +1,9 @@
 import {
   buildPackageRootsFromRepositoryFiles,
   resolveRepositoryMeshReferences,
+  type PackageNameByPath,
 } from "./repositoryMeshResolution";
+import { fixMissingMeshReferencesInRepository } from "./fixMissingMeshReferences";
 import {
   collectMeshReferencedPackageNamesFromUrdf,
   collectPackageNamesFromText,
@@ -24,6 +26,7 @@ export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
   hasRenderableGeometry?: boolean;
   meshReferenceCount?: number;
   unresolvedMeshReferenceCount?: number;
+  normalizableMeshReferenceCount?: number;
   referencedPackages: string[];
   xacroArgs?: XacroArgumentDefinition[];
 };
@@ -44,6 +47,7 @@ export type InspectRepositoryCandidatesOptions = {
 
 export type InspectRepositoryFilesOptions = InspectRepositoryCandidatesOptions & {
   candidateFilter?: (candidate: RepositoryUrdfCandidate) => boolean;
+  packageNameByPath?: PackageNameByPath;
 };
 
 type RepositoryTextLoader<T extends InspectableRepositoryFile> = (
@@ -60,7 +64,8 @@ const toBaseInspection = (candidate: RepositoryUrdfCandidate): RepositoryCandida
 const inspectRepositoryCandidate = async <T extends InspectableRepositoryFile>(
   candidate: RepositoryUrdfCandidate,
   files: T[],
-  readText: RepositoryTextLoader<T>
+  readText: RepositoryTextLoader<T>,
+  packageNameByPath?: PackageNameByPath
 ): Promise<RepositoryCandidateInspection> => {
   const file = files.find((entry) => entry.type === "file" && entry.path === candidate.path);
   const baseInspection = toBaseInspection(candidate);
@@ -85,8 +90,15 @@ const inspectRepositoryCandidate = async <T extends InspectableRepositoryFile>(
     };
   }
 
-  const packageRoots = buildPackageRootsFromRepositoryFiles(files);
+  const packageRoots = buildPackageRootsFromRepositoryFiles(files, {
+    packageNameByPath,
+  });
   const meshReferences = extractMeshReferencesFromUrdf(text);
+  const meshRepairPlan = fixMissingMeshReferencesInRepository(text, candidate.path, files, {
+    packageRoots,
+    packageNameByPath,
+    normalizeResolvableReferences: true,
+  });
   const { matchByReference } = resolveRepositoryMeshReferences(candidate.path, text, files, {
     packageRoots,
   });
@@ -107,6 +119,7 @@ const inspectRepositoryCandidate = async <T extends InspectableRepositoryFile>(
     unsupportedFormats: unsupported.hasUnsupported ? unsupported.formats : undefined,
     unmatchedMeshReferences: unmatchedMeshReferences.length > 0 ? unmatchedMeshReferences : undefined,
     unresolvedMeshReferenceCount: unmatchedMeshReferences.length,
+    normalizableMeshReferenceCount: meshRepairPlan.corrections.length,
   };
 };
 
@@ -114,7 +127,7 @@ export const inspectRepositoryCandidates = async <T extends InspectableRepositor
   candidates: RepositoryUrdfCandidate[],
   files: T[],
   readText: RepositoryTextLoader<T>,
-  options: InspectRepositoryCandidatesOptions = {}
+  options: InspectRepositoryCandidatesOptions & { packageNameByPath?: PackageNameByPath } = {}
 ): Promise<RepositoryCandidateInspection[]> => {
   const maxCandidatesToInspect = Math.max(
     0,
@@ -139,7 +152,8 @@ export const inspectRepositoryCandidates = async <T extends InspectableRepositor
         inspected[index] = await inspectRepositoryCandidate(
           candidatesToInspect[index],
           files,
-          readText
+          readText,
+          options.packageNameByPath
         );
       }
     }
@@ -163,6 +177,7 @@ export const inspectRepositoryFiles = async <T extends InspectableRepositoryFile
   const inspectedCandidates = await inspectRepositoryCandidates(candidates, files, readText, {
     maxCandidatesToInspect: options.maxCandidatesToInspect,
     concurrency: options.concurrency,
+    packageNameByPath: options.packageNameByPath,
   });
   const maxCandidatesToInspect = Math.max(
     0,

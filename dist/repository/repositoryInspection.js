@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.inspectRepositoryFiles = exports.inspectRepositoryCandidates = void 0;
 const repositoryMeshResolution_1 = require("./repositoryMeshResolution");
+const fixMissingMeshReferences_1 = require("./fixMissingMeshReferences");
 const repositoryUrdfDiscovery_1 = require("./repositoryUrdfDiscovery");
 const meshFormats_1 = require("../mesh/meshFormats");
 const meshPaths_1 = require("../mesh/meshPaths");
@@ -10,7 +11,7 @@ const toBaseInspection = (candidate) => ({
     inspectionMode: candidate.isXacro ? "xacro-source" : "urdf",
     referencedPackages: [],
 });
-const inspectRepositoryCandidate = async (candidate, files, readText) => {
+const inspectRepositoryCandidate = async (candidate, files, readText, packageNameByPath) => {
     const file = files.find((entry) => entry.type === "file" && entry.path === candidate.path);
     const baseInspection = toBaseInspection(candidate);
     if (!file) {
@@ -29,8 +30,15 @@ const inspectRepositoryCandidate = async (candidate, files, readText) => {
             xacroArgs,
         };
     }
-    const packageRoots = (0, repositoryMeshResolution_1.buildPackageRootsFromRepositoryFiles)(files);
+    const packageRoots = (0, repositoryMeshResolution_1.buildPackageRootsFromRepositoryFiles)(files, {
+        packageNameByPath,
+    });
     const meshReferences = (0, repositoryUrdfDiscovery_1.extractMeshReferencesFromUrdf)(text);
+    const meshRepairPlan = (0, fixMissingMeshReferences_1.fixMissingMeshReferencesInRepository)(text, candidate.path, files, {
+        packageRoots,
+        packageNameByPath,
+        normalizeResolvableReferences: true,
+    });
     const { matchByReference } = (0, repositoryMeshResolution_1.resolveRepositoryMeshReferences)(candidate.path, text, files, {
         packageRoots,
     });
@@ -50,6 +58,7 @@ const inspectRepositoryCandidate = async (candidate, files, readText) => {
         unsupportedFormats: unsupported.hasUnsupported ? unsupported.formats : undefined,
         unmatchedMeshReferences: unmatchedMeshReferences.length > 0 ? unmatchedMeshReferences : undefined,
         unresolvedMeshReferenceCount: unmatchedMeshReferences.length,
+        normalizableMeshReferenceCount: meshRepairPlan.corrections.length,
     };
 };
 const inspectRepositoryCandidates = async (candidates, files, readText, options = {}) => {
@@ -67,7 +76,7 @@ const inspectRepositoryCandidates = async (candidates, files, readText, options 
             cursor += 1;
             if (index >= candidatesToInspect.length)
                 return;
-            inspected[index] = await inspectRepositoryCandidate(candidatesToInspect[index], files, readText);
+            inspected[index] = await inspectRepositoryCandidate(candidatesToInspect[index], files, readText, options.packageNameByPath);
         }
     });
     await Promise.all(workers);
@@ -81,6 +90,7 @@ const inspectRepositoryFiles = async (files, readText, options = {}) => {
     const inspectedCandidates = await (0, exports.inspectRepositoryCandidates)(candidates, files, readText, {
         maxCandidatesToInspect: options.maxCandidatesToInspect,
         concurrency: options.concurrency,
+        packageNameByPath: options.packageNameByPath,
     });
     const maxCandidatesToInspect = Math.max(0, Number(options.maxCandidatesToInspect ?? 12) || 12);
     return {

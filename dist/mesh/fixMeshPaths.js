@@ -12,6 +12,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.fixMeshPaths = fixMeshPaths;
+exports.fixMeshPathsInternal = fixMeshPathsInternal;
 const urdfParser_1 = require("../parsing/urdfParser");
 /**
  * Normalizes a file path by resolving .. segments and converting backslashes
@@ -111,8 +112,14 @@ function detectMeshFolder(path) {
  * @param packageName - Optional package name to use (auto-detected if not provided)
  * @returns Result with corrected URDF and list of corrections
  */
-function fixMeshPaths(urdfContent, packageName) {
+function fixMeshPaths(urdfContent, packageNameOrOptions) {
+    return fixMeshPathsInternal(urdfContent, packageNameOrOptions);
+}
+function fixMeshPathsInternal(urdfContent, packageNameOrOptions) {
     const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
+    const options = typeof packageNameOrOptions === "string" ? { packageName: packageNameOrOptions } : packageNameOrOptions ?? {};
+    const convertRelativeToPackage = options.convertRelativeToPackage ?? true;
+    let packageName = options.packageName;
     const result = {
         urdfContent: urdfContent,
         corrections: [],
@@ -128,8 +135,8 @@ function fixMeshPaths(urdfContent, packageName) {
     // Auto-detect package name from robot name if not provided
     if (!packageName) {
         const robotName = robot.getAttribute("name") || "robot";
-        // Common convention: robot name without spaces, lowercase, with _description suffix
-        packageName = robotName.toLowerCase().replace(/\s+/g, "_");
+        // Preserve the original package casing when we only have the robot name as a hint.
+        packageName = robotName.replace(/\s+/g, "_");
         if (!packageName.endsWith("_description")) {
             packageName += "_description";
         }
@@ -179,9 +186,12 @@ function fixMeshPaths(urdfContent, packageName) {
             if (isPackagePath(filename)) {
                 correctedPath = filename.replace(/\\/g, "/");
             }
-            else {
+            else if (convertRelativeToPackage) {
                 const meshPart = detectMeshFolder(normalized);
                 correctedPath = `package://${packageName}/${meshPart}`;
+            }
+            else {
+                correctedPath = normalized;
             }
             reason = "Fixed Windows-style backslashes";
             needsCorrection = true;
@@ -196,21 +206,32 @@ function fixMeshPaths(urdfContent, packageName) {
                     correctedPath = basePath + "/" + restPath;
                 }
             }
-            else {
+            else if (convertRelativeToPackage) {
                 const normalized = normalizePath(filename);
                 const meshPart = detectMeshFolder(normalized);
                 correctedPath = `package://${packageName}/${meshPart}`;
+            }
+            else {
+                correctedPath = normalizePath(filename);
             }
             reason = "Normalized path segments (removed .. and .)";
             needsCorrection = true;
         }
         else if (!isPackagePath(filename)) {
             // Relative path without package:// prefix
-            const normalized = normalizePath(filename);
-            const meshPart = detectMeshFolder(normalized);
-            correctedPath = `package://${packageName}/${meshPart}`;
-            reason = "Added package:// prefix to relative path";
-            needsCorrection = true;
+            if (convertRelativeToPackage) {
+                const normalized = normalizePath(filename);
+                const meshPart = detectMeshFolder(normalized);
+                correctedPath = `package://${packageName}/${meshPart}`;
+                reason = "Added package:// prefix to relative path";
+                needsCorrection = true;
+            }
+            else {
+                const normalized = normalizePath(filename);
+                correctedPath = normalized;
+                reason = "Normalized relative mesh path";
+                needsCorrection = correctedPath !== filename;
+            }
         }
         else if (isPackagePath(filename)) {
             // Already a package path, but check for issues

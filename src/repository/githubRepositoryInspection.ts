@@ -10,6 +10,12 @@ import {
   type RepositoryCandidateInspection,
   type RepositoryInspectionSummary,
 } from "./repositoryInspection";
+import { buildPackageNameByPathFromRepositoryFiles } from "./repositoryPackageNames";
+import {
+  matchesRepositoryScope,
+  resolveRepositoryScopeFromFiles,
+  resolveRepositoryScopedPathFromFiles,
+} from "./repositoryPathScope";
 
 const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_ACCEPT_HEADER = "application/vnd.github.v3+json";
@@ -579,27 +585,23 @@ export const fetchGitHubRepositoryFiles = async (
       };
     }
   }
-  const normalizedPath = normalizeRepositoryPath(reference.path || "");
-
-  const readTree = async (treePath: string) =>
+  const readTree = async () =>
     readGitHubJson<GitHubTreeResponse>(
       `${GITHUB_API_BASE_URL}/repos/${reference.owner}/${reference.repo}/git/trees/${
-        treePath ? `${ref}:${treePath}` : ref
+        ref
       }?recursive=1`,
       {
         accessToken,
-        notFoundMessage: treePath
-          ? "GitHub repository path not found."
-          : "GitHub repository tree not found.",
+        notFoundMessage: "GitHub repository tree not found.",
         contextLabel: "reading repository tree",
       }
     );
 
   try {
-    const tree = await readTree(normalizedPath);
+    const tree = await readTree();
     return {
       ref,
-      files: convertTreeToRepositoryFiles(tree.tree ?? [], normalizedPath, {
+      files: convertTreeToRepositoryFiles(tree.tree ?? [], "", {
         owner: reference.owner,
         repo: reference.repo,
         ref,
@@ -609,27 +611,10 @@ export const fetchGitHubRepositoryFiles = async (
     if (isRecoverableGitHubError(error)) {
       return {
         ref,
-        files: await fetchPublicMirrorRepositoryFiles(reference, ref, normalizedPath),
+        files: await fetchPublicMirrorRepositoryFiles(reference, ref, ""),
       };
     }
-
-    if (!normalizedPath || !(error instanceof Error) || error.message !== "GitHub repository path not found.") {
-      throw error;
-    }
-
-    const rootTree = await readTree("");
-    const filtered = (rootTree.tree ?? []).filter((entry) => entry.path.startsWith(normalizedPath));
-    if (filtered.length === 0) {
-      throw error;
-    }
-    return {
-      ref,
-      files: convertTreeToRepositoryFiles(filtered, normalizedPath, {
-        owner: reference.owner,
-        repo: reference.repo,
-        ref,
-      }),
-    };
+    throw error;
   }
 };
 
@@ -698,6 +683,21 @@ export const inspectGitHubRepositoryUrdfs = async (
   options: InspectGitHubRepositoryOptions = {}
 ): Promise<GitHubRepositoryInspectionResult> => {
   const { ref, files } = await fetchGitHubRepositoryFiles(reference, options.accessToken);
+  const scope = resolveRepositoryScopeFromFiles(files, reference.path);
+  if (!scope) {
+    throw new Error("GitHub repository path not found.");
+  }
+  const packageNameByPath = await buildPackageNameByPathFromRepositoryFiles(files, (file) =>
+    fetchGitHubTextFile(
+      reference.owner,
+      reference.repo,
+      file.path,
+      file.sha,
+      options.accessToken,
+      ref,
+      file.download_url
+    )
+  );
   const summary = await inspectRepositoryFiles(
     files,
     (_candidate, file) =>
@@ -710,7 +710,15 @@ export const inspectGitHubRepositoryUrdfs = async (
         ref,
         file.download_url
       ),
-    options
+    {
+      ...options,
+      candidateFilter: (candidate) => {
+        const matchesRequestedScope = matchesRepositoryScope(candidate.path, scope);
+        const matchesCallerFilter = options.candidateFilter ? options.candidateFilter(candidate) : true;
+        return matchesRequestedScope && matchesCallerFilter;
+      },
+      packageNameByPath,
+    }
   );
 
   return {
@@ -728,7 +736,29 @@ export const repairGitHubRepositoryMeshReferences = async (
   options: RepairGitHubRepositoryOptions = {}
 ): Promise<GitHubRepositoryMeshRepairResult> => {
   const { ref, files } = await fetchGitHubRepositoryFiles(reference, options.accessToken);
-  const normalizedUrdfPath = normalizeRepositoryPath(options.urdfPath ?? reference.path ?? "");
+  const scope = resolveRepositoryScopeFromFiles(files, reference.path);
+  if (reference.path && !scope) {
+    throw new Error("GitHub repository path not found.");
+  }
+  const packageNameByPath = await buildPackageNameByPathFromRepositoryFiles(files, (file) =>
+    fetchGitHubTextFile(
+      reference.owner,
+      reference.repo,
+      file.path,
+      file.sha,
+      options.accessToken,
+      ref,
+      file.download_url
+    )
+  );
+  const normalizedUrdfPath = resolveRepositoryScopedPathFromFiles(
+    files,
+    scope ?? {
+      kind: "root",
+      path: "",
+    },
+    options.urdfPath ?? reference.path ?? ""
+  );
   if (!normalizedUrdfPath) {
     throw new Error(
       "GitHub repository repair requires --urdf unless the GitHub reference already points to a URDF or Xacro file."
@@ -755,7 +785,11 @@ export const repairGitHubRepositoryMeshReferences = async (
     urdfContent,
     targetFile.path,
     files,
-    options
+    {
+      ...options,
+      packageNameByPath,
+      normalizeResolvableReferences: options.normalizeResolvableReferences ?? true,
+    }
   );
 
   return {

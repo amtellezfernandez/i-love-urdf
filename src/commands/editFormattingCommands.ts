@@ -1,16 +1,17 @@
 import {
   canonicalOrderURDF,
-  fixMeshPaths,
   normalizeJointAxes,
   prettyPrintURDF,
   snapJointAxes,
   updateMeshPathsToAssetsInUrdf,
 } from "../index";
 import { emitWrittenPayload, type EditCommandHandler } from "./editCommandRuntime";
+import { fixLocalMeshPaths } from "./localMeshReferenceInspection";
 
 export const EDIT_FORMATTING_COMMAND_HANDLERS = {
-  "fix-mesh-paths": ({ args, helpers, urdfContent, outPath }) => {
-    const result = fixMeshPaths(urdfContent, helpers.getOptionalStringArg(args, "package"));
+  "fix-mesh-paths": ({ args, helpers, urdfPath, urdfContent, outPath }) => {
+    const explicitPackageName = helpers.getOptionalStringArg(args, "package");
+    const result = fixLocalMeshPaths(urdfPath, urdfContent, { packageName: explicitPackageName });
     emitWrittenPayload(helpers, outPath, result.urdfContent, result);
   },
 

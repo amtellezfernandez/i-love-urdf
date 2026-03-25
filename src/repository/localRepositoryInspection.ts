@@ -10,6 +10,8 @@ import {
   type InspectRepositoryFilesOptions,
   type RepositoryInspectionSummary,
 } from "./repositoryInspection";
+import { buildPackageNameByPathFromRepositoryFiles } from "./repositoryPackageNames";
+import { matchesRepositoryScope, type RepositoryScope } from "./repositoryPathScope";
 import { normalizeRepositoryPath } from "./repositoryMeshResolution";
 
 export type LocalRepositoryReference = {
@@ -87,17 +89,52 @@ const readFileStats = async (
   }
 };
 
-const resolveLocalRepositoryReference = async (
-  reference: LocalRepositoryReference
-) => {
-  const inspectedPath = path.resolve(reference.path);
-  const stats = await readFileStats(inspectedPath, { allowSkip: false });
-  const rootPath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
-  return { inspectedPath, stats, rootPath };
+const pathExists = async (absolutePath: string): Promise<boolean> => {
+  try {
+    await fs.access(absolutePath);
+    return true;
+  } catch (error) {
+    if (isSkippableWalkError(error)) {
+      return false;
+    }
+    throw error;
+  }
 };
 
-export const resolveLocalRepositoryFile = async (
+const findNearestLocalRepositoryRoot = async (startPath: string): Promise<string> => {
+  let currentPath = path.resolve(startPath);
+
+  while (true) {
+    if (await pathExists(path.join(currentPath, "package.xml"))) {
+      return currentPath;
+    }
+
+    const parentPath = path.dirname(currentPath);
+    if (parentPath === currentPath) {
+      break;
+    }
+    currentPath = parentPath;
+  }
+
+  currentPath = path.resolve(startPath);
+  while (true) {
+    if (await pathExists(path.join(currentPath, ".git"))) {
+      return currentPath;
+    }
+
+    const parentPath = path.dirname(currentPath);
+    if (parentPath === currentPath) {
+      break;
+    }
+    currentPath = parentPath;
+  }
+
+  return path.resolve(startPath);
+};
+
+export const resolveLocalRepositoryScopedFile = async (
   rootPath: string,
+  scopedBasePath: string,
   requestedPath: string,
   messages: {
     outsideRoot: string;
@@ -108,16 +145,11 @@ export const resolveLocalRepositoryFile = async (
   absolutePath: string;
 }> => {
   const normalizedRequestedPath = normalizeRepositoryPath(requestedPath);
-  if (!normalizedRequestedPath || normalizedRequestedPath.startsWith("..")) {
+  if (!normalizedRequestedPath) {
     throw new Error(messages.outsideRoot);
   }
 
-  const absoluteRequestedPath = path.resolve(rootPath, normalizedRequestedPath);
-  const lexicalRelativePath = normalizeRepositoryPath(path.relative(rootPath, absoluteRequestedPath));
-  if (!lexicalRelativePath || lexicalRelativePath.startsWith("..")) {
-    throw new Error(messages.outsideRoot);
-  }
-
+  const absoluteRequestedPath = path.resolve(scopedBasePath, requestedPath);
   const [realRootPath, realTargetPath] = await Promise.all([
     fs.realpath(rootPath),
     fs.realpath(absoluteRequestedPath),
@@ -137,6 +169,44 @@ export const resolveLocalRepositoryFile = async (
     absolutePath: realTargetPath,
   };
 };
+
+export const resolveLocalRepositoryReference = async (
+  reference: LocalRepositoryReference
+) => {
+  const inspectedPath = path.resolve(reference.path);
+  const stats = await readFileStats(inspectedPath, { allowSkip: false });
+  const scopedBasePath = stats.isDirectory() ? inspectedPath : path.dirname(inspectedPath);
+  const rootPath = await findNearestLocalRepositoryRoot(scopedBasePath);
+  const scopePath = normalizeRepositoryPath(path.relative(rootPath, inspectedPath));
+  const scope: RepositoryScope = stats.isDirectory()
+    ? scopePath
+      ? {
+          kind: "dir",
+          path: scopePath,
+        }
+      : {
+          kind: "root",
+          path: "",
+        }
+    : {
+        kind: "file",
+        path: scopePath || path.basename(inspectedPath),
+      };
+  return { inspectedPath, scopedBasePath, scope, stats, rootPath };
+};
+
+export const resolveLocalRepositoryFile = async (
+  rootPath: string,
+  requestedPath: string,
+  messages: {
+    outsideRoot: string;
+    notFile: (absolutePath: string) => string;
+  }
+): Promise<{
+  filePath: string;
+  absolutePath: string;
+}> =>
+  resolveLocalRepositoryScopedFile(rootPath, rootPath, requestedPath, messages);
 
 const walkLocalRepository = async (
   absoluteRootPath: string,
@@ -207,22 +277,26 @@ const resolveLocalRepositoryTarget = async (
   urdfPath: string;
   urdfContent: string;
 }> => {
-  const { inspectedPath, stats, rootPath } = await resolveLocalRepositoryReference(reference);
+  const { inspectedPath, scopedBasePath, scope, stats, rootPath } =
+    await resolveLocalRepositoryReference(reference);
 
-  const { filePath: normalizedUrdfPath, absolutePath: absoluteUrdfPath } = stats.isDirectory()
-    ? await (() => {
-        if (!requestedUrdfPath) {
+  const { filePath: normalizedUrdfPath, absolutePath: absoluteUrdfPath } = requestedUrdfPath
+    ? await resolveLocalRepositoryScopedFile(rootPath, scopedBasePath, requestedUrdfPath, {
+        outsideRoot: "Target URDF must stay inside the local repository root.",
+        notFile: (absolutePath) => `Local repository target is not a file: ${absolutePath}`,
+      })
+    : await (() => {
+        if (stats.isDirectory()) {
           throw new Error("Local repository repair requires --urdf when --local points to a directory.");
         }
-        return resolveLocalRepositoryFile(rootPath, requestedUrdfPath, {
-          outsideRoot: "Target URDF must stay inside the local repository root.",
-          notFile: (absolutePath) => `Local repository target is not a file: ${absolutePath}`,
+        if (scope.kind !== "file") {
+          throw new Error("Local repository repair could not resolve the selected URDF file.");
+        }
+        return Promise.resolve({
+          filePath: scope.path,
+          absolutePath: inspectedPath,
         });
-      })()
-    : {
-        filePath: normalizeRepositoryPath(path.basename(inspectedPath)),
-        absolutePath: inspectedPath,
-      };
+      })();
 
   const [files, urdfContent] = await Promise.all([
     collectLocalRepositoryFiles(rootPath),
@@ -242,22 +316,21 @@ export const inspectLocalRepositoryUrdfs = async (
   reference: LocalRepositoryReference,
   options: InspectLocalRepositoryOptions = {}
 ): Promise<LocalRepositoryInspectionResult> => {
-  const { inspectedPath, stats, rootPath } = await resolveLocalRepositoryReference(reference);
-  const candidateFilter =
-    stats.isFile()
-      ? (candidatePath: string) =>
-          normalizeRepositoryPath(candidatePath) ===
-          normalizeRepositoryPath(path.relative(rootPath, inspectedPath))
-      : null;
+  const { inspectedPath, scope, rootPath } = await resolveLocalRepositoryReference(reference);
 
   const files = await collectLocalRepositoryFiles(rootPath);
+  const packageNameByPath = await buildPackageNameByPathFromRepositoryFiles(
+    files,
+    async (file) => fs.readFile(file.absolutePath, "utf8")
+  );
   const summary = await inspectRepositoryFiles(
     files,
     async (_candidate, file) => fs.readFile(file.absolutePath, "utf8"),
     {
       ...options,
+      packageNameByPath,
       candidateFilter: (candidate) => {
-        const matchesLocalTarget = candidateFilter ? candidateFilter(candidate.path) : true;
+        const matchesLocalTarget = matchesRepositoryScope(candidate.path, scope);
         const matchesCallerFilter = options.candidateFilter ? options.candidateFilter(candidate) : true;
         return matchesLocalTarget && matchesCallerFilter;
       },
@@ -278,7 +351,15 @@ export const repairLocalRepositoryMeshReferences = async (
 ): Promise<LocalRepositoryMeshRepairResult> => {
   const { files, rootPath, inspectedPath, urdfPath, urdfContent } =
     await resolveLocalRepositoryTarget(reference, options.urdfPath);
-  const result = fixMissingMeshReferencesInRepository(urdfContent, urdfPath, files, options);
+  const packageNameByPath = await buildPackageNameByPathFromRepositoryFiles(
+    files,
+    async (file) => fs.readFile(file.absolutePath, "utf8")
+  );
+  const result = fixMissingMeshReferencesInRepository(urdfContent, urdfPath, files, {
+    ...options,
+    packageNameByPath,
+    normalizeResolvableReferences: options.normalizeResolvableReferences ?? true,
+  });
 
   return {
     source: "local",

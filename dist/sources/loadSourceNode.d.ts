@@ -14,6 +14,8 @@ export type LoadSourceResult = {
     runtime: XacroRuntimeName | null;
     candidateCount?: number;
     primaryCandidatePath?: string | null;
+    meshReferenceCorrectionCount?: number;
+    meshReferenceUnresolvedCount?: number;
 };
 export type LoadSourcePathOptions = XacroRuntimeOptions & InspectRepositoryFilesOptions & {
     path: string;

@@ -165,6 +165,8 @@ const applySharedSessionSnapshotToState = (state, snapshot, options = {}) => {
             githubRef: snapshot.loadedSource.githubRef,
             githubRevision: snapshot.loadedSource.githubRevision,
             repositoryUrdfPath: snapshot.loadedSource.repositoryUrdfPath,
+            meshReferenceCorrectionCount: snapshot.loadedSource.meshReferenceCorrectionCount,
+            meshReferenceUnresolvedCount: snapshot.loadedSource.meshReferenceUnresolvedCount,
         }
         : null;
 };
@@ -183,6 +185,8 @@ const getSharedSessionLoadedSource = (state) => {
             githubRef: loadedSource.githubRef,
             githubRevision: loadedSource.githubRevision,
             repositoryUrdfPath: loadedSource.repositoryUrdfPath,
+            meshReferenceCorrectionCount: loadedSource.meshReferenceCorrectionCount,
+            meshReferenceUnresolvedCount: loadedSource.meshReferenceUnresolvedCount,
         }
         : null;
 };

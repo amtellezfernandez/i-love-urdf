@@ -156,7 +156,7 @@ const getPackageNameOverride = (packageNameByPath, path) => {
 const buildPackageRootsFromRepositoryFiles = (files, options = {}) => {
     const roots = new Map();
     const addRoot = (packageName, rootPath) => {
-        if (!packageName || !rootPath)
+        if (!packageName)
             return;
         let entry = roots.get(packageName);
         if (!entry) {
@@ -169,10 +169,8 @@ const buildPackageRootsFromRepositoryFiles = (files, options = {}) => {
         if (file.type !== "file")
             return;
         const lowerPath = file.path.toLowerCase();
-        if (lowerPath.endsWith("/package.xml")) {
+        if (lowerPath === "package.xml" || lowerPath.endsWith("/package.xml")) {
             const rootPath = (0, exports.repositoryDirname)(file.path);
-            if (!rootPath)
-                return;
             const parts = rootPath.split("/").filter(Boolean);
             const packageName = getPackageNameOverride(options.packageNameByPath, file.path) ?? parts[parts.length - 1];
             if (packageName) {
@@ -234,13 +232,15 @@ const findFileByCandidates = (candidates, lowerCaseFileMap) => {
 const getPackageRootCandidates = (packageName, packageRoots, urdfPath) => {
     const roots = new Set();
     const direct = packageRoots[packageName] ?? [];
-    direct.forEach((root) => roots.add((0, meshPaths_1.normalizeMeshPathForMatch)(root)));
+    direct.forEach((root) => {
+        roots.add(root === "" ? "" : (0, meshPaths_1.normalizeMeshPathForMatch)(root));
+    });
     const urdfParts = (0, meshPaths_1.normalizeMeshPathForMatch)(urdfPath).split("/").filter(Boolean);
     const index = urdfParts.indexOf(packageName);
     if (index !== -1) {
         roots.add(urdfParts.slice(0, index + 1).join("/"));
     }
-    return Array.from(roots).filter(Boolean);
+    return Array.from(roots);
 };
 const resolveRepositoryFileReference = (urdfPath, meshRef, files, options) => {
     if (!meshRef)

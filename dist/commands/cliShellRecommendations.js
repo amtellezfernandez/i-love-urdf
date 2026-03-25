@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCandidateDetails = exports.detectSuggestedAction = exports.hasAttentionIssues = exports.collectAttentionLines = exports.getHealthStatusLine = exports.getValidationStatusLine = exports.appendSuggestedActionLines = exports.formatAttentionDetail = exports.buildInstallVisualizerSuggestion = exports.buildOpenVisualizerSuggestion = exports.shouldPromptVisualizerBeforeSuggestedAction = exports.buildAlignOrientationSuggestion = exports.buildReviewAttentionSuggestion = exports.buildFixMeshPathsSuggestion = exports.buildRepairMeshRefsSuggestion = void 0;
 const fs = require("node:fs");
 const fixMeshPaths_1 = require("../mesh/fixMeshPaths");
+const localMeshReferenceInspection_1 = require("./localMeshReferenceInspection");
 const buildRepairMeshRefsSuggestion = () => ({
     kind: "repair-mesh-refs",
     summary: "mesh references need attention",
@@ -182,7 +183,15 @@ const getOrientationSuggestion = (orientationGuess) => {
 };
 const detectSuggestedAction = (state, options = {}) => {
     const source = state.loadedSource;
-    if ((options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 &&
+    const pendingRepositoryMeshWork = (source?.meshReferenceUnresolvedCount ?? 0) > 0 || (source?.meshReferenceCorrectionCount ?? 0) > 0;
+    if (pendingRepositoryMeshWork &&
+        source &&
+        (source.source === "local-repo" || source.source === "github") &&
+        source.repositoryUrdfPath) {
+        return (0, exports.buildRepairMeshRefsSuggestion)();
+    }
+    if (((options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 ||
+        (options.selectedCandidate?.normalizableMeshReferenceCount ?? 0) > 0) &&
         source &&
         (source.source === "local-repo" || source.source === "github") &&
         source.repositoryUrdfPath) {
@@ -192,8 +201,12 @@ const detectSuggestedAction = (state, options = {}) => {
     if (urdfPath && source?.source === "local-file") {
         try {
             const currentUrdf = fs.readFileSync(urdfPath, "utf8");
-            const fixed = (0, fixMeshPaths_1.fixMeshPaths)(currentUrdf);
-            if (fixed.corrections.length > 0) {
+            const meshReport = (0, localMeshReferenceInspection_1.inspectLocalMeshReferences)(urdfPath, currentUrdf);
+            const syntaxOnlyFixes = (0, fixMeshPaths_1.fixMeshPaths)(currentUrdf, {
+                packageName: meshReport.packageName ?? undefined,
+                convertRelativeToPackage: false,
+            });
+            if (meshReport.summary.unresolved > 0 || syntaxOnlyFixes.corrections.length > 0) {
                 return (0, exports.buildFixMeshPathsSuggestion)();
             }
         }
@@ -206,7 +219,7 @@ const detectSuggestedAction = (state, options = {}) => {
 exports.detectSuggestedAction = detectSuggestedAction;
 const getCandidateDetails = (candidate) => {
     const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
-    if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
+    if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0 || (candidate.normalizableMeshReferenceCount ?? 0) > 0) {
         details.push("mesh refs need attention");
     }
     const requiredXacroArgs = (candidate.xacroArgs ?? []).filter((arg) => arg.isRequired).length;

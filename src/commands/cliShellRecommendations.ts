@@ -6,6 +6,7 @@ import type {
   ShellState,
   SuggestedActionPrompt,
 } from "./cliShellTypes";
+import { inspectLocalMeshReferences } from "./localMeshReferenceInspection";
 
 export const buildRepairMeshRefsSuggestion = (): SuggestedActionPrompt => ({
   kind: "repair-mesh-refs",
@@ -273,8 +274,20 @@ export const detectSuggestedAction = (
   } = {}
 ): SuggestedActionPrompt | null => {
   const source = state.loadedSource;
+  const pendingRepositoryMeshWork =
+    (source?.meshReferenceUnresolvedCount ?? 0) > 0 || (source?.meshReferenceCorrectionCount ?? 0) > 0;
   if (
-    (options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 &&
+    pendingRepositoryMeshWork &&
+    source &&
+    (source.source === "local-repo" || source.source === "github") &&
+    source.repositoryUrdfPath
+  ) {
+    return buildRepairMeshRefsSuggestion();
+  }
+
+  if (
+    ((options.selectedCandidate?.unresolvedMeshReferenceCount ?? 0) > 0 ||
+      (options.selectedCandidate?.normalizableMeshReferenceCount ?? 0) > 0) &&
     source &&
     (source.source === "local-repo" || source.source === "github") &&
     source.repositoryUrdfPath
@@ -286,8 +299,12 @@ export const detectSuggestedAction = (
   if (urdfPath && source?.source === "local-file") {
     try {
       const currentUrdf = fs.readFileSync(urdfPath, "utf8");
-      const fixed = fixMeshPaths(currentUrdf);
-      if (fixed.corrections.length > 0) {
+      const meshReport = inspectLocalMeshReferences(urdfPath, currentUrdf);
+      const syntaxOnlyFixes = fixMeshPaths(currentUrdf, {
+        packageName: meshReport.packageName ?? undefined,
+        convertRelativeToPackage: false,
+      });
+      if (meshReport.summary.unresolved > 0 || syntaxOnlyFixes.corrections.length > 0) {
         return buildFixMeshPathsSuggestion();
       }
     } catch {
@@ -302,7 +319,7 @@ export const getCandidateDetails = (
   candidate: RepositoryPreviewCandidate
 ): string[] => {
   const details = [candidate.inspectionMode === "xacro-source" ? "xacro" : "urdf"];
-  if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0) {
+  if ((candidate.unresolvedMeshReferenceCount ?? 0) > 0 || (candidate.normalizableMeshReferenceCount ?? 0) > 0) {
     details.push("mesh refs need attention");
   }
   const requiredXacroArgs = (candidate.xacroArgs ?? []).filter((arg) => arg.isRequired).length;

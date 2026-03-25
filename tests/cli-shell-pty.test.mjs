@@ -75,7 +75,7 @@ ptyTest("TTY shell lets arrows pick a candidate entrypoint", async () => {
         { delayMs: 350, data: "\r" },
         { delayMs: 600, data: "\u0003" },
       ],
-      timeoutMs: 10_000,
+      timeoutMs: 12_000,
     });
 
     assert.equal(result.code, 0);
@@ -143,7 +143,7 @@ ptyTest("TTY shell accepts the startup update prompt with Enter", async () => {
       { delayMs: 1_100, data: "\r" },
       { delayMs: 900, data: "\u0003" },
     ],
-    timeoutMs: 10_000,
+    timeoutMs: 12_000,
   });
 
   assert.equal(result.code, 0);
@@ -234,12 +234,17 @@ ptyTest("TTY shell asks to open URDF Studio before the repair recommendation", a
         { delayMs: 1_100, data: "\u001b" },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\u0003" },
+        { delayMs: 900, data: "2" },
       ],
       timeoutMs: 10_000,
     });
 
     assert.equal(result.code, 0);
     assert.match(result.sanitizedOutput, /open URDF Studio before repairing mesh paths\?/i);
+    assert.match(result.sanitizedOutput, /1\.\s+Open Studio/i);
+    assert.match(result.sanitizedOutput, /2\.\s+Continue here/i);
+    assert.match(result.sanitizedOutput, /\[Enter\]\s+confirm/i);
+    assert.match(result.sanitizedOutput, /\[Esc\]\s+Continue here/i);
     assert.match(result.sanitizedOutput, /repair mesh paths now\?/i);
     assert.match(result.sanitizedOutput, /repairing mesh paths/i);
     assert.match(result.sanitizedOutput, /working urdf .*broken\.urdf/i);
@@ -282,14 +287,21 @@ ptyTest("TTY shell offers Studio install when the visualizer is missing", async 
     steps: [
       { delayMs: 150, data: `${yUpUrdfPath}\n` },
       { delayMs: 1_100, data: "\r" },
-      { delayMs: 1_100, data: "\u0003" },
+      { delayMs: 2_000, data: "2" },
+      { delayMs: 1_000, data: "\u0003" },
     ],
-    timeoutMs: 12_000,
+    timeoutMs: 14_000,
   });
 
   assert.equal(result.code, 0);
   assert.match(result.sanitizedOutput, /open URDF Studio before aligning orientation\?/i);
+  assert.match(result.sanitizedOutput, /1\.\s+Open Studio/i);
+  assert.match(result.sanitizedOutput, /2\.\s+Continue here/i);
+  assert.match(result.sanitizedOutput, /\[Enter\]\s+confirm/i);
+  assert.match(result.sanitizedOutput, /\[Esc\]\s+Continue here/i);
   assert.match(result.sanitizedOutput, /install URDF Studio to visualize your modifications\?/i);
+  assert.match(result.sanitizedOutput, /1\.\s+Install Studio/i);
+  assert.match(result.sanitizedOutput, /2\.\s+Not now/i);
   assert.doesNotMatch(result.sanitizedOutput, /loaded the source|source loaded\. review the checks/i);
 });
 
@@ -300,22 +312,29 @@ ptyTest("TTY shell accepts the suggested orientation fix after skipping URDF Stu
       ILU_DISABLE_UPDATE_CHECK: "1",
       URDF_STUDIO_REPO: missingStudioRepoPath,
     },
-    steps: [
-      { delayMs: 150, data: `${yUpUrdfPath}\n` },
-      { delayMs: 1_100, data: "\u001b" },
-      { delayMs: 1_100, data: "\r" },
-      { delayMs: 1_100, data: "\u0003" },
-    ],
-    timeoutMs: 12_000,
+      steps: [
+        { delayMs: 150, data: `${yUpUrdfPath}\n` },
+        { delayMs: 1_100, data: "\u001b[B" },
+        { delayMs: 500, data: "\r" },
+        { delayMs: 1_100, data: "1" },
+        { delayMs: 1_100, data: "\u0003" },
+        { delayMs: 900, data: "2" },
+      ],
+      timeoutMs: 12_000,
   });
 
   assert.equal(result.code, 0);
   assert.match(result.sanitizedOutput, /open URDF Studio before aligning orientation\?/i);
+  assert.match(result.sanitizedOutput, /1\.\s+Open Studio/i);
+  assert.match(result.sanitizedOutput, /2\.\s+Continue here/i);
   assert.match(result.sanitizedOutput, /align orientation to \+z-up \/ \+x-forward now\?/i);
+  assert.match(result.sanitizedOutput, /1\.\s+Align now/i);
+  assert.match(result.sanitizedOutput, /2\.\s+Not now/i);
   assert.match(result.sanitizedOutput, /aligning orientation/i);
   assert.match(result.sanitizedOutput, /working urdf .*research_wheeled_y_up\.urdf/i);
   assert.doesNotMatch(result.sanitizedOutput, /loaded the source|source loaded\. review the checks/i);
   assert.doesNotMatch(result.sanitizedOutput, /updated the working copy|working copy ready/i);
+  assert.doesNotMatch(result.sanitizedOutput, /opened URDF Studio for the current session/i);
 });
 
 ptyTest("TTY shell asks whether to quit URDF Studio on Ctrl+C when Studio is open", async () => {
@@ -363,22 +382,117 @@ ptyTest("TTY shell asks whether to quit URDF Studio on Ctrl+C when Studio is ope
         { delayMs: 150, data: `${yUpUrdfPath}\n` },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\u0003" },
-        { delayMs: 900, data: "\u001b" },
+        { delayMs: 900, data: "\r" },
       ],
       timeoutMs: 12_000,
     });
 
     assert.equal(result.code, 0);
-    assert.match(result.sanitizedOutput, /quit URDF Studio/i);
-    assert.match(result.sanitizedOutput, /\[Enter\]\s+Keep Studio/i);
-    assert.match(result.sanitizedOutput, /\[Esc\]\s+Quit Studio/i);
+    assert.match(result.sanitizedOutput, /leave ilu and stop URDF Studio/i);
+    assert.match(result.sanitizedOutput, /1\.\s+Quit Studio and exit/i);
+    assert.match(result.sanitizedOutput, /2\.\s+Keep Studio open/i);
+    assert.match(result.sanitizedOutput, /\[Enter\]\s+confirm/i);
+    assert.match(result.sanitizedOutput, /\[Esc\]\s+Keep Studio open/i);
     assert.match(result.sanitizedOutput, /stopped URDF Studio/i);
+    assert.doesNotMatch(result.sanitizedOutput, /ilu terminal disconnected\. URDF Studio kept/i);
 
     const deadline = Date.now() + 3_000;
     while (Date.now() < deadline && isProcessAlive(managedStudio.pid)) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.equal(isProcessAlive(managedStudio.pid), false);
+  } finally {
+    await new Promise((resolve) => webServer.close(resolve));
+    await new Promise((resolve) => apiServer.close(resolve));
+    if (isProcessAlive(managedStudio.pid)) {
+      try {
+        process.kill(-managedStudio.pid, "SIGKILL");
+      } catch {
+        try {
+          process.kill(managedStudio.pid, "SIGKILL");
+        } catch {
+          // Ignore final cleanup failures in tests.
+        }
+      }
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+ptyTest("TTY shell saves the working URDF before the Studio exit prompt", async () => {
+  const tempDir = createTempDir("ilu-pty-save-exit-");
+  const runtimeFile = path.join(tempDir, "studio-runtime.json");
+  const managedStudio = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000);"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  managedStudio.unref();
+  fs.writeFileSync(
+    runtimeFile,
+    `${JSON.stringify(
+      {
+        pid: managedStudio.pid,
+        studioRoot: tempDir,
+        webUrl: "http://127.0.0.1:1/",
+        apiHealthUrl: "http://127.0.0.1:2/health",
+        startedAt: new Date().toISOString(),
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+
+  const webServer = await startHttpServer();
+  const apiServer = await startHttpServer();
+  const webAddress = webServer.address();
+  const apiAddress = apiServer.address();
+  const sourcePath = path.join(tempDir, "broken.urdf");
+  fs.writeFileSync(
+    sourcePath,
+    '<robot name="broken"><link name="base"><visual><geometry><mesh filename="meshes\\\\part.stl"/></geometry></visual></link></robot>',
+    "utf8"
+  );
+
+  try {
+    assert.equal(typeof webAddress === "object" && webAddress ? webAddress.port > 0 : false, true);
+    assert.equal(typeof apiAddress === "object" && apiAddress ? apiAddress.port > 0 : false, true);
+
+    const result = await runPtyShellSession({
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+        ILU_STUDIO_RUNTIME_FILE: runtimeFile,
+        URDF_STUDIO_URL: `http://127.0.0.1:${webAddress.port}/`,
+        URDF_STUDIO_API_URL: `http://127.0.0.1:${apiAddress.port}/health`,
+      },
+      steps: [
+        { delayMs: 150, data: `${sourcePath}\n` },
+        { delayMs: 1_100, data: "\r" },
+        { delayMs: 1_100, data: "1" },
+        { delayMs: 1_100, data: "\u0003" },
+        { delayMs: 900, data: "\r" },
+        { delayMs: 900, data: "\r" },
+        { delayMs: 900, data: "\r" },
+      ],
+      timeoutMs: 18_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /save the working URDF before exit\?/i);
+    assert.match(result.sanitizedOutput, /1\.\s+Save changes/i);
+    assert.match(result.sanitizedOutput, /2\.\s+Exit without saving/i);
+    assert.match(result.sanitizedOutput, /save path\s+Enter uses/i);
+    assert.match(result.sanitizedOutput, /saved working URDF to .*broken\.urdf/i);
+    assert.match(result.sanitizedOutput, /leave ilu and stop URDF Studio/i);
+
+    const savePromptIndex = result.sanitizedOutput.search(/save the working URDF before exit\?/i);
+    const studioPromptIndex = result.sanitizedOutput.search(/leave ilu and stop URDF Studio/i);
+    assert.ok(savePromptIndex >= 0);
+    assert.ok(studioPromptIndex > savePromptIndex);
+
+    const savedContent = fs.readFileSync(sourcePath, "utf8");
+    assert.match(savedContent, /meshes\/part\.stl/);
+    assert.doesNotMatch(savedContent, /meshes\\\\part\.stl/);
   } finally {
     await new Promise((resolve) => webServer.close(resolve));
     await new Promise((resolve) => apiServer.close(resolve));
@@ -408,6 +522,7 @@ ptyTest("TTY shell applies /align without opening the URDF manually", async () =
       { delayMs: 1_100, data: "/align" },
       { delayMs: 250, data: "\r" },
       { delayMs: 1_100, data: "\u0003" },
+      { delayMs: 900, data: "2" },
     ],
     timeoutMs: 10_000,
   });
@@ -439,13 +554,15 @@ ptyTest("TTY shell offers a remaining-issues review after a partial repair", asy
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\u0003" },
+        { delayMs: 900, data: "2" },
       ],
-      timeoutMs: 12_000,
+      timeoutMs: 14_000,
     });
 
     assert.equal(result.code, 0);
     assert.match(result.sanitizedOutput, /review the remaining issues now\?/i);
-    assert.match(result.sanitizedOutput, /\[Enter\]\s+Review now/i);
+    assert.match(result.sanitizedOutput, /1\.\s+Review now/i);
+    assert.match(result.sanitizedOutput, /2\.\s+Later/i);
     assert.match(result.sanitizedOutput, /reviewing the remaining issues\.\.\./i);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

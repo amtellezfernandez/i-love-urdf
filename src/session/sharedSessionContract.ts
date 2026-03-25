@@ -17,6 +17,8 @@ export type IluSharedLoadedSource = {
   githubRef?: string;
   githubRevision?: string;
   repositoryUrdfPath?: string;
+  meshReferenceCorrectionCount?: number;
+  meshReferenceUnresolvedCount?: number;
 };
 
 export type IluSharedSessionGitHubSource = {
@@ -60,6 +62,10 @@ export const coerceIluSharedLoadedSource = (
     githubRevision: typeof raw.githubRevision === "string" ? raw.githubRevision : undefined,
     repositoryUrdfPath:
       typeof raw.repositoryUrdfPath === "string" ? raw.repositoryUrdfPath : undefined,
+    meshReferenceCorrectionCount:
+      typeof raw.meshReferenceCorrectionCount === "number" ? raw.meshReferenceCorrectionCount : undefined,
+    meshReferenceUnresolvedCount:
+      typeof raw.meshReferenceUnresolvedCount === "number" ? raw.meshReferenceUnresolvedCount : undefined,
   };
 };
 

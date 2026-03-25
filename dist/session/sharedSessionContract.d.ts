@@ -9,6 +9,8 @@ export type IluSharedLoadedSource = {
     githubRef?: string;
     githubRevision?: string;
     repositoryUrdfPath?: string;
+    meshReferenceCorrectionCount?: number;
+    meshReferenceUnresolvedCount?: number;
 };
 export type IluSharedSessionGitHubSource = {
     owner: string;

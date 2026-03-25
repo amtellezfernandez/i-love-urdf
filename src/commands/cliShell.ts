@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -80,6 +81,7 @@ import type {
   RootShellCommandDefinition,
   RootTaskActionDefinition,
   RootTaskName,
+  SavePromptState,
   SessionOptionEntry,
   SessionOptionPriority,
   ShellBangCommandName,
@@ -122,11 +124,11 @@ import {
   attachShellToSharedSession,
   openVisualizerForShellState,
   persistShellSharedSession,
+  readIluSharedSession,
   readLatestIluSharedSession,
   type IluSharedSessionSnapshot,
 } from "../session/sharedSession";
 import { readGitHubCliToken } from "../node/githubCliAuth";
-import { fixMeshPaths } from "../mesh/fixMeshPaths";
 import { parseGitHubRepositoryReference } from "../repository/githubRepositoryInspection";
 import type { LoadSourceResult } from "../sources/loadSourceNode";
 import {
@@ -136,6 +138,7 @@ import {
   type GalleryRepoSource,
 } from "../gallery/galleryGeneration";
 import { buildApplyRepoFixesSuggestion, summarizeRepoFixesPreviewPanel } from "../gallery/repoBatchGuidance";
+import { fixLocalMeshPaths } from "./localMeshReferenceInspection";
 import {
   getPreferredStudioInstallRoot,
   installStudio,
@@ -213,6 +216,237 @@ const clearExitPrompt = (state: Pick<ShellState, "exitPrompt">) => {
   state.exitPrompt = null;
 };
 
+const clearSavePrompt = (state: Pick<ShellState, "savePrompt">) => {
+  state.savePrompt = null;
+};
+
+const getCurrentWorkingUrdfPath = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">
+): string | null => {
+  const candidate = state.loadedSource?.urdfPath || state.lastUrdfPath;
+  if (typeof candidate !== "string" || candidate.trim().length === 0) {
+    return null;
+  }
+
+  return candidate.trim();
+};
+
+const hashUrdfContent = (content: string): string =>
+  crypto.createHash("sha256").update(content).digest("hex");
+
+const readUrdfFileHash = (urdfPath: string | null | undefined): string | null => {
+  if (!urdfPath || !fs.existsSync(urdfPath) || !fs.statSync(urdfPath).isFile()) {
+    return null;
+  }
+
+  return hashUrdfContent(fs.readFileSync(urdfPath, "utf8"));
+};
+
+const getCurrentSharedSessionUpdatedAt = (
+  state: Pick<ShellState, "sharedSessionId">
+): string | undefined => state.sharedSessionId ? readIluSharedSession(state.sharedSessionId)?.updatedAt : undefined;
+
+const syncSaveBaselineFromSnapshot = (
+  state: Pick<ShellState, "saveBaselineHash" | "saveBaselineUpdatedAt">,
+  snapshot: IluSharedSessionSnapshot | null | undefined
+) => {
+  if (!snapshot) {
+    state.saveBaselineHash = undefined;
+    state.saveBaselineUpdatedAt = undefined;
+    return;
+  }
+
+  state.saveBaselineHash = readUrdfFileHash(snapshot.workingUrdfPath) ?? undefined;
+  state.saveBaselineUpdatedAt = snapshot.updatedAt;
+};
+
+const seedSaveBaselineFromCurrentSharedSessionIfUnset = (
+  state: Pick<ShellState, "saveBaselineHash" | "saveBaselineUpdatedAt" | "sharedSessionId">
+) => {
+  if (state.saveBaselineHash || state.saveBaselineUpdatedAt || !state.sharedSessionId) {
+    return;
+  }
+
+  syncSaveBaselineFromSnapshot(state, readIluSharedSession(state.sharedSessionId));
+};
+
+const hasUnsavedWorkingCopyChanges = (
+  state: Pick<ShellState, "sharedSessionId" | "saveBaselineHash" | "saveBaselineUpdatedAt" | "loadedSource" | "lastUrdfPath">
+): boolean => {
+  if (!state.sharedSessionId) {
+    return false;
+  }
+
+  const currentHash = readUrdfFileHash(getCurrentWorkingUrdfPath(state));
+  if (currentHash && state.saveBaselineHash) {
+    return currentHash !== state.saveBaselineHash;
+  }
+
+  const currentUpdatedAt = getCurrentSharedSessionUpdatedAt(state);
+  if (currentUpdatedAt && state.saveBaselineUpdatedAt) {
+    return currentUpdatedAt !== state.saveBaselineUpdatedAt;
+  }
+
+  if (currentHash && !state.saveBaselineHash) {
+    return true;
+  }
+
+  return false;
+};
+
+const normalizeSaveFileName = (value: string): string => {
+  const fileName = sanitizeUrdfSnapshotName(value || "robot.urdf");
+  return fileName.replace(/\.urdf$/i, "").concat(".urdf");
+};
+
+const toUrdfDestinationPath = (value: string): string =>
+  value.replace(/\.(urdf\.xacro|xacro|zip)$/i, ".urdf");
+
+const getDefaultSaveDirectory = (): string => {
+  const downloadsDir = path.join(os.homedir(), "Downloads");
+  if (fs.existsSync(downloadsDir)) {
+    try {
+      if (fs.statSync(downloadsDir).isDirectory()) {
+        return downloadsDir;
+      }
+    } catch {
+      // Ignore stat failures and fall back to cwd.
+    }
+  }
+
+  return process.cwd();
+};
+
+const isLikelyEphemeralSourcePath = (value: string): boolean => {
+  const resolved = path.resolve(value);
+  const sessionRoot = path.join(os.homedir(), ".i-love-urdf", "sessions");
+  if (resolved === sessionRoot || resolved.startsWith(`${sessionRoot}${path.sep}`)) {
+    return true;
+  }
+
+  const tmpRoot = path.resolve(os.tmpdir());
+  if (!(resolved === tmpRoot || resolved.startsWith(`${tmpRoot}${path.sep}`))) {
+    return false;
+  }
+
+  return (
+    resolved.includes(`${path.sep}ilu-archive-`) ||
+    resolved.includes(`${path.sep}ilu-loaded-`) ||
+    path.basename(resolved).startsWith("ilu-")
+  );
+};
+
+const getSaveFileNameHint = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">
+): string => {
+  const loadedSource = state.loadedSource;
+  if (loadedSource?.repositoryUrdfPath) {
+    return normalizeSaveFileName(loadedSource.repositoryUrdfPath);
+  }
+
+  if (loadedSource?.localPath && !isLikelyEphemeralSourcePath(loadedSource.localPath)) {
+    return normalizeSaveFileName(loadedSource.localPath);
+  }
+
+  if (loadedSource?.githubRef) {
+    const repoParts = loadedSource.githubRef.split("/").filter(Boolean);
+    const repoName = repoParts[repoParts.length - 1] || "robot";
+    return normalizeSaveFileName(repoName);
+  }
+
+  return normalizeSaveFileName(getCurrentWorkingUrdfPath(state) || "robot.urdf");
+};
+
+const getDefaultSavePath = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">
+): string => {
+  const loadedSource = state.loadedSource;
+  if (loadedSource?.source === "local-file" && loadedSource.localPath && !isLikelyEphemeralSourcePath(loadedSource.localPath)) {
+    return path.resolve(toUrdfDestinationPath(loadedSource.localPath));
+  }
+
+  if (loadedSource?.source === "local-repo" && loadedSource.localPath && !isLikelyEphemeralSourcePath(loadedSource.localPath)) {
+    if (loadedSource.repositoryUrdfPath) {
+      return path.resolve(toUrdfDestinationPath(path.join(loadedSource.localPath, loadedSource.repositoryUrdfPath)));
+    }
+    return path.resolve(path.join(loadedSource.localPath, getSaveFileNameHint(state)));
+  }
+
+  return path.resolve(path.join(getDefaultSaveDirectory(), getSaveFileNameHint(state)));
+};
+
+const resolveSaveDestinationPath = (rawInput: string, defaultPath: string): string => {
+  const trimmed = rawInput.trim();
+  const normalizedInput =
+    trimmed.length > 0
+      ? normalizeFilesystemInput(trimmed) || expandHomePath(trimmed) || trimmed
+      : defaultPath;
+  let resolved = path.resolve(toUrdfDestinationPath(normalizedInput));
+
+  if (fs.existsSync(resolved)) {
+    try {
+      if (fs.statSync(resolved).isDirectory()) {
+        resolved = path.join(resolved, path.basename(defaultPath));
+      }
+    } catch {
+      // Ignore stat failures and keep the resolved path as-is.
+    }
+  } else if (/[\\/]$/.test(normalizedInput)) {
+    resolved = path.join(resolved, path.basename(defaultPath));
+  }
+
+  return resolved;
+};
+
+const saveWorkingUrdfToDestination = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  destinationPath: string
+): {
+  destinationPath: string;
+  savedHash: string;
+} => {
+  const workingUrdfPath = getCurrentWorkingUrdfPath(state);
+  if (!workingUrdfPath || !fs.existsSync(workingUrdfPath)) {
+    throw new Error("working URDF is missing. load a robot before saving");
+  }
+
+  const urdfContent = fs.readFileSync(workingUrdfPath, "utf8");
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+  fs.writeFileSync(destinationPath, urdfContent, "utf8");
+
+  return {
+    destinationPath,
+    savedHash: hashUrdfContent(urdfContent),
+  };
+};
+
+const beginSavePrompt = (
+  state: Pick<ShellState, "savePrompt" | "loadedSource" | "lastUrdfPath">,
+  options: {
+    closeAfterSave: boolean;
+  }
+): boolean => {
+  state.savePrompt = {
+    phase: "confirm",
+    defaultPath: getDefaultSavePath(state),
+    closeAfterSave: options.closeAfterSave,
+  };
+  return true;
+};
+
+const beginSaveExitPrompt = (
+  state: Pick<ShellState, "savePrompt" | "sharedSessionId" | "saveBaselineHash" | "saveBaselineUpdatedAt" | "loadedSource" | "lastUrdfPath">
+): boolean => {
+  if (!hasUnsavedWorkingCopyChanges(state)) {
+    return false;
+  }
+
+  return beginSavePrompt(state, { closeAfterSave: true });
+};
+
+const getActiveSavePrompt = (state: Pick<ShellState, "savePrompt">): SavePromptState | null =>
+  state.savePrompt;
+
 const shouldPromptOnShellExit = (state: Pick<ShellState, "visualizerOpened">): boolean => state.visualizerOpened;
 
 const beginVisualizerExitPrompt = (state: Pick<ShellState, "exitPrompt" | "sharedSessionId" | "visualizerOpened">) => {
@@ -228,32 +462,117 @@ const beginVisualizerExitPrompt = (state: Pick<ShellState, "exitPrompt" | "share
 };
 
 const getVisualizerExitPrompt = (
-  state: Pick<ShellState, "exitPrompt" | "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">
-) =>
-  !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker ? state.exitPrompt : null;
+  state: Pick<ShellState, "exitPrompt">
+) => state.exitPrompt;
+
+const getSaveExitPromptText = (): string => "save the working URDF before exit?";
+
+const getSavePathPromptText = (savePrompt: SavePromptState): string =>
+  `save path  Enter uses ${quoteForPreview(savePrompt.defaultPath)}`;
 
 const getVisualizerExitPromptText = (
   exitPrompt: NonNullable<ShellState["exitPrompt"]>
 ): string =>
   exitPrompt.canStopVisualizer
     ? exitPrompt.sessionId
-      ? `quit URDF Studio for session ${exitPrompt.sessionId}?`
-      : "quit URDF Studio before leaving ilu?"
+      ? `leave ilu and stop URDF Studio for session ${exitPrompt.sessionId}?`
+      : "leave ilu and stop URDF Studio?"
     : exitPrompt.sessionId
-      ? `leave ilu and keep URDF Studio on session ${exitPrompt.sessionId}?`
-      : "leave ilu and keep URDF Studio running?";
+      ? `leave ilu and disconnect from URDF Studio on session ${exitPrompt.sessionId}?`
+      : "leave ilu and disconnect from URDF Studio?";
 
-const getVisualizerExitChoiceLine = (
-  exitPrompt: NonNullable<ShellState["exitPrompt"]>,
-  mode: "tty" | "line"
-): string =>
-  exitPrompt.canStopVisualizer
-    ? mode === "tty"
-      ? `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Keep Studio")}  ${SHELL_THEME.command("[Esc]")} ${SHELL_THEME.muted("Quit Studio")}`
-      : `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Keep Studio")}  ${SHELL_THEME.command("[n]")} ${SHELL_THEME.muted("Quit Studio")}`
-    : mode === "tty"
-      ? `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Exit shell")}  ${SHELL_THEME.command("[Esc]")} ${SHELL_THEME.muted("Stay here")}`
-      : `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("Exit shell")}  ${SHELL_THEME.command("[n]")} ${SHELL_THEME.muted("Stay here")}`;
+type TtyChoicePrompt =
+  | {
+      kind: "save";
+      prompt: SavePromptState;
+      text: string;
+      options: readonly [string, string];
+    }
+  | {
+      kind: "exit";
+      prompt: NonNullable<ShellState["exitPrompt"]>;
+      text: string;
+      options: readonly [string, string];
+    }
+  | {
+      kind: "suggested";
+      prompt: SuggestedActionPrompt;
+      text: string;
+      options: readonly [string, string];
+    };
+
+const getActiveTtyChoicePrompt = (
+  state: Pick<ShellState, "savePrompt" | "exitPrompt" | "suggestedAction" | "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">
+): TtyChoicePrompt | null => {
+  const activeSavePrompt = getActiveSavePrompt(state);
+  if (activeSavePrompt?.phase === "confirm") {
+    return {
+      kind: "save",
+      prompt: activeSavePrompt,
+      text: getSaveExitPromptText(),
+      options: ["Save changes", "Exit without saving"],
+    };
+  }
+
+  const activeExitPrompt = getVisualizerExitPrompt(state);
+  if (activeExitPrompt) {
+    return {
+      kind: "exit",
+      prompt: activeExitPrompt,
+      text: getVisualizerExitPromptText(activeExitPrompt),
+      options: activeExitPrompt.canStopVisualizer
+        ? ["Quit Studio and exit", "Keep Studio open"]
+        : ["Exit shell", "Stay here"],
+    };
+  }
+
+  const activeSuggestedAction = getActiveSuggestedAction(state);
+  if (!activeSuggestedAction) {
+    return null;
+  }
+
+  return {
+    kind: "suggested",
+    prompt: activeSuggestedAction,
+    text: activeSuggestedAction.prompt,
+    options: [activeSuggestedAction.acceptOptionLabel, activeSuggestedAction.skipOptionLabel],
+  };
+};
+
+const getTtyChoicePromptSelectionKey = (prompt: TtyChoicePrompt | null): string | null => {
+  if (!prompt) {
+    return null;
+  }
+
+  if (prompt.kind === "save") {
+    return `save:${prompt.prompt.phase}:${prompt.prompt.defaultPath}:${prompt.prompt.closeAfterSave ? "close" : "stay"}`;
+  }
+
+  if (prompt.kind === "exit") {
+    return `exit:${prompt.prompt.canStopVisualizer ? "managed" : "external"}:${prompt.prompt.sessionId ?? ""}`;
+  }
+
+  return `suggested:${prompt.prompt.kind}:${prompt.prompt.prompt}:${prompt.prompt.acceptOptionLabel}:${prompt.prompt.skipOptionLabel}`;
+};
+
+const renderTtyChoicePromptLine = (
+  label: string,
+  optionIndex: number,
+  selectedIndex: number
+): string => {
+  const selected = optionIndex === selectedIndex;
+  const prefix = selected ? "> " : "  ";
+  const text = `${prefix}${optionIndex + 1}. ${label}`;
+  return selected ? SHELL_THEME.selected(text) : SHELL_THEME.command(text);
+};
+
+const renderTtyChoicePromptHintLine = (prompt: TtyChoicePrompt): string =>
+  [
+    `${SHELL_THEME.command("[↑↓]")} ${SHELL_THEME.muted("move")}`,
+    `${SHELL_THEME.command("[Enter]")} ${SHELL_THEME.muted("confirm")}`,
+    `${SHELL_THEME.command("[Esc]")} ${SHELL_THEME.muted(prompt.options[1])}`,
+    `${SHELL_THEME.command("[1/2]")} ${SHELL_THEME.muted("quick select")}`,
+  ].join("  ");
 
 const getVisualizerExitDecisionHint = (
   exitPrompt: NonNullable<ShellState["exitPrompt"]>,
@@ -261,11 +580,16 @@ const getVisualizerExitDecisionHint = (
 ): string =>
   exitPrompt.canStopVisualizer
     ? mode === "tty"
-      ? "Enter exits ilu and keeps Studio open. Esc stops Studio first."
-      : "Press Enter to exit ilu and keep Studio open. Type n to stop Studio first."
+      ? "Up/down choose. Enter confirms. 1 quits Studio and exits. 2 keeps Studio open."
+      : "Press Enter to stop URDF Studio and exit. Type n to keep Studio open."
     : mode === "tty"
-      ? "Enter exits ilu. Esc stays in the shell."
+      ? "Up/down choose. Enter confirms. 1 exits the shell. 2 stays here."
       : "Press Enter to exit ilu. Type n to stay in the shell.";
+
+const getSaveDecisionHint = (mode: "tty" | "line" = "tty"): string =>
+  mode === "tty"
+    ? "Up/down choose. Enter confirms. 1 saves the working URDF. 2 exits without saving."
+    : "Press Enter to choose a save path, or type n to exit without saving.";
 
 const getVisualizerDisconnectNotice = (state: Pick<ShellState, "sharedSessionId">): ShellFeedback => ({
   kind: "info",
@@ -1578,6 +1902,8 @@ const rememberLoadedSource = (
           ? options.githubRevision.trim()
           : undefined,
       repositoryUrdfPath: payload.entryPath,
+      meshReferenceCorrectionCount: payload.meshReferenceCorrectionCount,
+      meshReferenceUnresolvedCount: payload.meshReferenceUnresolvedCount,
     };
     return;
   }
@@ -1591,6 +1917,8 @@ const rememberLoadedSource = (
       urdfPath: originalUrdfPath,
       localPath,
       repositoryUrdfPath: payload.entryPath,
+      meshReferenceCorrectionCount: payload.meshReferenceCorrectionCount,
+      meshReferenceUnresolvedCount: payload.meshReferenceUnresolvedCount,
     };
     return;
   }
@@ -2378,7 +2706,9 @@ const acceptResumePrompt = (state: ShellState): IluSharedSessionSnapshot => {
     throw new Error("No resumable ilu session is available.");
   }
   dismissResumePrompt(state);
-  return attachShellToSharedSession(state, snapshot.sessionId);
+  const attached = attachShellToSharedSession(state, snapshot.sessionId);
+  syncSaveBaselineFromSnapshot(state, attached);
+  return attached;
 };
 
 const runValidationAndHealthChecks = (urdfPath: string) => {
@@ -2504,7 +2834,7 @@ const getSuggestedActionDecisionHint = (
   mode: "tty" | "line" = "tty"
 ): string =>
   mode === "tty"
-    ? `Enter ${suggestedAction.acceptOptionLabel.toLowerCase()}. Esc skips.`
+    ? `Up/down choose. Enter confirms. 1 ${suggestedAction.acceptOptionLabel.toLowerCase()}. 2 ${suggestedAction.skipOptionLabel.toLowerCase()}.`
     : `Press Enter to ${suggestedAction.acceptOptionLabel.toLowerCase()}. Type n to ${suggestedAction.skipOptionLabel.toLowerCase()}.`;
 
 const getSuggestedActionSkipMessage = (suggestedAction: SuggestedActionPrompt): string =>
@@ -2825,6 +3155,13 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       fs.writeFileSync(workingUrdfPath, repairPayload.content, "utf8");
     }
     applyWorkingUrdfSnapshot(state, workingUrdfPath);
+    if (state.loadedSource) {
+      state.loadedSource = {
+        ...state.loadedSource,
+        meshReferenceCorrectionCount: 0,
+        meshReferenceUnresolvedCount: repairPayload.unresolved.length,
+      };
+    }
     const sharedSnapshot = persistShellSharedSession(state, {
       sourceUrdfPath: workingUrdfPath,
       fileNameHint: source.repositoryUrdfPath,
@@ -2978,7 +3315,7 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
   }
 
   try {
-    const fixed = fixMeshPaths(fs.readFileSync(urdfPath, "utf8"));
+    const fixed = fixLocalMeshPaths(urdfPath, fs.readFileSync(urdfPath, "utf8"));
     const workingUrdfPath = createTempUrdfSnapshotPath(urdfPath);
     fs.writeFileSync(workingUrdfPath, fixed.urdfContent, "utf8");
     applyWorkingUrdfSnapshot(state, workingUrdfPath);
@@ -3006,9 +3343,13 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
       validation: validationPayload,
       health: healthPayload,
     });
+    if (fixed.unresolved.length > 0 && state.suggestedAction?.kind === "fix-mesh-paths") {
+      state.suggestedAction = buildReviewAttentionSuggestion();
+    }
 
     return {
       panel: summarizeRepairResult("repaired mesh paths", validationPayload, healthPayload, {
+        unresolvedMeshRefs: fixed.unresolved.length,
         suggestedAction: state.suggestedAction,
       }),
       notice: {
@@ -3019,7 +3360,14 @@ const runSuggestedAction = (state: ShellState): AutoAutomationResult => {
           healthPayload.summary.warnings === 0
             ? "success"
             : "info",
-        text: fixed.corrections.length > 0 ? "mesh paths repaired" : "mesh paths already looked consistent",
+        text:
+          fixed.unresolved.length > 0
+            ? fixed.corrections.length > 0
+              ? "mesh paths repaired. some references still need review"
+              : "mesh paths still need review"
+            : fixed.corrections.length > 0
+              ? "mesh paths repaired"
+              : "mesh paths already looked consistent",
       },
       clearSession: false,
     };
@@ -3062,6 +3410,7 @@ const runInstallVisualizerAction = async (
   }
 
   const openResult = await openVisualizerForShellState(state);
+  seedSaveBaselineFromCurrentSharedSessionIfUnset(state);
   state.visualizerPromptResolved = true;
   state.suggestedAction = suggestedAction.followUpAction ?? null;
   const installLines = [
@@ -3089,6 +3438,7 @@ const runSuggestedActionAsync = async (state: ShellState): Promise<AutoAutomatio
   if (suggestedAction?.kind === "open-visualizer") {
     clearSuggestedAction(state);
     const result = await openVisualizerForShellState(state);
+    seedSaveBaselineFromCurrentSharedSessionIfUnset(state);
     state.visualizerPromptResolved = true;
     state.suggestedAction =
       result.visualizerFailureCode === "missing-repo"
@@ -3277,6 +3627,7 @@ const executeLoadSourceChecks = (
     sourceUrdfPath: loadPayload.outPath,
     fileNameHint: loadPayload.entryPath,
   });
+  syncSaveBaselineFromSnapshot(state, sharedSnapshot);
   const { validationExecution, healthExecution, validationPayload, healthPayload } = runValidationAndHealthChecks(
     sharedSnapshot?.workingUrdfPath || loadPayload.outPath
   );
@@ -4928,6 +5279,7 @@ const startRootShellCommand = (
 const printVisualizerShellAction = async (state: ShellState) => {
   process.stdout.write(`${SHELL_THEME.muted("starting URDF Studio if needed...")}\n`);
   const result = await openVisualizerForShellState(state);
+  seedSaveBaselineFromCurrentSharedSessionIfUnset(state);
   if (result.notice) {
     writeFeedback(result.notice);
   }
@@ -4943,25 +5295,22 @@ const printVisualizerStopShellAction = async (state: ShellState) => {
   printOutputPanel(result.panel);
 };
 
-const closeLineShell = (
-  state: ShellState,
-  close: () => void,
-  options: {
-    keepVisualizerOpenOnExit?: () => void;
-  } = {}
-) => {
-  if (shouldPromptOnShellExit(state)) {
-    options.keepVisualizerOpenOnExit?.();
-    writeFeedback(getVisualizerDisconnectNotice(state));
+const printSavePromptLine = (savePrompt: SavePromptState) => {
+  if (savePrompt.phase === "confirm") {
+    process.stdout.write(`${SHELL_THEME.muted(getSaveExitPromptText())}\n`);
+    process.stdout.write(
+      `${SHELL_THEME.muted("  Enter chooses a save path. Type n to exit without saving.")}\n`
+    );
+    return;
   }
-  close();
+
+  process.stdout.write(`${SHELL_THEME.muted(getSavePathPromptText(savePrompt))}\n`);
 };
 
 const handleRootSlashCommand = async (
   slashCommand: string,
   state: ShellState,
-  close: () => void,
-  keepVisualizerOpenOnExit: () => void
+  close: () => void
 ) => {
   if (!slashCommand || slashCommand === "help") {
     if (state.repoIntentPrompt) {
@@ -4987,7 +5336,7 @@ const handleRootSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    closeLineShell(state, close, { keepVisualizerOpenOnExit });
+    close();
     return;
   }
 
@@ -5154,12 +5503,11 @@ const handleRootSlashCommand = async (
 const handleRootTaskSlashCommand = async (
   slashCommand: string,
   state: ShellState,
-  close: () => void,
-  keepVisualizerOpenOnExit: () => void
+  close: () => void
 ) => {
   const task = state.rootTask;
   if (!task) {
-    handleRootSlashCommand(slashCommand, state, close, keepVisualizerOpenOnExit);
+    handleRootSlashCommand(slashCommand, state, close);
     return;
   }
 
@@ -5177,7 +5525,7 @@ const handleRootTaskSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    closeLineShell(state, close, { keepVisualizerOpenOnExit });
+    close();
     return;
   }
 
@@ -5322,8 +5670,7 @@ const handleSessionSlashCommand = async (
   slashCommand: string,
   inlineValue: string,
   state: ShellState,
-  close: () => void,
-  keepVisualizerOpenOnExit: () => void
+  close: () => void
 ) => {
   const session = state.session;
   if (!session) {
@@ -5456,7 +5803,7 @@ const handleSessionSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    closeLineShell(state, close, { keepVisualizerOpenOnExit });
+    close();
     return;
   }
 
@@ -6233,10 +6580,14 @@ const renderMenuEntry = (
 };
 
 const getPromptPlaceholder = (state: ShellState): string => {
+  if (state.savePrompt?.phase === "path") {
+    return `save path  Enter uses ${quoteForPreview(state.savePrompt.defaultPath)}`;
+  }
+
   if (state.exitPrompt) {
     return state.exitPrompt.canStopVisualizer
-      ? "Enter exits ilu and keeps Studio open. Esc stops Studio first"
-      : "Enter exits ilu. Esc stays in the shell";
+      ? "up/down choose, Enter confirms, 1 quits Studio, 2 keeps it open"
+      : "up/down choose, Enter confirms, 1 exits, 2 stays here";
   }
 
   if (!state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && state.resumePrompt) {
@@ -6305,8 +6656,14 @@ const getPromptPlaceholder = (state: ShellState): string => {
 const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
   const columns = process.stdout.columns ?? 100;
   const rows = process.stdout.rows ?? 24;
-  const activeExitPrompt = getVisualizerExitPrompt(state);
-  const activeSuggestedAction = activeExitPrompt ? null : getActiveSuggestedAction(state);
+  const activeChoicePrompt = getActiveTtyChoicePrompt(state);
+  const activeExitPrompt = activeChoicePrompt?.kind === "exit" ? activeChoicePrompt.prompt : null;
+  const activeSuggestedAction = activeChoicePrompt?.kind === "suggested" ? activeChoicePrompt.prompt : null;
+  const promptSelectionKey = getTtyChoicePromptSelectionKey(activeChoicePrompt);
+  if (view.promptSelectionKey !== promptSelectionKey) {
+    view.promptSelectionKey = promptSelectionKey;
+    view.promptOptionIndex = 0;
+  }
   const menuEntries = getSlashMenuEntries(state, view.input);
   const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
   view.menuIndex = menuWindow.selectedIndex;
@@ -6398,12 +6755,15 @@ const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
     lines.push(`  ${SHELL_THEME.icon("↑")} ${SHELL_THEME.muted(formatUpdatePromptLine(state.updatePrompt))}`);
   }
 
-  if (activeExitPrompt && !view.busy) {
-    lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(getVisualizerExitPromptText(activeExitPrompt))}`);
-    lines.push(`  ${getVisualizerExitChoiceLine(activeExitPrompt, "tty")}`);
-  } else if (activeSuggestedAction && !view.busy) {
-    lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(activeSuggestedAction.prompt)}`);
-    lines.push(`  ${renderSuggestedActionChoiceLine(activeSuggestedAction, "tty")}`);
+  if (activeChoicePrompt && !view.busy) {
+    lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(activeChoicePrompt.text)}`);
+    lines.push(`  ${renderTtyChoicePromptLine(activeChoicePrompt.options[0], 0, view.promptOptionIndex)}`);
+    lines.push(`  ${renderTtyChoicePromptLine(activeChoicePrompt.options[1], 1, view.promptOptionIndex)}`);
+    lines.push(`  ${renderTtyChoicePromptHintLine(activeChoicePrompt)}`);
+  }
+
+  if (state.savePrompt?.phase === "path" && !view.busy) {
+    lines.push(`  ${SHELL_THEME.icon("→")} ${SHELL_THEME.muted(getSavePathPromptText(state.savePrompt))}`);
   }
 
   if (shouldRenderInlineNotice(view)) {
@@ -6613,6 +6973,9 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     suggestedAction: null,
     visualizerPromptResolved: false,
     visualizerOpened: false,
+    savePrompt: null,
+    saveBaselineHash: undefined,
+    saveBaselineUpdatedAt: undefined,
     exitPrompt: null,
   };
   let isClosed = false;
@@ -6627,21 +6990,47 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
   rl.on("close", () => {
     isClosed = true;
   });
-  rl.on("SIGINT", () => {
-    process.stdout.write("\n");
-    rl.close();
-  });
-
   const close = () => rl.close();
-  const keepVisualizerOpenOnExit = () => {
-    visualizerExitGuard.keepVisualizerOpenOnExit();
+  const closeLineShell = () => {
+    clearSavePrompt(state);
+    clearExitPrompt(state);
+    close();
+  };
+  const requestLineClose = () => {
+    if (beginSaveExitPrompt(state)) {
+      printSavePromptLine(state.savePrompt as SavePromptState);
+      return;
+    }
+
+    closeLineShell();
   };
 
+  rl.on("SIGINT", () => {
+    process.stdout.write("\n");
+    if (state.savePrompt?.phase === "path") {
+      state.savePrompt = {
+        ...state.savePrompt,
+        phase: "confirm",
+      };
+      printSavePromptLine(state.savePrompt);
+    } else if (state.savePrompt) {
+      closeLineShell();
+      return;
+    } else {
+      requestLineClose();
+    }
+
+    if (!isClosed) {
+      rl.setPrompt(formatShellPrompt(state));
+      rl.prompt();
+    }
+  });
   printRootQuickStart();
 
   if (options.attachSessionId) {
     try {
       const snapshot = attachShellToSharedSession(state, options.attachSessionId);
+      syncSaveBaselineFromSnapshot(state, snapshot);
       process.stdout.write(`${SHELL_THEME.muted(`attached session ${snapshot.sessionId}`)}\n`);
       printContextRows(getLoadedSourceContextRows(state));
     } catch (error) {
@@ -6658,7 +7047,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
   if (options.initialSlashCommand) {
     const parsed = parseSlashInput(options.initialSlashCommand);
     if (parsed) {
-      handleRootSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
+      handleRootSlashCommand(parsed.slashCommand, state, requestLineClose);
     }
   }
 
@@ -6671,11 +7060,74 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     const session = state.session;
     const isSlashInput = shouldTreatAsSlashInput(line, state);
     const bangCommand = parseBangInput(line);
+    const activeSavePrompt = getActiveSavePrompt(state);
     const activeResumePrompt = getActiveResumePrompt(state);
     const activeSuggestedAction = getActiveSuggestedAction(state);
 
-    if (activeSuggestedAction && (isSlashInput || bangCommand)) {
+    if (!activeSavePrompt && activeSuggestedAction && (isSlashInput || bangCommand)) {
       bypassSuggestedAction(state, activeSuggestedAction);
+    }
+
+    if (activeSavePrompt) {
+      if (activeSavePrompt.phase === "confirm") {
+        const normalizedDecision = trimmed.toLowerCase();
+        if (!trimmed || normalizedDecision === "y" || normalizedDecision === "yes" || normalizedDecision === "save") {
+          state.savePrompt = {
+            ...activeSavePrompt,
+            phase: "path",
+          };
+          printSavePromptLine(state.savePrompt);
+        } else if (
+          normalizedDecision === "n" ||
+          normalizedDecision === "no" ||
+          normalizedDecision === "skip" ||
+          normalizedDecision === "discard" ||
+          normalizedDecision === "later"
+        ) {
+          clearSavePrompt(state);
+          closeLineShell();
+        } else {
+          process.stdout.write(`${SHELL_THEME.muted(getSaveDecisionHint("line"))}\n`);
+        }
+
+        if (!isClosed) {
+          rl.setPrompt(formatShellPrompt(state));
+          rl.prompt();
+        }
+        continue;
+      }
+
+      if (isSlashInput || bangCommand) {
+        process.stdout.write(`${SHELL_THEME.muted(getSavePathPromptText(activeSavePrompt))}\n`);
+        rl.setPrompt(formatShellPrompt(state));
+        rl.prompt();
+        continue;
+      }
+
+      try {
+        const destinationPath = resolveSaveDestinationPath(line, activeSavePrompt.defaultPath);
+        const saveResult = saveWorkingUrdfToDestination(state, destinationPath);
+        state.saveBaselineHash = saveResult.savedHash;
+        state.saveBaselineUpdatedAt = getCurrentSharedSessionUpdatedAt(state);
+        clearSavePrompt(state);
+        writeFeedback({
+          kind: "success",
+          text: `saved working URDF to ${quoteForPreview(saveResult.destinationPath)}`,
+        });
+        closeLineShell();
+      } catch (error) {
+        writeFeedback({
+          kind: "error",
+          text: error instanceof Error ? error.message : String(error),
+        });
+        printSavePromptLine(activeSavePrompt);
+      }
+
+      if (!isClosed) {
+        rl.setPrompt(formatShellPrompt(state));
+        rl.prompt();
+      }
+      continue;
     }
 
     if (activeResumePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker) {
@@ -6810,13 +7262,12 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
             parsed.slashCommand,
             parsed.inlineValue,
             state,
-            close,
-            keepVisualizerOpenOnExit
+            requestLineClose
           );
         } else if (state.rootTask) {
-          await handleRootTaskSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
+          await handleRootTaskSlashCommand(parsed.slashCommand, state, requestLineClose);
         } else {
-          await handleRootSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
+          await handleRootSlashCommand(parsed.slashCommand, state, requestLineClose);
         }
       }
     } else if (!trimmed) {
@@ -6936,12 +7387,17 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     suggestedAction: null,
     visualizerPromptResolved: false,
     visualizerOpened: false,
+    savePrompt: null,
+    saveBaselineHash: undefined,
+    saveBaselineUpdatedAt: undefined,
     exitPrompt: null,
   };
   const view: TtyShellViewState = {
     input: "",
     timeline: [],
     menuIndex: 0,
+    promptOptionIndex: 0,
+    promptSelectionKey: null,
     notice: null,
     output: null,
     busy: null,
@@ -6960,6 +7416,37 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     view.menuIndex = menuEntries.length === 0 ? 0 : clamp(view.menuIndex, 0, menuEntries.length - 1);
   };
 
+  const syncActivePromptSelection = () => {
+    const activeChoicePrompt = getActiveTtyChoicePrompt(state);
+    const promptSelectionKey = getTtyChoicePromptSelectionKey(activeChoicePrompt);
+    if (view.promptSelectionKey !== promptSelectionKey) {
+      view.promptSelectionKey = promptSelectionKey;
+      view.promptOptionIndex = 0;
+    }
+    return activeChoicePrompt;
+  };
+
+  const setPromptOptionIndex = (nextIndex: number) => {
+    view.promptOptionIndex = clamp(nextIndex, 0, 1);
+  };
+
+  const resolvePromptShortcutSelection = (input: string): 0 | 1 | null => {
+    const normalizedInput = input.trim().toLowerCase();
+    if (normalizedInput === "1" || normalizedInput === "y" || normalizedInput === "yes") {
+      return 0;
+    }
+    if (
+      normalizedInput === "2" ||
+      normalizedInput === "n" ||
+      normalizedInput === "no" ||
+      normalizedInput === "skip" ||
+      normalizedInput === "later"
+    ) {
+      return 1;
+    }
+    return null;
+  };
+
   const finalizeTtyClose = (
     notice: ShellFeedback | null,
     options: {
@@ -6971,20 +7458,120 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
     clearExitPrompt(state);
     setInput("");
+    view.promptSelectionKey = null;
+    view.promptOptionIndex = 0;
     view.output = null;
     view.notice = notice;
     close();
   };
 
-  const requestTtyClose = () => {
+  const continueTtyCloseFlow = (
+    options: {
+      preserveNotice?: boolean;
+      preserveOutput?: boolean;
+    } = {}
+  ) => {
     if (beginVisualizerExitPrompt(state)) {
       setInput("");
-      view.notice = null;
-      view.output = null;
+      if (!options.preserveNotice) {
+        view.notice = null;
+      }
+      if (!options.preserveOutput) {
+        view.output = null;
+      }
+      view.promptSelectionKey = null;
+      view.promptOptionIndex = 0;
       return;
     }
 
+    clearSavePrompt(state);
     close();
+  };
+
+  const requestTtyClose = () => {
+    if (beginSaveExitPrompt(state)) {
+      setInput("");
+      view.notice = null;
+      view.output = null;
+      view.promptSelectionKey = null;
+      view.promptOptionIndex = 0;
+      return;
+    }
+
+    continueTtyCloseFlow();
+  };
+
+  const runPromptSelection = async (selectedIndex: number) => {
+    const activeChoicePrompt = syncActivePromptSelection();
+    if (!activeChoicePrompt) {
+      return;
+    }
+
+    const normalizedIndex = clamp(selectedIndex, 0, 1);
+    if (activeChoicePrompt.kind === "save") {
+      if (normalizedIndex === 0) {
+        state.savePrompt = {
+          ...activeChoicePrompt.prompt,
+          phase: "path",
+        };
+        setInput("");
+        view.notice = {
+          kind: "info",
+          text: getSavePathPromptText(state.savePrompt),
+        };
+        view.output = null;
+        return;
+      }
+
+      clearSavePrompt(state);
+      if (activeChoicePrompt.prompt.closeAfterSave) {
+        continueTtyCloseFlow();
+      } else {
+        view.notice = { kind: "info", text: "save cancelled" };
+      }
+      return;
+    }
+
+    if (activeChoicePrompt.kind === "exit") {
+      if (normalizedIndex === 0) {
+        if (activeChoicePrompt.prompt.canStopVisualizer) {
+          const stopped = await stopVisualizerInTty();
+          if (stopped) {
+            close();
+          }
+          return;
+        }
+
+        finalizeTtyClose(getVisualizerDisconnectNotice(state));
+        return;
+      }
+
+      if (activeChoicePrompt.prompt.canStopVisualizer) {
+        finalizeTtyClose(getVisualizerDisconnectNotice(state), { keepVisualizerOpen: true });
+      } else {
+        clearExitPrompt(state);
+        view.promptSelectionKey = null;
+        view.promptOptionIndex = 0;
+        view.notice = { kind: "info", text: "kept the shell open" };
+      }
+      return;
+    }
+
+    if (normalizedIndex === 0) {
+      pushTimelineUserEntry(view, `yes, ${activeChoicePrompt.prompt.acceptLabel}`);
+      const result = await runBusyOperationAsync(
+        getSuggestedActionBusyState(activeChoicePrompt.prompt),
+        () => runSuggestedActionAsync(state)
+      );
+      view.notice = result.notice;
+      view.output = result.panel;
+      archiveAssistantStateToTimeline(view);
+      setInput("");
+      return;
+    }
+
+    view.notice = skipSuggestedAction(state, activeChoicePrompt.prompt);
+    setInput("");
   };
 
   const openSession = (command: SupportedCommandName) => {
@@ -7019,6 +7606,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
   if (options.attachSessionId) {
     try {
       const snapshot = attachShellToSharedSession(state, options.attachSessionId);
+      syncSaveBaselineFromSnapshot(state, snapshot);
       pushTimelineAssistantEntry(
         view,
         [
@@ -7134,6 +7722,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       },
       () => openVisualizerForShellState(state)
     );
+    seedSaveBaselineFromCurrentSharedSessionIfUnset(state);
     view.notice = result.notice;
     view.output = result.panel;
   };
@@ -7967,8 +8556,52 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     const trimmed = view.input.trim();
     const bangCommand = parseBangInput(trimmed);
     const isSlashInput = shouldTreatAsSlashInput(view.input, state);
-    const activeExitPrompt = getVisualizerExitPrompt(state);
+    const activeChoicePrompt = syncActivePromptSelection();
+    const activeSavePrompt = getActiveSavePrompt(state);
+    const activeExitPrompt = activeChoicePrompt?.kind === "exit" ? activeChoicePrompt.prompt : null;
     const activeResumePrompt = getActiveResumePrompt(state);
+
+    if (activeSavePrompt?.phase === "path") {
+      if (isSlashInput || bangCommand) {
+        view.notice = { kind: "info", text: getSavePathPromptText(activeSavePrompt) };
+        setInput("");
+        return;
+      }
+
+      const submittedPath = view.input.trim();
+      const destinationPath = resolveSaveDestinationPath(submittedPath, activeSavePrompt.defaultPath);
+      const saveResult = saveWorkingUrdfToDestination(state, destinationPath);
+      state.saveBaselineHash = saveResult.savedHash;
+      state.saveBaselineUpdatedAt = getCurrentSharedSessionUpdatedAt(state);
+      pushTimelineUserEntry(view, submittedPath || quoteForPreview(saveResult.destinationPath));
+      pushTimelineAssistantEntry(
+        view,
+        [`saved working URDF to ${quoteForPreview(saveResult.destinationPath)}`],
+        "success"
+      );
+      clearSavePrompt(state);
+      view.notice = {
+        kind: "success",
+        text: `saved working URDF to ${quoteForPreview(saveResult.destinationPath)}`,
+      };
+      view.output = null;
+      setInput("");
+      if (activeSavePrompt.closeAfterSave) {
+        continueTtyCloseFlow({ preserveNotice: true });
+      }
+      return;
+    }
+
+    if (activeChoicePrompt?.kind === "save") {
+      if (trimmed.length !== 0) {
+        view.notice = { kind: "info", text: getSaveDecisionHint("tty") };
+        setInput("");
+        return;
+      }
+
+      await runPromptSelection(view.promptOptionIndex);
+      return;
+    }
 
     if (activeExitPrompt) {
       if (trimmed.length !== 0) {
@@ -7977,7 +8610,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return;
       }
 
-      finalizeTtyClose(getVisualizerDisconnectNotice(state), { keepVisualizerOpen: true });
+      await runPromptSelection(view.promptOptionIndex);
       return;
     }
 
@@ -8054,7 +8687,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return;
     }
 
-    const activeSuggestedAction = getActiveSuggestedAction(state);
+    const activeSuggestedAction = activeChoicePrompt?.kind === "suggested" ? activeChoicePrompt.prompt : null;
     if (activeSuggestedAction && !isSlashInput && !bangCommand) {
       if (trimmed.length !== 0) {
         view.notice = { kind: "info", text: getSuggestedActionDecisionHint(activeSuggestedAction) };
@@ -8062,16 +8695,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return;
       }
 
-      const acceptedAction = activeSuggestedAction.acceptLabel;
-      pushTimelineUserEntry(view, `yes, ${acceptedAction}`);
-      const result = await runBusyOperationAsync(
-        getSuggestedActionBusyState(activeSuggestedAction),
-        () => runSuggestedActionAsync(state)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      archiveAssistantStateToTimeline(view);
-      setInput("");
+      await runPromptSelection(view.promptOptionIndex);
       return;
     }
 
@@ -8430,12 +9054,54 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return;
     }
 
-    const activeExitPrompt = getVisualizerExitPrompt(state);
-    const activeSuggestedAction = activeExitPrompt ? null : getActiveSuggestedAction(state);
+    const activeChoicePrompt = syncActivePromptSelection();
+    const activeSavePrompt = getActiveSavePrompt(state);
+    const activeExitPrompt = activeChoicePrompt?.kind === "exit" ? activeChoicePrompt.prompt : null;
+    const activeSuggestedAction = activeChoicePrompt?.kind === "suggested" ? activeChoicePrompt.prompt : null;
 
     if ((key.ctrl && key.name === "c") || input === "\u0003") {
+      if (activeSavePrompt?.phase === "path") {
+        state.savePrompt = {
+          ...activeSavePrompt,
+          phase: "confirm",
+        };
+        setInput("");
+        view.notice = { kind: "info", text: "save path cancelled" };
+        queueRender("force");
+        return;
+      }
+
+      if (activeChoicePrompt?.kind === "save") {
+        void runPromptSelection(view.promptOptionIndex)
+          .then(() => {
+            queueRender("force");
+          })
+          .catch((error) => {
+            view.busy = null;
+            ignoreKeypressUntilMs = Date.now() + 200;
+            view.notice = {
+              kind: "error",
+              text: error instanceof Error ? error.message : String(error),
+            };
+            queueRender("force");
+          });
+        return;
+      }
+
       if (activeExitPrompt) {
-        finalizeTtyClose(getVisualizerDisconnectNotice(state), { keepVisualizerOpen: true });
+        void runPromptSelection(view.promptOptionIndex)
+          .then(() => {
+            queueRender("force");
+          })
+          .catch((error) => {
+            view.busy = null;
+            ignoreKeypressUntilMs = Date.now() + 200;
+            view.notice = {
+              kind: "error",
+              text: error instanceof Error ? error.message : String(error),
+            };
+            queueRender("force");
+          });
       } else {
         requestTtyClose();
         queueRender("force");
@@ -8461,6 +9127,11 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (key.name === "up" || (key.shift && key.name === "tab")) {
+      if (activeChoicePrompt && view.input.length === 0) {
+        setPromptOptionIndex(view.promptOptionIndex - 1);
+        queueRender("navigation");
+        return;
+      }
       if (state.repoIntentPrompt && !view.input.startsWith("/")) {
         state.repoIntentPrompt.selectedIndex = clamp(
           state.repoIntentPrompt.selectedIndex - 1,
@@ -8488,6 +9159,11 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (key.name === "down") {
+      if (activeChoicePrompt && view.input.length === 0) {
+        setPromptOptionIndex(view.promptOptionIndex + 1);
+        queueRender("navigation");
+        return;
+      }
       if (state.repoIntentPrompt && !view.input.startsWith("/")) {
         state.repoIntentPrompt.selectedIndex = clamp(
           state.repoIntentPrompt.selectedIndex + 1,
@@ -8532,24 +9208,23 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (key.name === "escape") {
-      if (activeExitPrompt && view.input.length === 0) {
-        if (!activeExitPrompt.canStopVisualizer) {
-          clearExitPrompt(state);
-          view.notice = { kind: "info", text: "kept the shell open" };
-          queueRender("navigation");
-          return;
-        }
+      if (activeSavePrompt?.phase === "path") {
+        state.savePrompt = {
+          ...activeSavePrompt,
+          phase: "confirm",
+        };
+        setInput("");
+        view.notice = { kind: "info", text: "save path cancelled" };
+        queueRender("navigation");
+        return;
+      }
 
-        void stopVisualizerInTty()
-          .then((stopped) => {
-            clearExitPrompt(state);
-            if (stopped) {
-              close();
-            }
+      if (activeChoicePrompt && view.input.length === 0) {
+        void runPromptSelection(1)
+          .then(() => {
             queueRender("force");
           })
           .catch((error) => {
-            clearExitPrompt(state);
             view.busy = null;
             ignoreKeypressUntilMs = Date.now() + 200;
             view.notice = {
@@ -8599,6 +9274,38 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         queueRender("navigation");
       }
       return;
+    }
+
+    if (
+      activeChoicePrompt &&
+      view.input.length === 0 &&
+      !key.ctrl &&
+      !key.meta &&
+      (input.toLowerCase() === "k" || input.toLowerCase() === "j")
+    ) {
+      setPromptOptionIndex(view.promptOptionIndex + (input.toLowerCase() === "j" ? 1 : -1));
+      queueRender("navigation");
+      return;
+    }
+
+    if (activeChoicePrompt && view.input.length === 0 && !key.ctrl && !key.meta) {
+      const shortcutSelection = resolvePromptShortcutSelection(input);
+      if (shortcutSelection !== null) {
+        void runPromptSelection(shortcutSelection)
+          .then(() => {
+            queueRender("force");
+          })
+          .catch((error) => {
+            view.busy = null;
+            ignoreKeypressUntilMs = Date.now() + 200;
+            view.notice = {
+              kind: "error",
+              text: error instanceof Error ? error.message : String(error),
+            };
+            queueRender("force");
+          });
+        return;
+      }
     }
 
     if (key.name === "backspace") {
@@ -8699,13 +9406,15 @@ export const renderShellHelp = (): string => {
     "  ./robot-folder/    Load a local repo or folder and auto-run checks",
     "  resume prompt      Reopen the last session with Enter or skip with Esc",
     "  update prompt      If a newer release exists, Enter updates and Esc skips",
+    "  exit prompt        If the working copy changed, ilu asks where to save it before quitting",
     "  !xacro            Install or verify the local XACRO runtime",
     "  /                  Open direct actions under the prompt",
-    "  up/down            Move through picker options",
+    "  up/down, j/k       Move through picker and prompt options",
+    "  1/2                Pick the first or second prompt option directly",
     "  tab                Complete the selected option or path",
     "  enter              Select the highlighted option, run the ready action, or accept a recommended fix",
-    "  ctrl+c             Exit, or ask about URDF Studio first when it is open",
-    "  esc                Close the picker, cancel a pending value, or skip the recommended fix",
+    "  ctrl+c             Exit, or confirm the current URDF Studio exit option when it is open",
+    "  esc                Pick the secondary prompt option, close the picker, or cancel a pending value",
     "  /open              Load a repo, folder, or file as the current source",
     "  /inspect           Preview a repo or folder and suggest an entrypoint",
     "  /analyze           Run the compact investigation view",
