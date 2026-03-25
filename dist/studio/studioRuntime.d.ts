@@ -84,6 +84,7 @@ export declare const waitForStudioReady: (options?: {
     apiHealthUrl?: string;
 }) => Promise<boolean>;
 export declare const stopManagedStudio: () => Promise<StopManagedStudioResult>;
+export declare const stopManagedStudioImmediately: () => boolean;
 export declare const ensureStudioRunning: (options?: {
     detached?: boolean;
     timeoutMs?: number;

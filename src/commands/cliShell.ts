@@ -141,6 +141,7 @@ import {
   installStudio,
   isManagedStudioRunning,
   stopManagedStudio,
+  stopManagedStudioImmediately,
 } from "../studio/studioRuntime";
 
 type ShellValidationIssue = {
@@ -272,6 +273,42 @@ const getVisualizerDisconnectNotice = (state: Pick<ShellState, "sharedSessionId"
     ? `ilu terminal disconnected. URDF Studio kept session ${state.sharedSessionId}`
     : "ilu terminal disconnected. URDF Studio kept running",
 });
+
+const createVisualizerExitGuard = (state: Pick<ShellState, "visualizerOpened">) => {
+  let preserveVisualizerOnExit = false;
+  let cleanedUp = false;
+
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    if (!preserveVisualizerOnExit && state.visualizerOpened) {
+      stopManagedStudioImmediately();
+      state.visualizerOpened = false;
+    }
+  };
+
+  const handleTerminationSignal = () => {
+    cleanup();
+    process.exit(0);
+  };
+
+  process.on("exit", cleanup);
+  process.on("SIGHUP", handleTerminationSignal);
+  process.on("SIGTERM", handleTerminationSignal);
+
+  return {
+    keepVisualizerOpenOnExit: () => {
+      preserveVisualizerOnExit = true;
+    },
+    dispose: () => {
+      process.off("exit", cleanup);
+      process.off("SIGHUP", handleTerminationSignal);
+      process.off("SIGTERM", handleTerminationSignal);
+    },
+  };
+};
 
 const runStopVisualizerAction = async (state: ShellState): Promise<AutoAutomationResult> => {
   const stopResult = await stopManagedStudio();
@@ -4906,8 +4943,15 @@ const printVisualizerStopShellAction = async (state: ShellState) => {
   printOutputPanel(result.panel);
 };
 
-const closeLineShell = (state: ShellState, close: () => void) => {
+const closeLineShell = (
+  state: ShellState,
+  close: () => void,
+  options: {
+    keepVisualizerOpenOnExit?: () => void;
+  } = {}
+) => {
   if (shouldPromptOnShellExit(state)) {
+    options.keepVisualizerOpenOnExit?.();
     writeFeedback(getVisualizerDisconnectNotice(state));
   }
   close();
@@ -4916,7 +4960,8 @@ const closeLineShell = (state: ShellState, close: () => void) => {
 const handleRootSlashCommand = async (
   slashCommand: string,
   state: ShellState,
-  close: () => void
+  close: () => void,
+  keepVisualizerOpenOnExit: () => void
 ) => {
   if (!slashCommand || slashCommand === "help") {
     if (state.repoIntentPrompt) {
@@ -4942,7 +4987,7 @@ const handleRootSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    closeLineShell(state, close);
+    closeLineShell(state, close, { keepVisualizerOpenOnExit });
     return;
   }
 
@@ -5109,11 +5154,12 @@ const handleRootSlashCommand = async (
 const handleRootTaskSlashCommand = async (
   slashCommand: string,
   state: ShellState,
-  close: () => void
+  close: () => void,
+  keepVisualizerOpenOnExit: () => void
 ) => {
   const task = state.rootTask;
   if (!task) {
-    handleRootSlashCommand(slashCommand, state, close);
+    handleRootSlashCommand(slashCommand, state, close, keepVisualizerOpenOnExit);
     return;
   }
 
@@ -5131,7 +5177,7 @@ const handleRootTaskSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    closeLineShell(state, close);
+    closeLineShell(state, close, { keepVisualizerOpenOnExit });
     return;
   }
 
@@ -5276,7 +5322,8 @@ const handleSessionSlashCommand = async (
   slashCommand: string,
   inlineValue: string,
   state: ShellState,
-  close: () => void
+  close: () => void,
+  keepVisualizerOpenOnExit: () => void
 ) => {
   const session = state.session;
   if (!session) {
@@ -5409,7 +5456,7 @@ const handleSessionSlashCommand = async (
   }
 
   if (slashCommand === "exit" || slashCommand === "quit") {
-    closeLineShell(state, close);
+    closeLineShell(state, close, { keepVisualizerOpenOnExit });
     return;
   }
 
@@ -6569,6 +6616,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     exitPrompt: null,
   };
   let isClosed = false;
+  const visualizerExitGuard = createVisualizerExitGuard(state);
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -6585,6 +6633,9 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
   });
 
   const close = () => rl.close();
+  const keepVisualizerOpenOnExit = () => {
+    visualizerExitGuard.keepVisualizerOpenOnExit();
+  };
 
   printRootQuickStart();
 
@@ -6607,14 +6658,15 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
   if (options.initialSlashCommand) {
     const parsed = parseSlashInput(options.initialSlashCommand);
     if (parsed) {
-      handleRootSlashCommand(parsed.slashCommand, state, close);
+      handleRootSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
     }
   }
 
   rl.setPrompt(formatShellPrompt(state));
   rl.prompt();
 
-  for await (const line of rl) {
+  try {
+    for await (const line of rl) {
     const trimmed = line.trim();
     const session = state.session;
     const isSlashInput = shouldTreatAsSlashInput(line, state);
@@ -6754,11 +6806,17 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       const parsed = parseSlashInput(trimmed);
       if (parsed) {
         if (session) {
-          await handleSessionSlashCommand(parsed.slashCommand, parsed.inlineValue, state, close);
+          await handleSessionSlashCommand(
+            parsed.slashCommand,
+            parsed.inlineValue,
+            state,
+            close,
+            keepVisualizerOpenOnExit
+          );
         } else if (state.rootTask) {
-          await handleRootTaskSlashCommand(parsed.slashCommand, state, close);
+          await handleRootTaskSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
         } else {
-          await handleRootSlashCommand(parsed.slashCommand, state, close);
+          await handleRootSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
         }
       }
     } else if (!trimmed) {
@@ -6857,6 +6915,9 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
 
     rl.setPrompt(formatShellPrompt(state));
     rl.prompt();
+    }
+  } finally {
+    visualizerExitGuard.dispose();
   }
 };
 
@@ -6887,6 +6948,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
   };
   let closed = false;
   let ignoreKeypressUntilMs = 0;
+  const visualizerExitGuard = createVisualizerExitGuard(state);
 
   const close = () => {
     closed = true;
@@ -6898,7 +6960,15 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     view.menuIndex = menuEntries.length === 0 ? 0 : clamp(view.menuIndex, 0, menuEntries.length - 1);
   };
 
-  const finalizeTtyClose = (notice: ShellFeedback | null) => {
+  const finalizeTtyClose = (
+    notice: ShellFeedback | null,
+    options: {
+      keepVisualizerOpen?: boolean;
+    } = {}
+  ) => {
+    if (options.keepVisualizerOpen) {
+      visualizerExitGuard.keepVisualizerOpenOnExit();
+    }
     clearExitPrompt(state);
     setInput("");
     view.output = null;
@@ -7907,7 +7977,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return;
       }
 
-      finalizeTtyClose(getVisualizerDisconnectNotice(state));
+      finalizeTtyClose(getVisualizerDisconnectNotice(state), { keepVisualizerOpen: true });
       return;
     }
 
@@ -8365,7 +8435,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if ((key.ctrl && key.name === "c") || input === "\u0003") {
       if (activeExitPrompt) {
-        finalizeTtyClose(getVisualizerDisconnectNotice(state));
+        finalizeTtyClose(getVisualizerDisconnectNotice(state), { keepVisualizerOpen: true });
       } else {
         requestTtyClose();
         queueRender("force");
@@ -8607,6 +8677,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     process.stdin.off("keypress", onKeypress);
     process.stdin.setRawMode(false);
     process.stdin.pause();
+    visualizerExitGuard.dispose();
     printTtyShellSnapshot(state, view);
   }
 };

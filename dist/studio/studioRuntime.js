@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.installStudio = exports.ensureStudioRunning = exports.stopManagedStudio = exports.waitForStudioReady = exports.isStudioReady = exports.getStudioInstallState = exports.resolveStudioRoot = exports.isStudioRepoRoot = exports.getPreferredStudioInstallRoot = exports.getDefaultStudioRootCandidates = exports.getStudioApiHealthUrl = exports.getStudioWebUrl = exports.isManagedStudioRunning = exports.readManagedStudioRuntime = exports.getManagedStudioRuntimePath = void 0;
+exports.installStudio = exports.ensureStudioRunning = exports.stopManagedStudioImmediately = exports.stopManagedStudio = exports.waitForStudioReady = exports.isStudioReady = exports.getStudioInstallState = exports.resolveStudioRoot = exports.isStudioRepoRoot = exports.getPreferredStudioInstallRoot = exports.getDefaultStudioRootCandidates = exports.getStudioApiHealthUrl = exports.getStudioWebUrl = exports.isManagedStudioRunning = exports.readManagedStudioRuntime = exports.getManagedStudioRuntimePath = void 0;
 const node_child_process_1 = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -60,6 +60,43 @@ const isProcessActive = (pid) => {
     catch (error) {
         return error?.code === "EPERM";
     }
+};
+const readUnixProcessList = () => {
+    if (process.platform === "win32") {
+        return [];
+    }
+    const psResult = (0, node_child_process_1.spawnSync)("ps", ["-axo", "pid=,command="], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (psResult.status !== 0 || typeof psResult.stdout !== "string") {
+        return [];
+    }
+    return psResult.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => {
+        const match = /^(\d+)\s+(.*)$/.exec(line);
+        if (!match) {
+            return null;
+        }
+        const pid = Number.parseInt(match[1] ?? "", 10);
+        const command = match[2]?.trim() ?? "";
+        if (!Number.isInteger(pid) || pid <= 0 || command.length === 0) {
+            return null;
+        }
+        return {
+            pid,
+            command,
+        };
+    })
+        .filter((entry) => entry !== null);
+};
+const findStudioLauncherPid = (studioRoot) => {
+    const launcherPath = path.resolve(getStudioRunScriptPath(studioRoot));
+    const match = readUnixProcessList().find((entry) => entry.command.includes(launcherPath));
+    return match?.pid ?? null;
 };
 const coerceManagedStudioRuntime = (value) => {
     if (!value || typeof value !== "object") {
@@ -145,6 +182,35 @@ const resolveStudioRoot = (options = {}) => {
     return null;
 };
 exports.resolveStudioRoot = resolveStudioRoot;
+const discoverRunningStudioRuntime = (options = {}) => {
+    const studioRoot = (0, exports.resolveStudioRoot)(options);
+    if (!studioRoot) {
+        return null;
+    }
+    const pid = findStudioLauncherPid(studioRoot);
+    if (!pid || !isProcessActive(pid)) {
+        return null;
+    }
+    return {
+        pid,
+        studioRoot,
+        webUrl: (0, exports.getStudioWebUrl)(),
+        apiHealthUrl: (0, exports.getStudioApiHealthUrl)(),
+        startedAt: new Date().toISOString(),
+    };
+};
+const adoptRunningStudioRuntime = (options = {}) => {
+    const managed = (0, exports.readManagedStudioRuntime)();
+    if (managed) {
+        return managed;
+    }
+    const discovered = discoverRunningStudioRuntime(options);
+    if (!discovered) {
+        return null;
+    }
+    writeManagedStudioRuntime(discovered);
+    return discovered;
+};
 const getStudioVenvPythonPath = (studioRoot) => process.platform === "win32"
     ? path.join(studioRoot, ".venv", "Scripts", "python.exe")
     : path.join(studioRoot, ".venv", "bin", "python3");
@@ -253,7 +319,7 @@ const waitForManagedStudioStop = async (runtime, timeoutMs = STUDIO_STOP_TIMEOUT
     }));
 };
 const stopManagedStudio = async () => {
-    const runtime = (0, exports.readManagedStudioRuntime)();
+    const runtime = adoptRunningStudioRuntime();
     if (!runtime) {
         return {
             ok: false,
@@ -280,9 +346,55 @@ const stopManagedStudio = async () => {
     };
 };
 exports.stopManagedStudio = stopManagedStudio;
+const stopManagedStudioImmediately = () => {
+    const runtime = adoptRunningStudioRuntime();
+    if (!runtime) {
+        return false;
+    }
+    stopManagedStudioProcess(runtime);
+    clearManagedStudioRuntime();
+    return true;
+};
+exports.stopManagedStudioImmediately = stopManagedStudioImmediately;
 const ensureStudioRunning = async (options = {}) => {
     const webUrl = (0, exports.getStudioWebUrl)();
     const apiHealthUrl = (0, exports.getStudioApiHealthUrl)();
+    const existingRuntime = adoptRunningStudioRuntime();
+    if (existingRuntime) {
+        const ready = await (0, exports.waitForStudioReady)({
+            timeoutMs: options.timeoutMs,
+            webUrl,
+            apiHealthUrl,
+        });
+        if (ready) {
+            return {
+                ok: true,
+                handle: {
+                    startedHere: false,
+                    process: null,
+                    close: () => {
+                        void (0, exports.stopManagedStudio)();
+                    },
+                },
+                studioRoot: existingRuntime.studioRoot,
+                webUrl,
+                apiHealthUrl,
+            };
+        }
+        stopManagedStudioProcess(existingRuntime);
+        const stopped = await waitForManagedStudioStop(existingRuntime);
+        clearManagedStudioRuntime();
+        if (!stopped) {
+            return {
+                ok: false,
+                code: "startup-failed",
+                reason: "An existing URDF Studio launcher was running but could not be recovered.",
+                studioRoot: existingRuntime.studioRoot,
+                webUrl,
+                apiHealthUrl,
+            };
+        }
+    }
     if (await (0, exports.isStudioReady)({ webUrl, apiHealthUrl })) {
         return {
             ok: true,

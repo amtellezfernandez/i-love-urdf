@@ -20,6 +20,7 @@ const {
   isStudioRepoRoot,
   resolveStudioRoot,
   stopManagedStudio,
+  stopManagedStudioImmediately,
 } = runtime;
 
 const createTempDir = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -186,6 +187,71 @@ test("stopManagedStudio stops the detached ilu-managed runtime and clears its st
       } catch {
         try {
           process.kill(managed.pid, "SIGKILL");
+        } catch {
+          // Ignore final cleanup failures in tests.
+        }
+      }
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("stopManagedStudioImmediately adopts a matching launcher process even without a runtime file", async () => {
+  const tempDir = createTempDir("ilu-studio-adopt-");
+  const runtimeFile = path.join(tempDir, "studio-runtime.json");
+  const previousRuntimeFile = process.env.ILU_STUDIO_RUNTIME_FILE;
+  const previousStudioRepo = process.env.URDF_STUDIO_REPO;
+
+  createStudioRepo(tempDir, true);
+  fs.writeFileSync(
+    path.join(tempDir, "tools", "scripts", "run.js"),
+    "setInterval(() => {}, 1000);\n",
+    "utf8"
+  );
+
+  const launcher = spawn(process.execPath, [path.join(tempDir, "tools", "scripts", "run.js")], {
+    detached: true,
+    stdio: "ignore",
+  });
+  launcher.unref();
+
+  process.env.ILU_STUDIO_RUNTIME_FILE = runtimeFile;
+  process.env.URDF_STUDIO_REPO = tempDir;
+
+  try {
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline && !isProcessAlive(launcher.pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    assert.equal(isProcessAlive(launcher.pid), true);
+    assert.equal(fs.existsSync(runtimeFile), false);
+    assert.equal(stopManagedStudioImmediately(), true);
+
+    const stoppedDeadline = Date.now() + 3_000;
+    while (Date.now() < stoppedDeadline && isProcessAlive(launcher.pid)) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    assert.equal(isProcessAlive(launcher.pid), false);
+    assert.equal(fs.existsSync(runtimeFile), false);
+  } finally {
+    if (previousRuntimeFile === undefined) {
+      delete process.env.ILU_STUDIO_RUNTIME_FILE;
+    } else {
+      process.env.ILU_STUDIO_RUNTIME_FILE = previousRuntimeFile;
+    }
+    if (previousStudioRepo === undefined) {
+      delete process.env.URDF_STUDIO_REPO;
+    } else {
+      process.env.URDF_STUDIO_REPO = previousStudioRepo;
+    }
+    if (isProcessAlive(launcher.pid)) {
+      try {
+        process.kill(-launcher.pid, "SIGKILL");
+      } catch {
+        try {
+          process.kill(launcher.pid, "SIGKILL");
         } catch {
           // Ignore final cleanup failures in tests.
         }

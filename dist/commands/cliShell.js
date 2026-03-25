@@ -72,6 +72,37 @@ const getVisualizerDisconnectNotice = (state) => ({
         ? `ilu terminal disconnected. URDF Studio kept session ${state.sharedSessionId}`
         : "ilu terminal disconnected. URDF Studio kept running",
 });
+const createVisualizerExitGuard = (state) => {
+    let preserveVisualizerOnExit = false;
+    let cleanedUp = false;
+    const cleanup = () => {
+        if (cleanedUp) {
+            return;
+        }
+        cleanedUp = true;
+        if (!preserveVisualizerOnExit && state.visualizerOpened) {
+            (0, studioRuntime_1.stopManagedStudioImmediately)();
+            state.visualizerOpened = false;
+        }
+    };
+    const handleTerminationSignal = () => {
+        cleanup();
+        process.exit(0);
+    };
+    process.on("exit", cleanup);
+    process.on("SIGHUP", handleTerminationSignal);
+    process.on("SIGTERM", handleTerminationSignal);
+    return {
+        keepVisualizerOpenOnExit: () => {
+            preserveVisualizerOnExit = true;
+        },
+        dispose: () => {
+            process.off("exit", cleanup);
+            process.off("SIGHUP", handleTerminationSignal);
+            process.off("SIGTERM", handleTerminationSignal);
+        },
+    };
+};
 const runStopVisualizerAction = async (state) => {
     const stopResult = await (0, studioRuntime_1.stopManagedStudio)();
     if (stopResult.ok) {
@@ -3614,13 +3645,14 @@ const printVisualizerStopShellAction = async (state) => {
     }
     (0, cliShellUi_1.printOutputPanel)(result.panel);
 };
-const closeLineShell = (state, close) => {
+const closeLineShell = (state, close, options = {}) => {
     if (shouldPromptOnShellExit(state)) {
+        options.keepVisualizerOpenOnExit?.();
         (0, cliShellConfig_1.writeFeedback)(getVisualizerDisconnectNotice(state));
     }
     close();
 };
-const handleRootSlashCommand = async (slashCommand, state, close) => {
+const handleRootSlashCommand = async (slashCommand, state, close, keepVisualizerOpenOnExit) => {
     if (!slashCommand || slashCommand === "help") {
         if (state.repoIntentPrompt) {
             (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
@@ -3645,7 +3677,7 @@ const handleRootSlashCommand = async (slashCommand, state, close) => {
         return;
     }
     if (slashCommand === "exit" || slashCommand === "quit") {
-        closeLineShell(state, close);
+        closeLineShell(state, close, { keepVisualizerOpenOnExit });
         return;
     }
     if (slashCommand === "clear") {
@@ -3791,10 +3823,10 @@ const handleRootSlashCommand = async (slashCommand, state, close) => {
     (0, cliShellConfig_1.flushFeedback)(feedback);
     printSessionOptions(state, state.session);
 };
-const handleRootTaskSlashCommand = async (slashCommand, state, close) => {
+const handleRootTaskSlashCommand = async (slashCommand, state, close, keepVisualizerOpenOnExit) => {
     const task = state.rootTask;
     if (!task) {
-        handleRootSlashCommand(slashCommand, state, close);
+        handleRootSlashCommand(slashCommand, state, close, keepVisualizerOpenOnExit);
         return;
     }
     if (!slashCommand || slashCommand === "help") {
@@ -3809,7 +3841,7 @@ const handleRootTaskSlashCommand = async (slashCommand, state, close) => {
         return;
     }
     if (slashCommand === "exit" || slashCommand === "quit") {
-        closeLineShell(state, close);
+        closeLineShell(state, close, { keepVisualizerOpenOnExit });
         return;
     }
     if (slashCommand === "clear") {
@@ -3932,7 +3964,7 @@ const handleRootTaskSlashCommand = async (slashCommand, state, close) => {
     (0, cliShellConfig_1.flushFeedback)(feedback);
     printSessionOptions(state, state.session);
 };
-const handleSessionSlashCommand = async (slashCommand, inlineValue, state, close) => {
+const handleSessionSlashCommand = async (slashCommand, inlineValue, state, close, keepVisualizerOpenOnExit) => {
     const session = state.session;
     if (!session) {
         return;
@@ -4043,7 +4075,7 @@ const handleSessionSlashCommand = async (slashCommand, inlineValue, state, close
         return;
     }
     if (slashCommand === "exit" || slashCommand === "quit") {
-        closeLineShell(state, close);
+        closeLineShell(state, close, { keepVisualizerOpenOnExit });
         return;
     }
     const target = resolveSessionSlashTarget(session, slashCommand);
@@ -4953,6 +4985,7 @@ const runLineInteractiveShell = async (options = {}) => {
         exitPrompt: null,
     };
     let isClosed = false;
+    const visualizerExitGuard = createVisualizerExitGuard(state);
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
@@ -4967,6 +5000,9 @@ const runLineInteractiveShell = async (options = {}) => {
         rl.close();
     });
     const close = () => rl.close();
+    const keepVisualizerOpenOnExit = () => {
+        visualizerExitGuard.keepVisualizerOpenOnExit();
+    };
     (0, cliShellUi_1.printRootQuickStart)();
     if (options.attachSessionId) {
         try {
@@ -4986,70 +5022,254 @@ const runLineInteractiveShell = async (options = {}) => {
     if (options.initialSlashCommand) {
         const parsed = parseSlashInput(options.initialSlashCommand);
         if (parsed) {
-            handleRootSlashCommand(parsed.slashCommand, state, close);
+            handleRootSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
         }
     }
     rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
     rl.prompt();
-    for await (const line of rl) {
-        const trimmed = line.trim();
-        const session = state.session;
-        const isSlashInput = shouldTreatAsSlashInput(line, state);
-        const bangCommand = parseBangInput(line);
-        const activeResumePrompt = getActiveResumePrompt(state);
-        const activeSuggestedAction = getActiveSuggestedAction(state);
-        if (activeSuggestedAction && (isSlashInput || bangCommand)) {
-            bypassSuggestedAction(state, activeSuggestedAction);
-        }
-        if (activeResumePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker) {
-            const normalizedDecision = trimmed.toLowerCase();
-            if (!trimmed) {
-                try {
-                    const snapshot = acceptResumePrompt(state);
-                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(`resumed session ${snapshot.sessionId}`)}\n`);
-                    (0, cliShellUi_1.printContextRows)(getLoadedSourceContextRows(state));
-                }
-                catch (error) {
-                    (0, cliShellConfig_1.writeFeedback)({
-                        kind: "warning",
-                        text: error instanceof Error ? error.message : String(error),
-                    });
-                }
-                rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
-                rl.prompt();
-                continue;
+    try {
+        for await (const line of rl) {
+            const trimmed = line.trim();
+            const session = state.session;
+            const isSlashInput = shouldTreatAsSlashInput(line, state);
+            const bangCommand = parseBangInput(line);
+            const activeResumePrompt = getActiveResumePrompt(state);
+            const activeSuggestedAction = getActiveSuggestedAction(state);
+            if (activeSuggestedAction && (isSlashInput || bangCommand)) {
+                bypassSuggestedAction(state, activeSuggestedAction);
             }
-            if (normalizedDecision === "n" ||
-                normalizedDecision === "no" ||
-                normalizedDecision === "skip" ||
-                normalizedDecision === "fresh" ||
-                normalizedDecision === "later") {
+            if (activeResumePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker) {
+                const normalizedDecision = trimmed.toLowerCase();
+                if (!trimmed) {
+                    try {
+                        const snapshot = acceptResumePrompt(state);
+                        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(`resumed session ${snapshot.sessionId}`)}\n`);
+                        (0, cliShellUi_1.printContextRows)(getLoadedSourceContextRows(state));
+                    }
+                    catch (error) {
+                        (0, cliShellConfig_1.writeFeedback)({
+                            kind: "warning",
+                            text: error instanceof Error ? error.message : String(error),
+                        });
+                    }
+                    rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
+                    rl.prompt();
+                    continue;
+                }
+                if (normalizedDecision === "n" ||
+                    normalizedDecision === "no" ||
+                    normalizedDecision === "skip" ||
+                    normalizedDecision === "fresh" ||
+                    normalizedDecision === "later") {
+                    dismissResumePrompt(state);
+                    (0, cliShellConfig_1.writeFeedback)({ kind: "info", text: "starting fresh" });
+                    rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
+                    rl.prompt();
+                    continue;
+                }
                 dismissResumePrompt(state);
-                (0, cliShellConfig_1.writeFeedback)({ kind: "info", text: "starting fresh" });
+            }
+            if (activeSuggestedAction && !isSlashInput && !bangCommand) {
+                const normalizedDecision = trimmed.toLowerCase();
+                if (!trimmed || normalizedDecision === "y" || normalizedDecision === "yes") {
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(getSuggestedActionBusyState(activeSuggestedAction).lines[0])}\n`);
+                    const result = await runSuggestedActionAsync(state);
+                    if (result.notice) {
+                        (0, cliShellConfig_1.writeFeedback)(result.notice);
+                    }
+                    (0, cliShellUi_1.printOutputPanel)(result.panel);
+                }
+                else if (normalizedDecision === "n" ||
+                    normalizedDecision === "no" ||
+                    normalizedDecision === "later" ||
+                    normalizedDecision === "not now") {
+                    (0, cliShellConfig_1.writeFeedback)(skipSuggestedAction(state, activeSuggestedAction));
+                }
+                else {
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(getSuggestedActionDecisionHint(activeSuggestedAction, "line"))}\n`);
+                }
+                const nextSuggestedAction = getActiveSuggestedAction(state);
+                if (!isClosed && nextSuggestedAction) {
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(nextSuggestedAction.prompt)}\n`);
+                    process.stdout.write(`  ${renderSuggestedActionChoiceLine(nextSuggestedAction, "line")}\n`);
+                }
+                if (isClosed) {
+                    break;
+                }
                 rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
                 rl.prompt();
                 continue;
             }
-            dismissResumePrompt(state);
-        }
-        if (activeSuggestedAction && !isSlashInput && !bangCommand) {
-            const normalizedDecision = trimmed.toLowerCase();
-            if (!trimmed || normalizedDecision === "y" || normalizedDecision === "yes") {
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(getSuggestedActionBusyState(activeSuggestedAction).lines[0])}\n`);
-                const result = await runSuggestedActionAsync(state);
-                if (result.notice) {
+            if (bangCommand) {
+                if (bangCommand === "xacro") {
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("setting up xacro runtime...")}\n`);
+                    const result = runXacroBangCommand(state);
                     (0, cliShellConfig_1.writeFeedback)(result.notice);
+                    (0, cliShellUi_1.printOutputPanel)(result.panel);
+                    if (result.clearSession) {
+                        state.session = null;
+                        state.rootTask = null;
+                    }
                 }
-                (0, cliShellUi_1.printOutputPanel)(result.panel);
             }
-            else if (normalizedDecision === "n" ||
-                normalizedDecision === "no" ||
-                normalizedDecision === "later" ||
-                normalizedDecision === "not now") {
-                (0, cliShellConfig_1.writeFeedback)(skipSuggestedAction(state, activeSuggestedAction));
+            else if (state.repoIntentPrompt && !isSlashInput) {
+                if (trimmed.length > 0 && inferFreeformRootPlan(state, line)) {
+                    clearRepoIntentPrompt(state);
+                }
+                else {
+                    const choice = resolveRepoIntentSelectionInput(state.repoIntentPrompt, line);
+                    if (choice) {
+                        const result = await runRepoIntentChoice(state, choice);
+                        if (result.notice) {
+                            (0, cliShellConfig_1.writeFeedback)(result.notice);
+                        }
+                        (0, cliShellUi_1.printOutputPanel)(result.panel);
+                        if (state.repoIntentPrompt) {
+                            (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
+                        }
+                        else if (state.candidatePicker) {
+                            (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
+                        }
+                    }
+                    else {
+                        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning("pick 1, 2, or 3 to choose the repo action")}\n`);
+                        if (state.repoIntentPrompt) {
+                            (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
+                        }
+                    }
+                }
+            }
+            else if (state.candidatePicker && !isSlashInput) {
+                const selectedPath = resolveCandidateSelectionInput(state, line);
+                if (selectedPath) {
+                    const picker = state.candidatePicker;
+                    const result = runSelectedCandidatePicker(state, picker, selectedPath);
+                    if (result?.notice) {
+                        (0, cliShellConfig_1.writeFeedback)(result.notice);
+                    }
+                    (0, cliShellUi_1.printOutputPanel)(result?.panel ?? null);
+                    if (result?.clearSession) {
+                        clearInteractiveFlowState(state);
+                    }
+                }
+                else {
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning("pick a valid number or paste a repo entry path")}\n`);
+                    if (state.candidatePicker) {
+                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
+                    }
+                }
+            }
+            else if (session?.pending && !isSlashInput) {
+                handlePendingValue(line, state);
+            }
+            else if (isSlashInput) {
+                const parsed = parseSlashInput(trimmed);
+                if (parsed) {
+                    if (session) {
+                        await handleSessionSlashCommand(parsed.slashCommand, parsed.inlineValue, state, close, keepVisualizerOpenOnExit);
+                    }
+                    else if (state.rootTask) {
+                        await handleRootTaskSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
+                    }
+                    else {
+                        await handleRootSlashCommand(parsed.slashCommand, state, close, keepVisualizerOpenOnExit);
+                    }
+                }
+            }
+            else if (!trimmed) {
+                if (session) {
+                    if (!session.pending && getRequirementStatus(session).ready) {
+                        printSessionCommandExecution(state, executeSessionCommand(state, session), session);
+                    }
+                    else {
+                        printSessionStatus(state, session);
+                    }
+                }
+                else if (state.repoIntentPrompt) {
+                    (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
+                }
+                else if (state.rootTask) {
+                    printRootTaskOptions(state.rootTask);
+                }
+                else {
+                    printRootOptions(state);
+                }
+            }
+            else if (session) {
+                const feedback = [];
+                const applied = applyFreeformInputToSession(state, session, line, feedback);
+                if (applied) {
+                    const automated = runDirectInputAutomation(state, applied.session, applied.key);
+                    if (automated) {
+                        if (automated.notice) {
+                            (0, cliShellConfig_1.writeFeedback)(automated.notice);
+                        }
+                        (0, cliShellUi_1.printOutputPanel)(automated.panel);
+                        if (state.repoIntentPrompt) {
+                            (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
+                        }
+                        if (state.candidatePicker) {
+                            (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
+                        }
+                        if (automated.clearSession) {
+                            clearInteractiveFlowState(state);
+                        }
+                        else if (state.session) {
+                            if (!state.candidatePicker) {
+                                printSessionStatus(state, state.session);
+                            }
+                        }
+                    }
+                    else {
+                        printSessionStatus(state, session);
+                        (0, cliShellUi_1.printOutputPanel)(buildAutoPreviewPanel(state, applied.session, applied.key));
+                        if (state.repoIntentPrompt) {
+                            (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
+                        }
+                        if (state.candidatePicker) {
+                            (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
+                        }
+                    }
+                }
+                else {
+                    (0, cliShellConfig_1.flushFeedback)(feedback);
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
+                }
             }
             else {
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(getSuggestedActionDecisionHint(activeSuggestedAction, "line"))}\n`);
+                const feedback = [];
+                const applied = applyFreeformInputToRootState(state, line, feedback);
+                if (applied && state.session) {
+                    const automated = runDirectInputAutomation(state, applied.session, applied.key);
+                    if (automated) {
+                        if (automated.notice) {
+                            (0, cliShellConfig_1.writeFeedback)(automated.notice);
+                        }
+                        (0, cliShellUi_1.printOutputPanel)(automated.panel);
+                        if (state.candidatePicker) {
+                            (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
+                        }
+                        if (automated.clearSession) {
+                            clearInteractiveFlowState(state);
+                        }
+                        else if (state.session) {
+                            if (!state.candidatePicker) {
+                                printSessionStatus(state, state.session);
+                            }
+                        }
+                    }
+                    else {
+                        printSessionStatus(state, state.session);
+                        (0, cliShellUi_1.printOutputPanel)(buildAutoPreviewPanel(state, applied.session, applied.key));
+                        if (state.candidatePicker) {
+                            (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
+                        }
+                    }
+                }
+                else {
+                    (0, cliShellConfig_1.flushFeedback)(feedback);
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
+                }
             }
             const nextSuggestedAction = getActiveSuggestedAction(state);
             if (!isClosed && nextSuggestedAction) {
@@ -5061,189 +5281,10 @@ const runLineInteractiveShell = async (options = {}) => {
             }
             rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
             rl.prompt();
-            continue;
         }
-        if (bangCommand) {
-            if (bangCommand === "xacro") {
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("setting up xacro runtime...")}\n`);
-                const result = runXacroBangCommand(state);
-                (0, cliShellConfig_1.writeFeedback)(result.notice);
-                (0, cliShellUi_1.printOutputPanel)(result.panel);
-                if (result.clearSession) {
-                    state.session = null;
-                    state.rootTask = null;
-                }
-            }
-        }
-        else if (state.repoIntentPrompt && !isSlashInput) {
-            if (trimmed.length > 0 && inferFreeformRootPlan(state, line)) {
-                clearRepoIntentPrompt(state);
-            }
-            else {
-                const choice = resolveRepoIntentSelectionInput(state.repoIntentPrompt, line);
-                if (choice) {
-                    const result = await runRepoIntentChoice(state, choice);
-                    if (result.notice) {
-                        (0, cliShellConfig_1.writeFeedback)(result.notice);
-                    }
-                    (0, cliShellUi_1.printOutputPanel)(result.panel);
-                    if (state.repoIntentPrompt) {
-                        (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
-                    }
-                    else if (state.candidatePicker) {
-                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
-                    }
-                }
-                else {
-                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning("pick 1, 2, or 3 to choose the repo action")}\n`);
-                    if (state.repoIntentPrompt) {
-                        (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
-                    }
-                }
-            }
-        }
-        else if (state.candidatePicker && !isSlashInput) {
-            const selectedPath = resolveCandidateSelectionInput(state, line);
-            if (selectedPath) {
-                const picker = state.candidatePicker;
-                const result = runSelectedCandidatePicker(state, picker, selectedPath);
-                if (result?.notice) {
-                    (0, cliShellConfig_1.writeFeedback)(result.notice);
-                }
-                (0, cliShellUi_1.printOutputPanel)(result?.panel ?? null);
-                if (result?.clearSession) {
-                    clearInteractiveFlowState(state);
-                }
-            }
-            else {
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning("pick a valid number or paste a repo entry path")}\n`);
-                if (state.candidatePicker) {
-                    (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
-                }
-            }
-        }
-        else if (session?.pending && !isSlashInput) {
-            handlePendingValue(line, state);
-        }
-        else if (isSlashInput) {
-            const parsed = parseSlashInput(trimmed);
-            if (parsed) {
-                if (session) {
-                    await handleSessionSlashCommand(parsed.slashCommand, parsed.inlineValue, state, close);
-                }
-                else if (state.rootTask) {
-                    await handleRootTaskSlashCommand(parsed.slashCommand, state, close);
-                }
-                else {
-                    await handleRootSlashCommand(parsed.slashCommand, state, close);
-                }
-            }
-        }
-        else if (!trimmed) {
-            if (session) {
-                if (!session.pending && getRequirementStatus(session).ready) {
-                    printSessionCommandExecution(state, executeSessionCommand(state, session), session);
-                }
-                else {
-                    printSessionStatus(state, session);
-                }
-            }
-            else if (state.repoIntentPrompt) {
-                (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
-            }
-            else if (state.rootTask) {
-                printRootTaskOptions(state.rootTask);
-            }
-            else {
-                printRootOptions(state);
-            }
-        }
-        else if (session) {
-            const feedback = [];
-            const applied = applyFreeformInputToSession(state, session, line, feedback);
-            if (applied) {
-                const automated = runDirectInputAutomation(state, applied.session, applied.key);
-                if (automated) {
-                    if (automated.notice) {
-                        (0, cliShellConfig_1.writeFeedback)(automated.notice);
-                    }
-                    (0, cliShellUi_1.printOutputPanel)(automated.panel);
-                    if (state.repoIntentPrompt) {
-                        (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
-                    }
-                    if (state.candidatePicker) {
-                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
-                    }
-                    if (automated.clearSession) {
-                        clearInteractiveFlowState(state);
-                    }
-                    else if (state.session) {
-                        if (!state.candidatePicker) {
-                            printSessionStatus(state, state.session);
-                        }
-                    }
-                }
-                else {
-                    printSessionStatus(state, session);
-                    (0, cliShellUi_1.printOutputPanel)(buildAutoPreviewPanel(state, applied.session, applied.key));
-                    if (state.repoIntentPrompt) {
-                        (0, cliShellUi_1.printRepoIntentPrompt)(state.repoIntentPrompt, getRepoIntentMenuEntries());
-                    }
-                    if (state.candidatePicker) {
-                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
-                    }
-                }
-            }
-            else {
-                (0, cliShellConfig_1.flushFeedback)(feedback);
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
-            }
-        }
-        else {
-            const feedback = [];
-            const applied = applyFreeformInputToRootState(state, line, feedback);
-            if (applied && state.session) {
-                const automated = runDirectInputAutomation(state, applied.session, applied.key);
-                if (automated) {
-                    if (automated.notice) {
-                        (0, cliShellConfig_1.writeFeedback)(automated.notice);
-                    }
-                    (0, cliShellUi_1.printOutputPanel)(automated.panel);
-                    if (state.candidatePicker) {
-                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
-                    }
-                    if (automated.clearSession) {
-                        clearInteractiveFlowState(state);
-                    }
-                    else if (state.session) {
-                        if (!state.candidatePicker) {
-                            printSessionStatus(state, state.session);
-                        }
-                    }
-                }
-                else {
-                    printSessionStatus(state, state.session);
-                    (0, cliShellUi_1.printOutputPanel)(buildAutoPreviewPanel(state, applied.session, applied.key));
-                    if (state.candidatePicker) {
-                        (0, cliShellUi_1.printCandidatePicker)(state.candidatePicker);
-                    }
-                }
-            }
-            else {
-                (0, cliShellConfig_1.flushFeedback)(feedback);
-                process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
-            }
-        }
-        const nextSuggestedAction = getActiveSuggestedAction(state);
-        if (!isClosed && nextSuggestedAction) {
-            process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(nextSuggestedAction.prompt)}\n`);
-            process.stdout.write(`  ${renderSuggestedActionChoiceLine(nextSuggestedAction, "line")}\n`);
-        }
-        if (isClosed) {
-            break;
-        }
-        rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
-        rl.prompt();
+    }
+    finally {
+        visualizerExitGuard.dispose();
     }
 };
 const runTtyInteractiveShell = async (options = {}) => {
@@ -5273,6 +5314,7 @@ const runTtyInteractiveShell = async (options = {}) => {
     };
     let closed = false;
     let ignoreKeypressUntilMs = 0;
+    const visualizerExitGuard = createVisualizerExitGuard(state);
     const close = () => {
         closed = true;
     };
@@ -5281,7 +5323,10 @@ const runTtyInteractiveShell = async (options = {}) => {
         const menuEntries = getSlashMenuEntries(state, view.input);
         view.menuIndex = menuEntries.length === 0 ? 0 : (0, cliShellConfig_1.clamp)(view.menuIndex, 0, menuEntries.length - 1);
     };
-    const finalizeTtyClose = (notice) => {
+    const finalizeTtyClose = (notice, options = {}) => {
+        if (options.keepVisualizerOpen) {
+            visualizerExitGuard.keepVisualizerOpenOnExit();
+        }
         clearExitPrompt(state);
         setInput("");
         view.output = null;
@@ -6115,7 +6160,7 @@ const runTtyInteractiveShell = async (options = {}) => {
                 setInput("");
                 return;
             }
-            finalizeTtyClose(getVisualizerDisconnectNotice(state));
+            finalizeTtyClose(getVisualizerDisconnectNotice(state), { keepVisualizerOpen: true });
             return;
         }
         if (activeResumePrompt &&
@@ -6504,7 +6549,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         const activeSuggestedAction = activeExitPrompt ? null : getActiveSuggestedAction(state);
         if ((key.ctrl && key.name === "c") || input === "\u0003") {
             if (activeExitPrompt) {
-                finalizeTtyClose(getVisualizerDisconnectNotice(state));
+                finalizeTtyClose(getVisualizerDisconnectNotice(state), { keepVisualizerOpen: true });
             }
             else {
                 requestTtyClose();
@@ -6711,6 +6756,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         process.stdin.off("keypress", onKeypress);
         process.stdin.setRawMode(false);
         process.stdin.pause();
+        visualizerExitGuard.dispose();
         printTtyShellSnapshot(state, view);
     }
 };

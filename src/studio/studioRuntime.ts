@@ -141,6 +141,52 @@ const isProcessActive = (pid: number): boolean => {
   }
 };
 
+const readUnixProcessList = (): Array<{
+  pid: number;
+  command: string;
+}> => {
+  if (process.platform === "win32") {
+    return [];
+  }
+
+  const psResult = spawnSync("ps", ["-axo", "pid=,command="], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (psResult.status !== 0 || typeof psResult.stdout !== "string") {
+    return [];
+  }
+
+  return psResult.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const match = /^(\d+)\s+(.*)$/.exec(line);
+      if (!match) {
+        return null;
+      }
+
+      const pid = Number.parseInt(match[1] ?? "", 10);
+      const command = match[2]?.trim() ?? "";
+      if (!Number.isInteger(pid) || pid <= 0 || command.length === 0) {
+        return null;
+      }
+
+      return {
+        pid,
+        command,
+      };
+    })
+    .filter((entry): entry is { pid: number; command: string } => entry !== null);
+};
+
+const findStudioLauncherPid = (studioRoot: string): number | null => {
+  const launcherPath = path.resolve(getStudioRunScriptPath(studioRoot));
+  const match = readUnixProcessList().find((entry) => entry.command.includes(launcherPath));
+  return match?.pid ?? null;
+};
+
 const coerceManagedStudioRuntime = (value: unknown): ManagedStudioRuntime | null => {
   if (!value || typeof value !== "object") {
     return null;
@@ -240,6 +286,51 @@ export const resolveStudioRoot = (
   }
 
   return null;
+};
+
+const discoverRunningStudioRuntime = (
+  options: {
+    explicitEnv?: string | null;
+    candidateRoots?: readonly string[];
+  } = {}
+): ManagedStudioRuntime | null => {
+  const studioRoot = resolveStudioRoot(options);
+  if (!studioRoot) {
+    return null;
+  }
+
+  const pid = findStudioLauncherPid(studioRoot);
+  if (!pid || !isProcessActive(pid)) {
+    return null;
+  }
+
+  return {
+    pid,
+    studioRoot,
+    webUrl: getStudioWebUrl(),
+    apiHealthUrl: getStudioApiHealthUrl(),
+    startedAt: new Date().toISOString(),
+  };
+};
+
+const adoptRunningStudioRuntime = (
+  options: {
+    explicitEnv?: string | null;
+    candidateRoots?: readonly string[];
+  } = {}
+): ManagedStudioRuntime | null => {
+  const managed = readManagedStudioRuntime();
+  if (managed) {
+    return managed;
+  }
+
+  const discovered = discoverRunningStudioRuntime(options);
+  if (!discovered) {
+    return null;
+  }
+
+  writeManagedStudioRuntime(discovered);
+  return discovered;
 };
 
 const getStudioVenvPythonPath = (studioRoot: string): string =>
@@ -382,7 +473,7 @@ const waitForManagedStudioStop = async (
 };
 
 export const stopManagedStudio = async (): Promise<StopManagedStudioResult> => {
-  const runtime = readManagedStudioRuntime();
+  const runtime = adoptRunningStudioRuntime();
   if (!runtime) {
     return {
       ok: false,
@@ -411,6 +502,17 @@ export const stopManagedStudio = async (): Promise<StopManagedStudioResult> => {
   };
 };
 
+export const stopManagedStudioImmediately = (): boolean => {
+  const runtime = adoptRunningStudioRuntime();
+  if (!runtime) {
+    return false;
+  }
+
+  stopManagedStudioProcess(runtime);
+  clearManagedStudioRuntime();
+  return true;
+};
+
 export const ensureStudioRunning = async (
   options: {
     detached?: boolean;
@@ -419,6 +521,44 @@ export const ensureStudioRunning = async (
 ): Promise<EnsureStudioRunningResult> => {
   const webUrl = getStudioWebUrl();
   const apiHealthUrl = getStudioApiHealthUrl();
+  const existingRuntime = adoptRunningStudioRuntime();
+
+  if (existingRuntime) {
+    const ready = await waitForStudioReady({
+      timeoutMs: options.timeoutMs,
+      webUrl,
+      apiHealthUrl,
+    });
+    if (ready) {
+      return {
+        ok: true,
+        handle: {
+          startedHere: false,
+          process: null,
+          close: () => {
+            void stopManagedStudio();
+          },
+        },
+        studioRoot: existingRuntime.studioRoot,
+        webUrl,
+        apiHealthUrl,
+      };
+    }
+
+    stopManagedStudioProcess(existingRuntime);
+    const stopped = await waitForManagedStudioStop(existingRuntime);
+    clearManagedStudioRuntime();
+    if (!stopped) {
+      return {
+        ok: false,
+        code: "startup-failed",
+        reason: "An existing URDF Studio launcher was running but could not be recovered.",
+        studioRoot: existingRuntime.studioRoot,
+        webUrl,
+        apiHealthUrl,
+      };
+    }
+  }
 
   if (await isStudioReady({ webUrl, apiHealthUrl })) {
     return {
