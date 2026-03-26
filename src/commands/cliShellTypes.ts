@@ -160,7 +160,7 @@ export type Keypress = {
   sequence?: string;
 };
 
-export type RootTaskName = "open" | "inspect" | "check" | "convert" | "fix";
+export type RootTaskName = "open" | "inspect" | "check" | "convert" | "fix" | "preview";
 
 export type StartupModeName = "single" | "assembly" | "substitute" | "preview";
 
@@ -283,10 +283,13 @@ export type RepoIntentPromptState = {
 export type RepoSourceContext = Omit<RepoIntentPromptState, "selectedIndex">;
 
 export type CandidatePickerState = {
+  mode: "load-source" | "session-source";
   candidates: RepositoryPreviewCandidate[];
   selectedIndex: number;
   loadArgs: Map<string, string | boolean>;
   extractedArchivePath?: string;
+  targetKey?: string;
+  sourceInput?: string;
 };
 
 export type ShellBangCommandName = "xacro";

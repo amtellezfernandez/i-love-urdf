@@ -7,6 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import AdmZip from "adm-zip";
 import { runPtyShellSession, supportsPtyShellTests } from "./helpers/ptyShell.mjs";
 import { rootDir } from "./helpers/loadDist.mjs";
 
@@ -14,6 +15,13 @@ const ptyTest = supportsPtyShellTests ? test : test.skip;
 
 const createTempDir = (prefix) => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 const missingStudioRepoPath = path.join(os.tmpdir(), "ilu-missing-studio-repo");
+const createZipFromFiles = (zipPath, entries) => {
+  const zip = new AdmZip();
+  for (const entry of entries) {
+    zip.addFile(entry.name, Buffer.from(entry.contents, "utf8"));
+  }
+  zip.writeZip(zipPath);
+};
 
 const isProcessAlive = (pid) => {
   try {
@@ -95,6 +103,7 @@ ptyTest("TTY startup mode selector reaches preview with repeated down arrows", a
       { delayMs: 150, data: "\u001b[B" },
       { delayMs: 200, data: "\u001b[B" },
       { delayMs: 200, data: "\u001b[B" },
+      { delayMs: 250, data: "\r" },
       { delayMs: 350, data: "\u0003" },
     ],
   });
@@ -102,6 +111,9 @@ ptyTest("TTY startup mode selector reaches preview with repeated down arrows", a
   assert.equal(result.code, 0);
   assert.match(result.sanitizedOutput, /\/preview-mode/i);
   assert.match(result.sanitizedOutput, /> preview\s+gallery output/i);
+  assert.match(result.sanitizedOutput, /generate cards and thumbnails/i);
+  assert.match(result.sanitizedOutput, /entire repo, \/folder for all URDFs, or \/urdf for one file/i);
+  assert.doesNotMatch(result.sanitizedOutput, /source\s+none yet/i);
 });
 
 ptyTest("TTY substitute mode starts with a compact source prompt", async () => {
@@ -166,6 +178,76 @@ ptyTest("TTY substitute mode asks for the replacement source after the first fil
     assert.equal(result.code, 0);
     assert.match(result.sanitizedOutput, /paste or drop 1 replacement source file/i);
     assert.doesNotMatch(result.sanitizedOutput, /replacement urdf file to import into the host robot/i);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+ptyTest("TTY substitute mode opens a picker for a zipped host source with multiple robots", async () => {
+  const tempDir = createTempDir("ilu-pty-substitute-host-zip-");
+  const hostZipPath = path.join(tempDir, "host-bundle.zip");
+  createZipFromFiles(hostZipPath, [
+    { name: "robots/base.urdf", contents: '<robot name="base"><link name="base"/></robot>' },
+    { name: "robots/arm.urdf", contents: '<robot name="arm"><link name="arm"/></robot>' },
+  ]);
+
+  try {
+    const result = await runPtyShellSession({
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+      },
+      steps: [
+        { delayMs: 150, data: "\u001b[B" },
+        { delayMs: 200, data: "\u001b[B" },
+        { delayMs: 250, data: "\r" },
+        { delayMs: 250, data: `${hostZipPath}\n` },
+        { delayMs: 1_100, data: "\u0003" },
+      ],
+      timeoutMs: 10_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /selected\s+arm\.urdf/i);
+    assert.match(result.sanitizedOutput, /arm\.urdf/i);
+    assert.match(result.sanitizedOutput, /use up\/down, then press Enter to load the highlighted entry/i);
+    assert.doesNotMatch(result.sanitizedOutput, /paste or drop 1 replacement source file/i);
+    assert.doesNotMatch(result.sanitizedOutput, /set \/old-root \+ \/new-root/i);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+ptyTest("TTY substitute mode opens a picker for a zipped replacement source with multiple robots", async () => {
+  const tempDir = createTempDir("ilu-pty-substitute-replacement-zip-");
+  const hostUrdfPath = path.join(tempDir, "host.urdf");
+  const replacementZipPath = path.join(tempDir, "replacement-bundle.zip");
+  fs.writeFileSync(hostUrdfPath, '<robot name="host"><link name="base"/></robot>');
+  createZipFromFiles(replacementZipPath, [
+    { name: "robots/tool.urdf", contents: '<robot name="tool"><link name="tool"/></robot>' },
+    { name: "robots/gripper.urdf", contents: '<robot name="gripper"><link name="gripper"/></robot>' },
+  ]);
+
+  try {
+    const result = await runPtyShellSession({
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+      },
+      steps: [
+        { delayMs: 150, data: "\u001b[B" },
+        { delayMs: 200, data: "\u001b[B" },
+        { delayMs: 250, data: "\r" },
+        { delayMs: 250, data: `${hostUrdfPath}\n` },
+        { delayMs: 500, data: `${replacementZipPath}\n` },
+        { delayMs: 1_100, data: "\u0003" },
+      ],
+      timeoutMs: 10_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /picker/i);
+    assert.match(result.sanitizedOutput, /tool\.urdf/i);
+    assert.match(result.sanitizedOutput, /gripper\.urdf/i);
+    assert.doesNotMatch(result.sanitizedOutput, /set \/old-root \+ \/new-root/i);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -377,7 +459,7 @@ ptyTest("TTY shell asks to open URDF Studio before the repair recommendation", a
   }
 });
 
-ptyTest("TTY shell lets slash commands bypass recommendation prompts", async () => {
+ptyTest("TTY shell lets slash commands bypass generic Studio prompts without forcing conflicted alignment", async () => {
   const yUpUrdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
   const result = await runPtyShellSession({
     env: {
@@ -394,9 +476,10 @@ ptyTest("TTY shell lets slash commands bypass recommendation prompts", async () 
   });
 
   assert.equal(result.code, 0);
-  assert.match(result.sanitizedOutput, /align orientation to the default target \+z-up \/ \+x-forward now\?/i);
+  assert.match(result.sanitizedOutput, /open URDF Studio for this robot now\?/i);
   assert.match(result.sanitizedOutput, /\/orientation/i);
   assert.match(result.sanitizedOutput, /\[↑↓\] move\s+\[Enter\] confirm\s+\[Esc\] Not now/i);
+  assert.doesNotMatch(result.sanitizedOutput, /align orientation to the default target \+z-up \/ \+x-forward now\?/i);
 });
 
 ptyTest("TTY shell offers Studio install when the visualizer is missing", async () => {
@@ -419,18 +502,18 @@ ptyTest("TTY shell offers Studio install when the visualizer is missing", async 
   });
 
   assert.equal(result.code, 0);
-  assert.match(result.sanitizedOutput, /open URDF Studio before aligning orientation\?/i);
+  assert.match(result.sanitizedOutput, /open URDF Studio for this robot now\?/i);
   assert.match(result.sanitizedOutput, /1\.\s+Open Studio/i);
-  assert.match(result.sanitizedOutput, /2\.\s+Continue here/i);
+  assert.match(result.sanitizedOutput, /2\.\s+Not now/i);
   assert.match(result.sanitizedOutput, /\[Enter\]\s+confirm/i);
-  assert.match(result.sanitizedOutput, /\[Esc\]\s+Continue here/i);
+  assert.match(result.sanitizedOutput, /\[Esc\]\s+Not now/i);
   assert.match(result.sanitizedOutput, /install URDF Studio to visualize your modifications\?/i);
   assert.match(result.sanitizedOutput, /1\.\s+Install Studio/i);
   assert.match(result.sanitizedOutput, /2\.\s+Not now/i);
   assert.doesNotMatch(result.sanitizedOutput, /loaded the source|source loaded\. review the checks/i);
 });
 
-ptyTest("TTY shell accepts the suggested orientation fix after skipping URDF Studio", async () => {
+ptyTest("TTY shell does not offer a conflicted orientation fix after skipping URDF Studio", async () => {
   const yUpUrdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
   const result = await runPtyShellSession({
     env: {
@@ -450,14 +533,12 @@ ptyTest("TTY shell accepts the suggested orientation fix after skipping URDF Stu
   });
 
   assert.equal(result.code, 0);
-  assert.match(result.sanitizedOutput, /open URDF Studio before aligning orientation\?/i);
+  assert.match(result.sanitizedOutput, /open URDF Studio for this robot now\?/i);
   assert.match(result.sanitizedOutput, /1\.\s+Open Studio/i);
-  assert.match(result.sanitizedOutput, /2\.\s+Continue here/i);
-  assert.match(result.sanitizedOutput, /align orientation to the default target \+z-up \/ \+x-forward now\?/i);
-  assert.match(result.sanitizedOutput, /1\.\s+Align now/i);
   assert.match(result.sanitizedOutput, /2\.\s+Not now/i);
-  assert.match(result.sanitizedOutput, /aligning orientation/i);
   assert.match(result.sanitizedOutput, /working urdf .*research_wheeled_y_up\.urdf/i);
+  assert.doesNotMatch(result.sanitizedOutput, /align orientation to the default target \+z-up \/ \+x-forward now\?/i);
+  assert.doesNotMatch(result.sanitizedOutput, /aligning orientation/i);
   assert.doesNotMatch(result.sanitizedOutput, /loaded the source|source loaded\. review the checks/i);
   assert.doesNotMatch(result.sanitizedOutput, /updated the working copy|working copy ready/i);
   assert.doesNotMatch(result.sanitizedOutput, /opened URDF Studio for the current session/i);
@@ -639,7 +720,7 @@ ptyTest("TTY shell saves the working URDF before the Studio exit prompt", async 
   }
 });
 
-ptyTest("TTY shell applies /align without opening the URDF manually", async () => {
+ptyTest("TTY shell keeps the working copy unchanged when /align sees a conflicted orientation guess", async () => {
   const yUpUrdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
   const result = await runPtyShellSession({
     env: {
@@ -657,9 +738,10 @@ ptyTest("TTY shell applies /align without opening the URDF manually", async () =
   });
 
   assert.equal(result.code, 0);
-  assert.match(result.sanitizedOutput, /aligning orientation/i);
   assert.match(result.sanitizedOutput, /\/align/i);
   assert.match(result.sanitizedOutput, /working urdf .*research_wheeled_y_up\.urdf/i);
+  assert.doesNotMatch(result.sanitizedOutput, /aligning orientation/i);
+  assert.doesNotMatch(result.sanitizedOutput, /orientation aligned/i);
   assert.doesNotMatch(result.sanitizedOutput, /updated the working copy|working copy ready/i);
 });
 
@@ -691,9 +773,9 @@ ptyTest("TTY shell offers a remaining-issues review after a partial repair", asy
 
     assert.equal(result.code, 0);
     assert.match(result.sanitizedOutput, /review the remaining issues now\?/i);
-    assert.match(result.sanitizedOutput, /1\.\s+Review now/i);
-    assert.match(result.sanitizedOutput, /2\.\s+Later/i);
-    assert.match(result.sanitizedOutput, /reviewing the remaining issues\.\.\./i);
+    assert.match(result.sanitizedOutput, /save the working URDF before exit\?/i);
+    assert.match(result.sanitizedOutput, /1\.\s+Save changes/i);
+    assert.match(result.sanitizedOutput, /2\.\s+Exit without saving/i);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

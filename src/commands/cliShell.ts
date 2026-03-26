@@ -993,7 +993,13 @@ const printRootOptions = (
 };
 
 const printRootTaskOptions = (_task: RootTaskName) => {
-  process.stdout.write(`${SHELL_THEME.muted("Direct actions only. Type / for actions or paste a source.\n")}`);
+  if (_task === "preview") {
+    process.stdout.write(
+      `${SHELL_THEME.muted("Choose a source for cards. Use /repo for the entire repo, /folder for all URDFs in one folder, or /urdf for one file.\n")}`
+    );
+  } else {
+    process.stdout.write(`${SHELL_THEME.muted("Direct actions only. Type / for actions or paste a source.\n")}`);
+  }
   printRootOptions({
     lastUrdfPath: undefined,
     loadedSource: null,
@@ -1070,6 +1076,8 @@ const getSessionPurposeText = (session: ShellSession): string => {
   switch (session.label) {
     case "open":
       return "Load a repo, folder, or file as the current source.";
+    case "preview":
+      return "Select a source before generating cards and thumbnails.";
     case "inspect":
       return "Preview a repo or folder and suggest the best entrypoint.";
     case "analyze":
@@ -1094,6 +1102,8 @@ const getEmptySessionInputText = (session: Pick<ShellSession, "label">): string 
   switch (session.label) {
     case "open":
       return "paste or drop a file, folder, zip, or GitHub repo";
+    case "preview":
+      return "paste a GitHub repo, a folder with URDFs, or one URDF file";
     case "inspect":
       return "paste or drop a folder, file, or GitHub repo";
     case "assemble":
@@ -1109,6 +1119,8 @@ const getRootTaskInputText = (task: RootTaskName): string => {
   switch (task) {
     case "open":
       return "paste or drop a file, folder, zip, or GitHub repo";
+    case "preview":
+      return "paste a GitHub repo, a folder with URDFs, or one URDF file";
     case "inspect":
       return "paste or drop a folder, file, or GitHub repo";
     case "check":
@@ -1259,7 +1271,7 @@ const getSessionContextRows = (
   if (
     !shouldHideActionRow &&
     (session.pending ||
-      ((session.label === "open" || session.label === "inspect") && session.args.size === 0) ||
+      ((session.label === "open" || session.label === "inspect" || session.label === "preview") && session.args.size === 0) ||
       !getRequirementStatus(session).ready)
   ) {
     rows.push({
@@ -1317,6 +1329,10 @@ const buildSessionHeadline = (session: ShellSession): string => {
     case "open": {
       const source = getSessionSourceValue(session, ["github", "path"]);
       return source ? `open ${quoteForPreview(source)}` : "open a repo, folder, or file";
+    }
+    case "preview": {
+      const source = getSessionSourceValue(session, ["github", "path"]);
+      return source ? `generate cards from ${quoteForPreview(source)}` : "generate cards from a repo, folder, or URDF";
     }
     case "assemble": {
       const source = getSessionSourceValue(session, ["urdf"]);
@@ -2822,11 +2838,15 @@ const summarizeRepositoryPreview = (
   }
 
   lines.push(
-    session.label === "open"
+    session.label === "preview"
       ? payload.candidateCount === 1
-        ? "press Enter to load the match"
-        : "choose what to do with this repo below"
-      : "next /open to load it, or /path to narrow the repo"
+        ? "press Enter to load the match, then use /gallery-current for one card"
+        : "choose /gallery to generate cards for the whole repo or /work-one to pick one robot"
+      : session.label === "open"
+        ? payload.candidateCount === 1
+          ? "press Enter to load the match"
+          : "choose what to do with this repo below"
+        : "next /open to load it, or /path to narrow the repo"
   );
 
   return {
@@ -4288,11 +4308,242 @@ const createAssemblyLoadPreflightPrompt = (
   }
 };
 
+const getSessionSourcePickerNotice = (targetKey: string): string =>
+  targetKey === "replacement" ? "choose the replacement robot entry" : "choose the host robot entry";
+
+const summarizeResolvedSessionSource = (
+  targetKey: string,
+  loadResult: LoadSourceResult & { outPath: string | null },
+  options: {
+    sourceInput: string;
+    extractedArchivePath?: string;
+    requestedEntryPath?: string;
+    recommendVisualize?: boolean;
+  }
+): AutoPreviewPanel => {
+  const lines: string[] = [
+    `${targetKey === "replacement" ? "replacement" : "host"} source ${quoteForPreview(options.sourceInput)}`,
+  ];
+
+  if (options.extractedArchivePath) {
+    lines.push("archive opened as an extracted working copy");
+  }
+
+  if (options.requestedEntryPath) {
+    lines.push(`entry ${options.requestedEntryPath}`);
+  } else if (loadResult.entryPath) {
+    lines.push(`entry ${loadResult.entryPath}`);
+  }
+
+  if (loadResult.outPath) {
+    lines.push(`working urdf ${quoteForPreview(loadResult.outPath)}`);
+  }
+
+  if (options.recommendVisualize) {
+    lines.push("next /visualize to inspect the host before setting /old-root and /new-root");
+  }
+
+  return {
+    title: targetKey === "replacement" ? "replacement ready" : "host ready",
+    kind: "success",
+    lines,
+  };
+};
+
+const buildSubstituteVisualizerPrompt = (): SuggestedActionPrompt => ({
+  kind: "open-visualizer",
+  summary: "review the host in URDF Studio before picking substitute roots",
+  recommendedLine: "recommended: open URDF Studio before choosing /old-root and /new-root",
+  prompt: "open URDF Studio before choosing the host subtree to replace?",
+  acceptLabel: "open URDF Studio",
+  acceptOptionLabel: "Open Studio",
+  skipOptionLabel: "Not now",
+  followUpAction: null,
+});
+
+const resolveSessionSourceLoad = (
+  state: ShellState,
+  session: ShellSession,
+  targetKey: string,
+  execArgs: ReadonlyMap<string, string | boolean>,
+  options: {
+    sourceInput: string;
+    extractedArchivePath?: string;
+    requestedEntryPath?: string;
+  }
+): AutoAutomationResult => {
+  const loadArgs = cloneArgsMap(execArgs);
+  const outputPath = createTempUrdfSnapshotPath(
+    String(loadArgs.get("entry") || loadArgs.get("path") || loadArgs.get("github") || "robot.urdf")
+  );
+  loadArgs.set("out", outputPath);
+
+  const loadExecution = executeCliCommand("load-source", loadArgs);
+  const loadPayload = parseExecutionJson<LoadSourceResult & { outPath: string | null }>(loadExecution);
+  if (!loadPayload || !loadPayload.outPath) {
+    const panel = buildPreviewErrorPanel("error", loadExecution);
+    return {
+      panel,
+      notice: buildShellFailureNotice(panel, `could not prepare the ${targetKey === "replacement" ? "replacement" : "host"} source`),
+      clearSession: false,
+    };
+  }
+
+  session.args.set(targetKey, loadPayload.outPath);
+  session.inheritedKeys.delete(targetKey);
+  if (targetKey === "urdf") {
+    state.lastUrdfPath = loadPayload.outPath;
+    rememberLoadedSource(state, loadPayload, {
+      githubRef: typeof execArgs.get("github") === "string" ? String(execArgs.get("github")) : undefined,
+      extractedArchivePath: options.extractedArchivePath,
+    });
+    const sharedSnapshot = persistShellSharedSession(state, {
+      sourceUrdfPath: loadPayload.outPath,
+      fileNameHint: loadPayload.entryPath,
+    });
+    syncSaveBaselineFromSnapshot(state, sharedSnapshot);
+  }
+  openSessionFollowupPending(state, session, targetKey);
+  const recommendVisualize = targetKey === "replacement" && session.args.has("urdf") && Boolean(state.sharedSessionId);
+  if (recommendVisualize) {
+    state.suggestedAction = buildSubstituteVisualizerPrompt();
+  }
+
+  return {
+    panel: summarizeResolvedSessionSource(targetKey, loadPayload, {
+      ...options,
+      recommendVisualize,
+    }),
+    notice: {
+      kind: "success",
+      text:
+        targetKey === "replacement" && recommendVisualize
+          ? "replacement source ready. use /visualize before choosing roots"
+          : targetKey === "replacement"
+            ? "replacement source ready"
+            : "host source ready",
+    },
+    clearSession: false,
+  };
+};
+
+const runReplaceSubrobotSourceAutomation = (
+  state: ShellState,
+  session: ShellSession,
+  targetKey: string
+): AutoAutomationResult | null => {
+  if (session.command !== "replace-subrobot" || (targetKey !== "urdf" && targetKey !== "replacement")) {
+    return null;
+  }
+
+  const sourceInput = session.args.get(targetKey);
+  if (typeof sourceInput !== "string" || sourceInput.trim().length === 0) {
+    return null;
+  }
+
+  const githubRef = detectGitHubReferenceInput(sourceInput);
+  const localPath = detectLocalPathDrop(sourceInput);
+  const needsResolution =
+    Boolean(githubRef) ||
+    Boolean(localPath?.isDirectory || localPath?.isZipFile || localPath?.isXacroFile);
+
+  if (!needsResolution) {
+    return null;
+  }
+
+  const loadArgs = new Map<string, string | boolean>();
+  if (githubRef) {
+    loadArgs.set("github", githubRef);
+  } else if (localPath) {
+    loadArgs.set("path", localPath.inputPath);
+  } else {
+    return null;
+  }
+
+  const prepared = prepareLoadSourceArgs(session, loadArgs);
+  if ("error" in prepared) {
+    return prepared.error;
+  }
+
+  const { execArgs, extractedArchivePath } = prepared;
+  const preview = inspectRepositoryCandidatesForLoad(session, execArgs, {
+    extractedArchivePath,
+  });
+  if (preview) {
+    if (preview.panel.kind === "error") {
+      clearCandidatePicker(state);
+      return {
+        panel: preview.panel,
+        notice: { kind: "error", text: "preview failed" },
+        clearSession: false,
+      };
+    }
+
+    if (preview.payload.candidateCount === 0) {
+      clearCandidatePicker(state);
+      return {
+        panel: preview.panel,
+        notice: {
+          kind: "warning",
+          text: `no ${targetKey === "replacement" ? "replacement" : "host"} robot entrypoint found`,
+        },
+        clearSession: false,
+      };
+    }
+
+    if (preview.payload.candidateCount > 1) {
+      state.candidatePicker = {
+        mode: "session-source",
+        candidates: preview.payload.candidates,
+        selectedIndex: 0,
+        loadArgs: cloneArgsMap(execArgs),
+        extractedArchivePath,
+        targetKey,
+        sourceInput,
+      };
+      return {
+        panel: preview.panel,
+        notice: { kind: "info", text: getSessionSourcePickerNotice(targetKey) },
+        clearSession: false,
+      };
+    }
+
+    if (preview.payload.primaryCandidatePath) {
+      execArgs.set("entry", preview.payload.primaryCandidatePath);
+    }
+  }
+
+  return resolveSessionSourceLoad(state, session, targetKey, execArgs, {
+    sourceInput,
+    extractedArchivePath,
+    requestedEntryPath: typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
+  });
+};
+
 const runSelectedCandidatePicker = (
   state: ShellState,
   picker: CandidatePickerState,
   selectionPath: string
 ): AutoAutomationResult | null => {
+  if (picker.mode === "session-source") {
+    const session = state.session;
+    if (!session || !picker.targetKey || !picker.sourceInput) {
+      return {
+        panel: null,
+        notice: { kind: "error", text: "candidate selection is no longer active" },
+        clearSession: false,
+      };
+    }
+
+    const execArgs = cloneArgsMap(picker.loadArgs);
+    execArgs.set("entry", selectionPath);
+    return resolveSessionSourceLoad(state, session, picker.targetKey, execArgs, {
+      sourceInput: picker.sourceInput,
+      extractedArchivePath: picker.extractedArchivePath,
+      requestedEntryPath: selectionPath,
+    });
+  }
+
   const execArgs = cloneArgsMap(picker.loadArgs);
   execArgs.set("entry", selectionPath);
   const selectedCandidate = picker.candidates.find((candidate) => candidate.path === selectionPath);
@@ -4705,6 +4956,7 @@ const runRepoIntentChoice = (
 
   if (choice === "work-one") {
     state.candidatePicker = {
+      mode: "load-source",
       candidates: repoContext.payload.candidates,
       selectedIndex: 0,
       loadArgs: cloneArgsMap(repoContext.loadArgs),
@@ -5018,6 +5270,11 @@ const runDirectInputAutomation = (
       },
       clearSession: true,
     };
+  }
+
+  if (session.command === "replace-subrobot" && (changedKey === "urdf" || changedKey === "replacement")) {
+    clearCandidatePicker(state);
+    return runReplaceSubrobotSourceAutomation(state, session, changedKey);
   }
 
   if (session.command === "health-check" && changedKey === "urdf") {
@@ -5902,6 +6159,41 @@ const inferFreeformRootPlan = (state: ShellState, rawValue: string): FreeformRoo
     }
   }
 
+  if (task === "preview") {
+    if (githubValue) {
+      return {
+        rootTask: "preview",
+        command: "load-source",
+        label: "preview",
+        key: "github",
+        slashName: "repo",
+        value: githubValue,
+      };
+    }
+
+    if (localPath?.isDirectory) {
+      return {
+        rootTask: "preview",
+        command: "load-source",
+        label: "preview",
+        key: "path",
+        slashName: "folder",
+        value: localPath.inputPath,
+      };
+    }
+
+    if (localPath?.isUrdfFile) {
+      return {
+        rootTask: "preview",
+        command: "load-source",
+        label: "preview",
+        key: "path",
+        slashName: "urdf",
+        value: localPath.inputPath,
+      };
+    }
+  }
+
   if (task === "inspect") {
     if (githubValue) {
       return {
@@ -6085,7 +6377,7 @@ const applyStartupModeSelection = (
   }
 
   if (mode === "preview") {
-    state.rootTask = "open";
+    state.rootTask = "preview";
     pushFeedback(feedback, "info", "preview generation mode");
     return;
   }
@@ -7663,12 +7955,24 @@ const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
       lines.push(renderContextRow(row));
     }
   } else if (state.rootTask) {
+    const rootTaskRows: readonly ShellContextRow[] =
+      state.rootTask === "preview"
+        ? [
+            { label: "source", value: "required before cards can be generated", tone: "muted" },
+            { label: "action", value: "generate cards and thumbnails", tone: "muted" },
+            {
+              label: "next",
+              value: "use /repo for the entire repo, /folder for all URDFs, or /urdf for one file",
+              tone: "accent",
+            },
+          ]
+        : [
+            { label: "source", value: "none yet", tone: "muted" },
+            { label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" },
+            { label: "next", value: "paste input directly or type /", tone: "accent" },
+          ];
     for (const row of getPersistentTtyContextRows(
-      [
-        { label: "source", value: "none yet", tone: "muted" },
-        { label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" },
-        { label: "next", value: "paste input directly or type /", tone: "accent" },
-      ],
+      rootTaskRows,
       hasHistory
     ).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state)))) {
       lines.push(renderContextRow(row));
