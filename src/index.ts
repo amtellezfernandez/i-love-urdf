@@ -37,6 +37,7 @@ export * from "./transforms/linkEditing";
 export * from "./transforms/canonicalizeJointFrames";
 export * from "./transforms/assemblySpec";
 export * from "./transforms/mergeUrdfs";
+export * from "./transforms/replaceSubrobot";
 export * from "./convert/urdfToMJCF";
 export * from "./convert/urdfToUSD";
 export * from "./convert/urdfToXacro";

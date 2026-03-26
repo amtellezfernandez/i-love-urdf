@@ -85,6 +85,16 @@ export declare const ROOT_SHELL_COMMANDS: readonly [{
         readonly onlyIfMissing: true;
     };
 }, {
+    readonly name: "replace";
+    readonly summary: "Replace an embedded robot with a new one and save an updated URDF.";
+    readonly command: "replace-subrobot";
+    readonly sessionLabel: "replace";
+    readonly openPending: {
+        readonly key: "urdf";
+        readonly slashName: "host";
+        readonly onlyIfMissing: true;
+    };
+}, {
     readonly name: "inspect";
     readonly summary: "Preview a repo or folder and suggest the best entrypoint.";
     readonly command: "inspect-repo";
@@ -130,8 +140,8 @@ export declare const ROOT_SHELL_COMMANDS: readonly [{
         readonly onlyIfMissing: true;
     };
 }];
-export declare const ROOT_START_COMMAND_NAMES: readonly ["open", "assemble", "inspect", "analyze", "health", "validate", "orientation"];
-export declare const ROOT_READY_COMMAND_NAMES: readonly ["assemble", "analyze", "health", "validate", "orientation", "open", "inspect"];
+export declare const ROOT_START_COMMAND_NAMES: readonly ["open", "assemble", "replace", "inspect", "analyze", "health", "validate", "orientation"];
+export declare const ROOT_READY_COMMAND_NAMES: readonly ["assemble", "replace", "analyze", "health", "validate", "orientation", "open", "inspect"];
 export declare const FLAT_ROOT_SESSION_LABELS: Set<string>;
 export declare const ROOT_TASK_ACTIONS: {
     readonly open: readonly [{
@@ -290,10 +300,13 @@ export declare const ROOT_TASK_ACTIONS: {
     }];
 };
 export declare const COMMAND_SUMMARY_OVERRIDES: Partial<Record<SupportedCommandName, string>>;
-export declare const URDF_OUTPUT_COMMANDS: Set<"inspect-meshes" | "compress-meshes" | "mesh-refs" | "health-check" | "snap-axes" | "apply-orientation" | "canonicalize-joint-frame" | "pretty-print" | "canonical-order" | "validate" | "analyze" | "robot-type" | "morphology-card" | "gallery-generate" | "guess-orientation" | "diff" | "fix-mesh-paths" | "normalize-axes" | "set-joint-axis" | "set-joint-type" | "set-joint-limits" | "set-joint-velocity" | "rotate-90" | "normalize-robot" | "remove-joints" | "reassign-joint" | "set-material-color" | "merge-urdf" | "mesh-to-assets" | "urdf-to-mjcf" | "urdf-to-usd" | "urdf-to-xacro" | "xacro-to-urdf" | "probe-xacro-runtime" | "setup-xacro-runtime" | "load-source" | "assemble" | "rename-joint" | "rename-link" | "inspect-repo" | "repair-mesh-refs" | "repo-fixes">;
+export declare const URDF_OUTPUT_COMMANDS: Set<"inspect-meshes" | "compress-meshes" | "mesh-refs" | "health-check" | "snap-axes" | "apply-orientation" | "canonicalize-joint-frame" | "pretty-print" | "canonical-order" | "validate" | "analyze" | "robot-type" | "morphology-card" | "gallery-generate" | "guess-orientation" | "diff" | "fix-mesh-paths" | "bundle-mesh-assets" | "normalize-axes" | "set-joint-axis" | "set-joint-origin" | "set-joint-type" | "set-joint-limits" | "set-joint-velocity" | "rotate-90" | "normalize-robot" | "remove-joints" | "reassign-joint" | "set-material-color" | "merge-urdf" | "replace-subrobot" | "mesh-to-assets" | "urdf-to-mjcf" | "urdf-to-usd" | "urdf-to-xacro" | "xacro-to-urdf" | "probe-xacro-runtime" | "setup-xacro-runtime" | "load-source" | "assemble" | "rename-joint" | "rename-link" | "inspect-repo" | "repair-mesh-refs" | "repo-fixes">;
 export declare const ADVANCED_OPTION_KEYS: Set<string>;
 export declare const SESSION_OPTION_ORDER: {
     readonly assemble: readonly ["urdf", "attach", "name"];
+    readonly "replace-subrobot": readonly ["urdf", "replace-root", "replacement", "replacement-root", "mount-parent", "mount-joint", "prefix", "xyz", "rpy", "calibrate", "portable", "out"];
+    readonly "bundle-mesh-assets": readonly ["urdf", "out"];
+    readonly "set-joint-origin": readonly ["urdf", "joint", "xyz", "rpy", "out"];
     readonly "load-source": readonly ["github", "path", "entry", "out", "ref", "subdir", "args", "python", "wheel", "token", "root"];
     readonly "inspect-repo": readonly ["github", "local", "path", "ref", "max-candidates", "token", "out"];
     readonly "repair-mesh-refs": readonly ["github", "local", "urdf", "path", "ref", "token", "out"];

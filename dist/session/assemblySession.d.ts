@@ -10,6 +10,13 @@ export type CreateAssemblySessionResult = {
     sessionDir: string;
     copiedFiles: number;
 };
+export type InspectAssemblyWorkspacePlanResult = {
+    robotCount: number;
+    sourceRoots: string[];
+    copiedFiles: number;
+    totalBytes: number;
+};
+export declare const inspectAssemblyWorkspacePlan: ({ urdfPaths, }: CreateAssemblySessionParams) => InspectAssemblyWorkspacePlanResult;
 export declare const buildStudioAssemblyUrl: (assemblySessionId: string) => string;
 export declare const createAssemblySession: ({ urdfPaths, label, }: CreateAssemblySessionParams) => CreateAssemblySessionResult;
 export declare const openStudioForAssemblySession: (assemblySessionId: string) => Promise<{

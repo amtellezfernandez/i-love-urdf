@@ -26,6 +26,9 @@ export { sanitizeNames, sanitizeUrdfName, type SanitizeNamesOptions, } from "./u
 export { alignJointToLocalZ, canonicalizeJointFrames, type CanonicalizeJointFrameOptions, type CanonicalizeJointFrameResult, type CanonicalizeJointFrameSkip, } from "./transforms/canonicalizeJointFrames";
 export { createAssemblySpec, validateAssemblySpec, type AssemblyMountOrigin, type AssemblyPoseLike, type AssemblySpec, type AssemblySpecRobot, type AssemblySpecValidationResult, type CreateAssemblySpecModel, type CreateAssemblySpecOptions, } from "./transforms/assemblySpec";
 export { buildAssemblyUrdf, mergeAssemblySpec, mergeUrdfs, type AssemblyUrdfModel, type BuildAssemblyUrdfOptions, type BuildAssemblyUrdfResult, type MergeUrdfModel, type MergeUrdfsOptions, type MergeUrdfsResult, } from "./transforms/mergeUrdfs";
+export { replaceSubrobotInUrdf, type ReplaceSubrobotOptions, type ReplaceSubrobotResult, } from "./transforms/replaceSubrobot";
+export { renameJointInUrdf, renameLinkInUrdf, setJointAxisInUrdf, updateJointLimitsInUrdf, updateJointOriginInUrdf, updateJointTypeInUrdf, updateJointVelocityInUrdf, } from "./transforms/urdfEditing";
+export { updateJointLinksInUrdf, updateMaterialColorInUrdf, } from "./transforms/urdfTransforms";
 export { convertURDFToUSD, createInlineUsdMeshPrim, createUsdStage, mapUrdfToUsdPrim, type ConvertURDFToUSDOptions, type CreateUsdStageOptions, type InlineUsdMesh, type InlineUsdMeshPrimOptions, type MapUrdfToUsdPrimOptions, type ResolvedUsdMesh, type URDFToUSDConversionResult, type UsdMeshResolveRequest, type UsdPrim, type UsdQuaternion, type UsdStage, type UsdUpAxis, } from "./convert/urdfToUSD";
 export { buildOrientationMappingRotation, applyGlobalRotation, applyOrientationToRobot, rotateRobot90Degrees, type AxisSpec, } from "./utils/rotateRobot";
 export { rotateInertiaTensor, fixInertiaThresholds, type InertiaTensor, type Mat3, type Vec3, } from "./utils/rotationMath";

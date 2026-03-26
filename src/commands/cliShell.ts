@@ -129,6 +129,7 @@ import {
   readLatestIluSharedSession,
   type IluSharedSessionSnapshot,
 } from "../session/sharedSession";
+import { inspectAssemblyWorkspacePlan } from "../session/assemblySession";
 import { readGitHubCliToken } from "../node/githubCliAuth";
 import { parseGitHubRepositoryReference } from "../repository/githubRepositoryInspection";
 import type { LoadSourceResult } from "../sources/loadSourceNode";
@@ -629,6 +630,7 @@ const formatByteEstimate = (bytes: number): string => {
 };
 
 const getSessionStorageRoot = (): string => path.join(os.homedir(), ".i-love-urdf", "sessions");
+const getAssemblyStorageRoot = (): string => path.join(os.homedir(), ".i-love-urdf", "assembly-sessions");
 
 const buildLoadPreflightPanel = (prompt: LoadPreflightPromptState): AutoPreviewPanel => ({
   title: "load locally",
@@ -649,12 +651,13 @@ const printLoadPreflightPrompt = (prompt: LoadPreflightPromptState, mode: "line"
 };
 
 const createLoadPreflightPrompt = (params: {
-  sourceKind: "archive" | "github";
+  sourceKind: "archive" | "github" | "assembly";
   sourceLabel: string;
   lines: string[];
   args: Map<string, string | boolean>;
   skipZipPreflight?: boolean;
   skipWorkingCopyPreflight?: boolean;
+  skipAssemblyPreflight?: boolean;
 }): LoadPreflightPromptState => ({
   sourceKind: params.sourceKind,
   sourceLabel: params.sourceLabel,
@@ -665,6 +668,7 @@ const createLoadPreflightPrompt = (params: {
   args: params.args,
   skipZipPreflight: params.skipZipPreflight,
   skipWorkingCopyPreflight: params.skipWorkingCopyPreflight,
+  skipAssemblyPreflight: params.skipAssemblyPreflight,
 });
 
 const getLoadPreflightDecisionHint = (mode: "tty" | "line" = "tty"): string =>
@@ -951,6 +955,10 @@ const getSessionPurposeText = (session: ShellSession): string => {
     return "Create a shared local assembly workspace from one or more URDF files.";
   }
 
+  if (session.command === "replace-subrobot") {
+    return "Replace an embedded robot with a new one and save an updated URDF.";
+  }
+
   if (session.command === "urdf-to-mjcf") {
     return "Export the current URDF as MJCF.";
   }
@@ -992,6 +1000,10 @@ const getSessionNextText = (session: ShellSession): string => {
 
   if (session.label === "assemble" && session.args.size === 0) {
     return "paste a base URDF path";
+  }
+
+  if (session.label === "replace" && session.args.size === 0) {
+    return "paste the host robot file";
   }
 
   const requirementStatus = getRequirementStatus(session);
@@ -1172,6 +1184,10 @@ const buildSessionHeadline = (session: ShellSession): string => {
       const source = getSessionSourceValue(session, ["urdf"]);
       return source ? `assemble from ${quoteForPreview(source)}` : "assemble local URDF files";
     }
+    case "replace": {
+      const source = getSessionSourceValue(session, ["urdf"]);
+      return source ? `replace inside ${quoteForPreview(source)}` : "replace an embedded robot";
+    }
     case "inspect": {
       const source = getSessionSourceValue(session, ["github", "local", "urdf"]);
       return source ? `inspect ${quoteForPreview(source)}` : "inspect a repo or URDF";
@@ -1246,6 +1262,9 @@ const getOptionSummary = (
   }
 
   if (key === "urdf") {
+    if (session.command === "replace-subrobot") {
+      return "Host URDF or XACRO that already contains the embedded robot you want to update.";
+    }
     return "URDF file path.";
   }
 
@@ -1262,6 +1281,9 @@ const getOptionSummary = (
   }
 
   if (key === "out") {
+    if (session.command === "replace-subrobot") {
+      return "Create the updated robot here. ilu keeps this as a new file unless you point it at the original.";
+    }
     if (session.command === "urdf-to-mjcf") {
       return "Write the exported MJCF file here.";
     }
@@ -1309,6 +1331,46 @@ const getOptionSummary = (
 
   if (key === "strict") {
     return "Treat warnings as failures.";
+  }
+
+  if (key === "replacement") {
+    return "Replacement URDF file to import into the host robot.";
+  }
+
+  if (key === "replace-root") {
+    return "Root link of the old embedded robot subtree to remove from the host.";
+  }
+
+  if (key === "replacement-root") {
+    return "Root link of the replacement robot subtree to mount into the host.";
+  }
+
+  if (key === "mount-parent") {
+    return "Optional host link that should own the preserved mount joint.";
+  }
+
+  if (key === "mount-joint") {
+    return "Optional host joint name to preserve when more than one inbound mount is possible.";
+  }
+
+  if (key === "prefix") {
+    return "Optional prefix for imported links, joints, and materials to avoid name collisions.";
+  }
+
+  if (key === "xyz") {
+    return "Override the preserved mount translation with xyz values like 0 0 0.12.";
+  }
+
+  if (key === "rpy") {
+    return "Override the preserved mount rotation with rpy values like 0 0 0.";
+  }
+
+  if (key === "calibrate") {
+    return "Open URDF Studio after replacement so you can visually calibrate the preserved mount.";
+  }
+
+  if (key === "portable") {
+    return "Copy mesh assets and rewrite references so the saved robot stays portable.";
   }
 
   if (key === "mesh-dir") {
@@ -1494,6 +1556,17 @@ const getRequirementStatus = (
       return leftRank - rightRank;
     }),
   };
+};
+
+const getRunPromptForOptionalSessionStep = (
+  state: Pick<ShellState, "loadedSource" | "lastUrdfPath">,
+  session: ShellSession
+): PendingValuePrompt | null => {
+  if (session.command === "replace-subrobot" && !session.args.has("out")) {
+    return getPendingValuePrompt(state, session, "out", getPreferredSlashName(session, "out"));
+  }
+
+  return null;
 };
 
 const printSessionStatus = (
@@ -1703,6 +1776,10 @@ const getExportFileSuffix = (command: SupportedCommandName): string | null => {
     return ".usda";
   }
 
+  if (command === "replace-subrobot") {
+    return ".updated.urdf";
+  }
+
   return null;
 };
 
@@ -1833,6 +1910,22 @@ const getPendingValuePrompt = (
   key: string,
   slashName: string
 ): PendingValuePrompt => {
+  const readLinkExamples = (filePath: string | null | undefined): readonly string[] => {
+    if (!filePath) {
+      return [];
+    }
+
+    try {
+      const content = fs.readFileSync(filePath, "utf8");
+      const matches = Array.from(content.matchAll(/<link\b[^>]*\bname="([^"]+)"/g))
+        .map((match) => match[1]?.trim())
+        .filter((value): value is string => Boolean(value));
+      return Array.from(new Set(matches)).slice(0, 5);
+    } catch {
+      return [];
+    }
+  };
+
   if (key === "github") {
     return {
       key,
@@ -1883,6 +1976,16 @@ const getPendingValuePrompt = (
   }
 
   if (key === "urdf") {
+    if (session.command === "replace-subrobot") {
+      return {
+        key,
+        slashName,
+        title: "Host robot file",
+        examples: ["./amr.urdf", "./amr.urdf.xacro"],
+        notes: ["This is the robot that already contains the embedded arm or subrobot you want to replace."],
+        expectsPath: true,
+      };
+    }
     return {
       key,
       slashName,
@@ -1942,10 +2045,55 @@ const getPendingValuePrompt = (
     return {
       key,
       slashName,
-      title: "Output file path",
-      examples: suggestedOutPath ? [suggestedOutPath] : ["./robot.fixed.urdf"],
-      notes: [],
+      title: session.command === "replace-subrobot" ? "New updated robot path" : "Output file path",
+      examples:
+        suggestedOutPath
+          ? [suggestedOutPath]
+          : [session.command === "replace-subrobot" ? "./robot.updated.urdf" : "./robot.fixed.urdf"],
+      notes:
+        session.command === "replace-subrobot"
+          ? ["ilu will create a new robot file here unless you explicitly point it at the original."]
+          : [],
       expectsPath: true,
+    };
+  }
+
+  if (key === "replacement") {
+    return {
+      key,
+      slashName,
+      title: "Replacement robot file",
+      examples: ["./new-arm.urdf"],
+      notes: ["This is the new robot that will replace the embedded subtree in the host."],
+      expectsPath: true,
+    };
+  }
+
+  if (key === "replace-root") {
+    const examples = readLinkExamples(
+      typeof session.args.get("urdf") === "string" ? String(session.args.get("urdf")) : null
+    );
+    return {
+      key,
+      slashName,
+      title: "Old embedded robot root link",
+      examples: examples.length > 0 ? examples : ["arm_root", "old_root", "1240_Solid_1"],
+      notes: ["ilu accepts case-insensitive and normalized matches, so the spelling does not need to be exact."],
+      expectsPath: false,
+    };
+  }
+
+  if (key === "replacement-root") {
+    const examples = readLinkExamples(
+      typeof session.args.get("replacement") === "string" ? String(session.args.get("replacement")) : null
+    );
+    return {
+      key,
+      slashName,
+      title: "New robot root link",
+      examples: examples.length > 0 ? examples : ["base", "base_link"],
+      notes: ["Pick the link from the replacement robot that should mount onto the preserved host joint."],
+      expectsPath: false,
     };
   }
 
@@ -2392,7 +2540,9 @@ const summarizeAssemblyResult = (payload: {
   if (payload.visualizerStart.ok) {
     lines.push(payload.visualizerOpened ? "opened URDF Studio for the assembly" : "URDF Studio is ready for the assembly");
   } else {
-    lines.push(`URDF Studio not ready: ${payload.visualizerStart.reason}`);
+    lines.push(
+      `URDF Studio not ready: ${"reason" in payload.visualizerStart ? payload.visualizerStart.reason : "unknown error"}`
+    );
   }
 
   return {
@@ -4000,6 +4150,54 @@ const createGitHubLoadPreflightPrompt = (
     skipWorkingCopyPreflight: true,
   });
 
+const createAssemblyLoadPreflightPrompt = (
+  args: ReadonlyMap<string, string | boolean>
+): LoadPreflightPromptState | null => {
+  const primaryUrdf = typeof args.get("urdf") === "string" ? String(args.get("urdf")).trim() : "";
+  if (!primaryUrdf) {
+    return null;
+  }
+
+  const attachPaths =
+    typeof args.get("attach") === "string"
+      ? String(args.get("attach"))
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0)
+      : [];
+  const urdfPaths = [primaryUrdf, ...attachPaths];
+
+  try {
+    const plan = inspectAssemblyWorkspacePlan({ urdfPaths });
+    return createLoadPreflightPrompt({
+      sourceKind: "assembly",
+      sourceLabel: `assembly ${formatCount(plan.robotCount, "robot")}`,
+      lines: [
+        "this will create a shared local assembly workspace",
+        `estimated copied source data ${formatByteEstimate(plan.totalBytes)} across ${formatCount(plan.copiedFiles, "file")}`,
+        `source roots ${plan.sourceRoots.map((entry) => quoteForPreview(entry)).join(", ")}`,
+        `assembly sessions are stored under ${quoteForPreview(getAssemblyStorageRoot())}`,
+        "cleanup is manual today for assembly workspaces",
+      ],
+      args: cloneArgsMap(args),
+      skipAssemblyPreflight: true,
+    });
+  } catch (error) {
+    return createLoadPreflightPrompt({
+      sourceKind: "assembly",
+      sourceLabel: `assembly ${formatCount(urdfPaths.length, "robot")}`,
+      lines: [
+        "this will create a shared local assembly workspace",
+        `assembly sessions are stored under ${quoteForPreview(getAssemblyStorageRoot())}`,
+        error instanceof Error ? `size estimate unavailable: ${error.message}` : "size estimate unavailable",
+        "cleanup is manual today for assembly workspaces",
+      ],
+      args: cloneArgsMap(args),
+      skipAssemblyPreflight: true,
+    });
+  }
+};
+
 const runSelectedCandidatePicker = (
   state: ShellState,
   picker: CandidatePickerState,
@@ -4633,7 +4831,7 @@ const runLoadSourceAutomation = (
 const runLoadPreflightAsync = async (state: ShellState): Promise<AutoAutomationResult> => {
   const prompt = state.loadPreflightPrompt;
   const session = state.session;
-  if (!prompt || !session || session.command !== "load-source") {
+  if (!prompt || !session || (session.command !== "load-source" && session.command !== "assemble")) {
     return {
       panel: null,
       notice: { kind: "info", text: "no pending local-load confirmation" },
@@ -4642,6 +4840,34 @@ const runLoadPreflightAsync = async (state: ShellState): Promise<AutoAutomationR
   }
 
   clearLoadPreflightPrompt(state);
+  if (session.command === "assemble") {
+    const execution = executeSessionCommand(state, session);
+    const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
+    if (compactFailurePanel) {
+      return {
+        panel: compactFailurePanel,
+        notice: buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`),
+        clearSession: false,
+      };
+    }
+
+    const successPanel = getShellExecutionSuccessPanel(state, session, execution);
+    return {
+      panel:
+        successPanel ??
+        createOutputPanel(
+          execution.status === 0 ? "result" : "error",
+          buildExecutionPanelText(execution, session.command),
+          execution.status === 0 ? "success" : "error"
+        ),
+      notice:
+        execution.status === 0
+          ? { kind: "success", text: "assembly workspace ready" }
+          : { kind: "error", text: `[${session.command}] exited with status ${execution.status}` },
+      clearSession: false,
+    };
+  }
+
   return (
     runLoadSourceAutomation(state, session, prompt.args, {
       skipZipPreflight: prompt.skipZipPreflight,
@@ -6231,6 +6457,21 @@ const handleSessionSlashCommand = async (
         `${SHELL_THEME.warning("[missing]")} ${requirementStatus.nextSteps.map((step) => formatSlashSequence(session, step)).join(" or ")}\n`
       );
       return;
+    }
+
+    const optionalPrompt = getRunPromptForOptionalSessionStep(state, session);
+    if (optionalPrompt) {
+      session.pending = optionalPrompt;
+      printPendingValuePrompt(optionalPrompt);
+      return;
+    }
+
+    if (session.command === "assemble" && !state.loadPreflightPrompt) {
+      state.loadPreflightPrompt = createAssemblyLoadPreflightPrompt(session.args);
+      if (state.loadPreflightPrompt) {
+        printLoadPreflightPrompt(state.loadPreflightPrompt);
+        return;
+      }
     }
 
     printSessionCommandExecution(state, executeSessionCommand(state, session), session);
@@ -8940,6 +9181,29 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         pushTimelineUserEntry(view, "/run");
         archiveAssistantStateToTimeline(view);
         return true;
+      }
+
+      const optionalPrompt = getRunPromptForOptionalSessionStep(state, session);
+      if (optionalPrompt) {
+        session.pending = optionalPrompt;
+        view.notice = {
+          kind: "info",
+          text: `set ${getSlashDisplayName(session, optionalPrompt.key)} before creating the updated robot`,
+        };
+        pushTimelineUserEntry(view, "/run");
+        archiveAssistantStateToTimeline(view);
+        return true;
+      }
+
+      if (session.command === "assemble" && !state.loadPreflightPrompt) {
+        state.loadPreflightPrompt = createAssemblyLoadPreflightPrompt(session.args);
+        if (state.loadPreflightPrompt) {
+          view.output = buildLoadPreflightPanel(state.loadPreflightPrompt);
+          view.notice = { kind: "info", text: "confirm local working copy" };
+          pushTimelineUserEntry(view, "/run");
+          archiveAssistantStateToTimeline(view);
+          return true;
+        }
       }
 
       const execution = runBusyOperation(getBusyStateForSession(session), () =>

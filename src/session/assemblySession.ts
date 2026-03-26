@@ -27,6 +27,13 @@ export type CreateAssemblySessionResult = {
   copiedFiles: number;
 };
 
+export type InspectAssemblyWorkspacePlanResult = {
+  robotCount: number;
+  sourceRoots: string[];
+  copiedFiles: number;
+  totalBytes: number;
+};
+
 const ILU_STATE_ROOT = path.join(os.homedir(), ".i-love-urdf");
 const ILU_ASSEMBLY_SESSION_ROOT = path.join(ILU_STATE_ROOT, "assembly-sessions");
 const ASSEMBLY_SESSION_METADATA_FILE = "assembly-session.json";
@@ -146,6 +153,65 @@ const copyDirectoryRecursive = (
 
   visit(sourceRoot);
   return { copiedFiles, relativePaths };
+};
+
+const inspectDirectoryCopyPlan = (
+  sourceRoot: string
+): { copiedFiles: number; totalBytes: number } => {
+  let copiedFiles = 0;
+  let totalBytes = 0;
+
+  const visit = (currentSourceDir: string) => {
+    for (const entry of fs.readdirSync(currentSourceDir, { withFileTypes: true })) {
+      const sourcePath = path.join(currentSourceDir, entry.name);
+      if (entry.isDirectory()) {
+        visit(sourcePath);
+        continue;
+      }
+      if (!entry.isFile() || !shouldCopyAssetFile(sourcePath)) {
+        continue;
+      }
+
+      const stats = fs.statSync(sourcePath);
+      copiedFiles += 1;
+      totalBytes += stats.size;
+    }
+  };
+
+  visit(sourceRoot);
+  return { copiedFiles, totalBytes };
+};
+
+export const inspectAssemblyWorkspacePlan = ({
+  urdfPaths,
+}: CreateAssemblySessionParams): InspectAssemblyWorkspacePlanResult => {
+  if (urdfPaths.length === 0) {
+    throw new Error("At least one URDF path is required.");
+  }
+
+  const uniqueRoots = new Set<string>();
+  for (const rawUrdfPath of urdfPaths) {
+    const resolvedUrdfPath = path.resolve(rawUrdfPath);
+    if (!fs.existsSync(resolvedUrdfPath) || !fs.statSync(resolvedUrdfPath).isFile()) {
+      throw new Error(`URDF file not found: ${rawUrdfPath}`);
+    }
+    uniqueRoots.add(getNearestPackageRoot(resolvedUrdfPath));
+  }
+
+  let copiedFiles = 0;
+  let totalBytes = 0;
+  for (const sourceRoot of uniqueRoots) {
+    const inspection = inspectDirectoryCopyPlan(sourceRoot);
+    copiedFiles += inspection.copiedFiles;
+    totalBytes += inspection.totalBytes;
+  }
+
+  return {
+    robotCount: urdfPaths.length,
+    sourceRoots: Array.from(uniqueRoots),
+    copiedFiles,
+    totalBytes,
+  };
 };
 
 export const buildStudioAssemblyUrl = (assemblySessionId: string): string => {

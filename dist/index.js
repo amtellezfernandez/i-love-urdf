@@ -44,6 +44,7 @@ __exportStar(require("./transforms/linkEditing"), exports);
 __exportStar(require("./transforms/canonicalizeJointFrames"), exports);
 __exportStar(require("./transforms/assemblySpec"), exports);
 __exportStar(require("./transforms/mergeUrdfs"), exports);
+__exportStar(require("./transforms/replaceSubrobot"), exports);
 __exportStar(require("./convert/urdfToMJCF"), exports);
 __exportStar(require("./convert/urdfToUSD"), exports);
 __exportStar(require("./convert/urdfToXacro"), exports);

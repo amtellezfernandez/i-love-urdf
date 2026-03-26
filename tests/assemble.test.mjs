@@ -101,12 +101,13 @@ test("line shell assemble reports the shared workspace explicitly", () => {
           ILU_STATE_ROOT: stateRoot,
           ILU_DISABLE_UPDATE_CHECK: "1",
         },
-        input: `/assemble\n${basePath}\n/run\n/exit\n`,
+        input: `/assemble\n${basePath}\n/run\n\n/exit\n`,
         encoding: "utf8",
       }
     );
 
     assert.equal(result.status, 0);
+    assert.match(result.stdout, /load this source into local working storage\?/i);
     assert.match(result.stdout, /assembly local working copy ready/i);
     assert.match(result.stdout, /workspace .*assembly-sessions/i);
     assert.match(result.stdout, /robots 1 robot/i);

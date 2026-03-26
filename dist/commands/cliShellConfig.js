@@ -94,6 +94,13 @@ exports.ROOT_SHELL_COMMANDS = [
         openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
     },
     {
+        name: "replace",
+        summary: "Replace an embedded robot with a new one and save an updated URDF.",
+        command: "replace-subrobot",
+        sessionLabel: "replace",
+        openPending: { key: "urdf", slashName: "host", onlyIfMissing: true },
+    },
+    {
         name: "inspect",
         summary: "Preview a repo or folder and suggest the best entrypoint.",
         command: "inspect-repo",
@@ -131,6 +138,7 @@ exports.ROOT_SHELL_COMMANDS = [
 exports.ROOT_START_COMMAND_NAMES = [
     "open",
     "assemble",
+    "replace",
     "inspect",
     "analyze",
     "health",
@@ -139,6 +147,7 @@ exports.ROOT_START_COMMAND_NAMES = [
 ];
 exports.ROOT_READY_COMMAND_NAMES = [
     "assemble",
+    "replace",
     "analyze",
     "health",
     "validate",
@@ -273,6 +282,7 @@ exports.ROOT_TASK_ACTIONS = {
 exports.COMMAND_SUMMARY_OVERRIDES = {
     "load-source": "Load from GitHub, a local repo, or a local file.",
     assemble: "Create a shared local assembly workspace from one or more URDF files.",
+    "replace-subrobot": "Replace an embedded robot subtree and save a new updated URDF.",
     "inspect-repo": "Preview a local or GitHub repo and suggest the right URDF or XACRO entrypoint.",
     "xacro-to-urdf": "Expand a XACRO file, repo, or GitHub source into URDF.",
     "repair-mesh-refs": "Repair or normalize mesh references in a local or GitHub repo.",
@@ -290,8 +300,10 @@ exports.URDF_OUTPUT_COMMANDS = new Set([
     "normalize-axes",
     "snap-axes",
     "fix-mesh-paths",
+    "bundle-mesh-assets",
     "mesh-to-assets",
     "set-joint-axis",
+    "set-joint-origin",
     "set-joint-type",
     "set-joint-limits",
     "set-joint-velocity",
@@ -300,6 +312,7 @@ exports.URDF_OUTPUT_COMMANDS = new Set([
     "remove-joints",
     "reassign-joint",
     "set-material-color",
+    "replace-subrobot",
     "rename-joint",
     "rename-link",
     "canonicalize-joint-frame",
@@ -322,6 +335,22 @@ exports.ADVANCED_OPTION_KEYS = new Set([
 ]);
 exports.SESSION_OPTION_ORDER = {
     assemble: ["urdf", "attach", "name"],
+    "replace-subrobot": [
+        "urdf",
+        "replace-root",
+        "replacement",
+        "replacement-root",
+        "mount-parent",
+        "mount-joint",
+        "prefix",
+        "xyz",
+        "rpy",
+        "calibrate",
+        "portable",
+        "out",
+    ],
+    "bundle-mesh-assets": ["urdf", "out"],
+    "set-joint-origin": ["urdf", "joint", "xyz", "rpy", "out"],
     "load-source": ["github", "path", "entry", "out", "ref", "subdir", "args", "python", "wheel", "token", "root"],
     "inspect-repo": ["github", "local", "path", "ref", "max-candidates", "token", "out"],
     "repair-mesh-refs": ["github", "local", "urdf", "path", "ref", "token", "out"],
@@ -341,6 +370,15 @@ exports.MUTUALLY_EXCLUSIVE_OPTION_GROUPS = {
 exports.SESSION_SLASH_ALIASES = {
     assemble: {
         file: "urdf",
+    },
+    "replace-subrobot": {
+        host: "urdf",
+        with: "replacement",
+        "old-root": "replace-root",
+        "new-root": "replacement-root",
+        parent: "mount-parent",
+        joint: "mount-joint",
+        save: "out",
     },
     "load-source": {
         repo: "github",

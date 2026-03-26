@@ -192,6 +192,24 @@ export {
   type MergeUrdfsResult,
 } from "./transforms/mergeUrdfs";
 export {
+  replaceSubrobotInUrdf,
+  type ReplaceSubrobotOptions,
+  type ReplaceSubrobotResult,
+} from "./transforms/replaceSubrobot";
+export {
+  renameJointInUrdf,
+  renameLinkInUrdf,
+  setJointAxisInUrdf,
+  updateJointLimitsInUrdf,
+  updateJointOriginInUrdf,
+  updateJointTypeInUrdf,
+  updateJointVelocityInUrdf,
+} from "./transforms/urdfEditing";
+export {
+  updateJointLinksInUrdf,
+  updateMaterialColorInUrdf,
+} from "./transforms/urdfTransforms";
+export {
   convertURDFToUSD,
   createInlineUsdMeshPrim,
   createUsdStage,

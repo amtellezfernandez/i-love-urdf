@@ -253,7 +253,7 @@ export type RepositoryPreviewPayload = {
 };
 
 export type LoadPreflightPromptState = {
-  sourceKind: "archive" | "github";
+  sourceKind: "archive" | "github" | "assembly";
   sourceLabel: string;
   lines: string[];
   prompt: string;
@@ -262,6 +262,7 @@ export type LoadPreflightPromptState = {
   args: Map<string, string | boolean>;
   skipZipPreflight?: boolean;
   skipWorkingCopyPreflight?: boolean;
+  skipAssemblyPreflight?: boolean;
 };
 
 export type RepoIntentChoiceName = "work-one" | "gallery" | "repo-fixes";
