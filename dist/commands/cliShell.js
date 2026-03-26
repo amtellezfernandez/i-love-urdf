@@ -705,6 +705,7 @@ const getSessionNextText = (session) => {
 };
 const getSessionContextRows = (state, session) => {
     const rows = [];
+    const shouldHideActionRow = (session.command === "replace-subrobot" || session.command === "assemble") && session.args.size === 0;
     const getExtractedArchivePathForSource = (candidatePath) => {
         const loadedSource = state.loadedSource;
         if (!loadedSource?.extractedArchivePath || !loadedSource.localPath) {
@@ -805,9 +806,10 @@ const getSessionContextRows = (state, session) => {
             rows.push({ label: "output", value: (0, cliShellConfig_1.quoteForPreview)(outPath) });
         }
     }
-    if (session.pending ||
-        ((session.label === "open" || session.label === "inspect") && session.args.size === 0) ||
-        !getRequirementStatus(session).ready) {
+    if (!shouldHideActionRow &&
+        (session.pending ||
+            ((session.label === "open" || session.label === "inspect") && session.args.size === 0) ||
+            !getRequirementStatus(session).ready)) {
         rows.push({
             label: "action",
             value: getSessionPurposeText(session).replace(/\.$/, ""),
@@ -829,9 +831,9 @@ const getPersistentTtyContextRows = (rows, hasHistory) => {
     const compactRows = rows.filter((row) => importantLabels.has(row.label));
     return compactRows.length > 0 ? compactRows : rows;
 };
-const shouldHideEmptyStateNextRow = (state, hasHistory) => !hasHistory && Boolean(state.session || state.rootTask) && !state.repoIntentPrompt && !state.candidatePicker;
+const shouldHideEmptyStateNextRow = (state) => Boolean(state.session || state.rootTask) && !state.repoIntentPrompt && !state.candidatePicker;
 const buildSessionNarrativeLines = (state, session) => getSessionContextRows(state, session)
-    .filter((row) => row.label === "source" || row.label === "action" || row.label === "next")
+    .filter((row) => row.label === "source" || row.label === "action")
     .map((row) => `${row.label} ${row.value}`);
 const buildSessionHeadline = (session) => {
     if (session.command === "urdf-to-mjcf") {
@@ -5720,7 +5722,7 @@ const buildTtyShellFrame = (state, view) => {
         }
     }
     else if (state.session) {
-        for (const row of getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state, hasHistory)))) {
+        for (const row of getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state)))) {
             lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
     }
@@ -5729,7 +5731,7 @@ const buildTtyShellFrame = (state, view) => {
             { label: "source", value: "none yet", tone: "muted" },
             { label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" },
             { label: "next", value: "paste input directly or type /", tone: "accent" },
-        ], hasHistory).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state, hasHistory)))) {
+        ], hasHistory).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state)))) {
             lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
     }
@@ -5791,14 +5793,7 @@ const buildTtyShellFrame = (state, view) => {
                 : "";
     lines.push(`  ${cliShellConfig_1.SHELL_THEME.inputBand(` ${promptLabel} ${promptValue} `)}`);
     if (state.session?.pending && !view.input.startsWith("/") && hasHistory) {
-        const hasExamples = state.session.pending.examples.length > 0;
         const hasNotes = state.session.pending.notes.length > 0;
-        if (hasExamples) {
-            lines.push(cliShellConfig_1.SHELL_THEME.section("examples"));
-            for (const example of state.session.pending.examples.slice(0, 2)) {
-                lines.push(`  ${cliShellConfig_1.SHELL_THEME.muted(example)}`);
-            }
-        }
         if (hasNotes) {
             lines.push(cliShellConfig_1.SHELL_THEME.section("note"));
             for (const note of state.session.pending.notes) {

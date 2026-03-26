@@ -1149,6 +1149,8 @@ const getSessionContextRows = (
   session: ShellSession
 ): readonly ShellContextRow[] => {
   const rows: ShellContextRow[] = [];
+  const shouldHideActionRow =
+    (session.command === "replace-subrobot" || session.command === "assemble") && session.args.size === 0;
   const getExtractedArchivePathForSource = (candidatePath: string): string | undefined => {
     const loadedSource = state.loadedSource;
     if (!loadedSource?.extractedArchivePath || !loadedSource.localPath) {
@@ -1255,9 +1257,10 @@ const getSessionContextRows = (
   }
 
   if (
-    session.pending ||
-    ((session.label === "open" || session.label === "inspect") && session.args.size === 0) ||
-    !getRequirementStatus(session).ready
+    !shouldHideActionRow &&
+    (session.pending ||
+      ((session.label === "open" || session.label === "inspect") && session.args.size === 0) ||
+      !getRequirementStatus(session).ready)
   ) {
     rows.push({
       label: "action",
@@ -1288,17 +1291,15 @@ const getPersistentTtyContextRows = (
 };
 
 const shouldHideEmptyStateNextRow = (
-  state: Pick<ShellState, "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">,
-  hasHistory: boolean
-): boolean =>
-  !hasHistory && Boolean(state.session || state.rootTask) && !state.repoIntentPrompt && !state.candidatePicker;
+  state: Pick<ShellState, "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">
+): boolean => Boolean(state.session || state.rootTask) && !state.repoIntentPrompt && !state.candidatePicker;
 
 const buildSessionNarrativeLines = (
   state: Pick<ShellState, "loadedSource" | "lastUrdfPath" | "repoSourceContext" | "sharedSessionId">,
   session: ShellSession
 ): readonly string[] =>
   getSessionContextRows(state, session)
-    .filter((row) => row.label === "source" || row.label === "action" || row.label === "next")
+    .filter((row) => row.label === "source" || row.label === "action")
     .map((row) => `${row.label} ${row.value}`);
 
 const buildSessionHeadline = (session: ShellSession): string => {
@@ -7657,7 +7658,7 @@ const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
     }
   } else if (state.session) {
     for (const row of getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory).filter(
-      (row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state, hasHistory))
+      (row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state))
     )) {
       lines.push(renderContextRow(row));
     }
@@ -7669,7 +7670,7 @@ const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
         { label: "next", value: "paste input directly or type /", tone: "accent" },
       ],
       hasHistory
-    ).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state, hasHistory)))) {
+    ).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state)))) {
       lines.push(renderContextRow(row));
     }
   } else {
@@ -7741,14 +7742,7 @@ const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
   lines.push(`  ${SHELL_THEME.inputBand(` ${promptLabel} ${promptValue} `)}`);
 
   if (state.session?.pending && !view.input.startsWith("/") && hasHistory) {
-    const hasExamples = state.session.pending.examples.length > 0;
     const hasNotes = state.session.pending.notes.length > 0;
-    if (hasExamples) {
-      lines.push(SHELL_THEME.section("examples"));
-      for (const example of state.session.pending.examples.slice(0, 2)) {
-        lines.push(`  ${SHELL_THEME.muted(example)}`);
-      }
-    }
     if (hasNotes) {
       lines.push(SHELL_THEME.section("note"));
       for (const note of state.session.pending.notes) {

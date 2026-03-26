@@ -396,7 +396,7 @@ ptyTest("TTY shell lets slash commands bypass recommendation prompts", async () 
   assert.equal(result.code, 0);
   assert.match(result.sanitizedOutput, /align orientation to the default target \+z-up \/ \+x-forward now\?/i);
   assert.match(result.sanitizedOutput, /\/orientation/i);
-  assert.match(result.sanitizedOutput, /press Enter or type \/run/i);
+  assert.match(result.sanitizedOutput, /\[↑↓\] move\s+\[Enter\] confirm\s+\[Esc\] Not now/i);
 });
 
 ptyTest("TTY shell offers Studio install when the visualizer is missing", async () => {
