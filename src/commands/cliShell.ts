@@ -121,6 +121,16 @@ import {
   normalizeFilesystemInput,
   normalizeShellInput,
 } from "./shellPathInput";
+import {
+  handleCommonLineShellCommand,
+  handleCommonTtyCommand,
+} from "./cliShellSharedActions";
+import {
+  getRepoIntentChoiceBusyState,
+  handleLineShellSelectedRepoIntentChoice,
+  handleTtyRepoIntentChoice,
+  handleTtySelectedRepoIntentChoice,
+} from "./cliShellRepoIntent";
 import { checkForUpdateAvailability, runUpdateCommand, type UpdateAvailability } from "./cliUpdate";
 import {
   attachShellToSharedSession,
@@ -204,13 +214,28 @@ type ShellAnalysisPayload = {
   jointHierarchy?: { orderedJoints?: unknown[] };
 };
 
-const clearInteractiveFlowState = (state: ShellState) => {
+const clearTransientShellState = (state: ShellState) => {
   clearCandidatePicker(state);
+  clearXacroRetry(state);
+};
+
+const openShellSession = (
+  state: ShellState,
+  command: SupportedCommandName,
+  label: string,
+  feedback?: ShellFeedback[]
+): ShellSession => {
+  clearTransientShellState(state);
+  state.session = createSession(command, state, label, feedback);
+  return state.session;
+};
+
+const clearInteractiveFlowState = (state: ShellState) => {
+  clearTransientShellState(state);
   clearRepoIntentPrompt(state);
   clearRepoSourceContext(state);
   clearLoadPreflightPrompt(state);
   state.visualizerPromptResolved = false;
-  clearXacroRetry(state);
   state.session = null;
   state.rootTask = null;
 };
@@ -1058,7 +1083,7 @@ const getSessionSourceValue = (
 
 const getSessionPurposeText = (session: ShellSession): string => {
   if (session.command === "assemble") {
-    return "Provide the base file, then add more files if needed.";
+    return "Provide the base repo or file, then add more sources if needed.";
   }
 
   if (session.command === "replace-subrobot") {
@@ -1107,7 +1132,7 @@ const getEmptySessionInputText = (session: Pick<ShellSession, "label">): string 
     case "inspect":
       return "paste or drop a folder, file, or GitHub repo";
     case "assemble":
-      return "paste or drop 1 base source file";
+      return "paste or drop 1 base repo, folder, GitHub repo, or URDF file";
     case "replace":
       return "paste or drop 1 host source file";
     default:
@@ -1297,14 +1322,17 @@ const getPersistentTtyContextRows = (
     return rows;
   }
 
-  const importantLabels = new Set(["source", "imported from", "entry", "selected", "output", "working urdf", "next"]);
+  const importantLabels = new Set(["source", "action", "imported from", "entry", "selected", "output", "working urdf", "next"]);
   const compactRows = rows.filter((row) => importantLabels.has(row.label));
   return compactRows.length > 0 ? compactRows : rows;
 };
 
 const shouldHideEmptyStateNextRow = (
   state: Pick<ShellState, "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">
-): boolean => Boolean(state.session || state.rootTask) && !state.repoIntentPrompt && !state.candidatePicker;
+): boolean =>
+  Boolean(state.session || (state.rootTask && state.rootTask !== "preview")) &&
+  !state.repoIntentPrompt &&
+  !state.candidatePicker;
 
 const buildSessionNarrativeLines = (
   state: Pick<ShellState, "loadedSource" | "lastUrdfPath" | "repoSourceContext" | "sharedSessionId">,
@@ -2136,8 +2164,8 @@ const getPendingValuePrompt = (
       return {
         key,
         slashName,
-        title: "1 base source file",
-        examples: ["./robot.urdf"],
+        title: "1 base repo, folder, GitHub repo, or URDF file",
+        examples: ["./robot.urdf", "./robot-description/", "owner/repo"],
         notes: [],
         expectsPath: true,
       };
@@ -2163,6 +2191,16 @@ const getPendingValuePrompt = (
   }
 
   if (key === "attach") {
+    if (session.command === "assemble") {
+      return {
+        key,
+        slashName,
+        title: "Attached repo, folder, GitHub repo, or URDF path",
+        examples: ["./tool.urdf", "./tool-description/", "owner/tool_repo"],
+        notes: [],
+        expectsPath: true,
+      };
+    }
     return {
       key,
       slashName,
@@ -4309,7 +4347,13 @@ const createAssemblyLoadPreflightPrompt = (
 };
 
 const getSessionSourcePickerNotice = (targetKey: string): string =>
-  targetKey === "replacement" ? "choose the replacement robot entry" : "choose the host robot entry";
+  targetKey === "replacement"
+    ? "choose the replacement robot entry"
+    : targetKey === "attach"
+      ? "choose the robot entry to add to the assembly"
+      : targetKey === "urdf"
+        ? "choose the base robot entry for the assembly"
+        : "choose the host robot entry";
 
 const summarizeResolvedSessionSource = (
   targetKey: string,
@@ -4322,7 +4366,15 @@ const summarizeResolvedSessionSource = (
   }
 ): AutoPreviewPanel => {
   const lines: string[] = [
-    `${targetKey === "replacement" ? "replacement" : "host"} source ${quoteForPreview(options.sourceInput)}`,
+    `${
+      targetKey === "replacement"
+        ? "replacement"
+        : targetKey === "attach"
+          ? "attached"
+          : targetKey === "urdf"
+            ? "base"
+            : "host"
+    } source ${quoteForPreview(options.sourceInput)}`,
   ];
 
   if (options.extractedArchivePath) {
@@ -4344,9 +4396,74 @@ const summarizeResolvedSessionSource = (
   }
 
   return {
-    title: targetKey === "replacement" ? "replacement ready" : "host ready",
+    title:
+      targetKey === "replacement"
+        ? "replacement ready"
+        : targetKey === "attach"
+          ? "assembly source ready"
+          : targetKey === "urdf"
+            ? "assembly source ready"
+            : "host ready",
     kind: "success",
     lines,
+  };
+};
+
+const resolveAssembleSourceLoad = (
+  state: ShellState,
+  session: ShellSession,
+  targetKey: "urdf" | "attach",
+  execArgs: ReadonlyMap<string, string | boolean>,
+  options: {
+    sourceInput: string;
+    extractedArchivePath?: string;
+    requestedEntryPath?: string;
+  }
+): AutoAutomationResult => {
+  const loadArgs = cloneArgsMap(execArgs);
+  const outputPath = createTempUrdfSnapshotPath(
+    String(loadArgs.get("entry") || loadArgs.get("path") || loadArgs.get("github") || "robot.urdf")
+  );
+  loadArgs.set("out", outputPath);
+
+  const loadExecution = executeCliCommand("load-source", loadArgs);
+  const loadPayload = parseExecutionJson<LoadSourceResult & { outPath: string | null }>(loadExecution);
+  if (!loadPayload?.outPath) {
+    const panel = buildPreviewErrorPanel("error", loadExecution);
+    return {
+      panel,
+      notice: buildShellFailureNotice(panel, "could not prepare the assembly source"),
+      clearSession: false,
+    };
+  }
+
+  if (targetKey === "attach") {
+    const existingAttach = typeof session.args.get("attach") === "string" ? String(session.args.get("attach")) : "";
+    const merged = Array.from(
+      new Set(
+        [existingAttach, loadPayload.outPath]
+          .join(",")
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0)
+      )
+    ).join(",");
+    session.args.set("attach", merged);
+    session.inheritedKeys.delete("attach");
+  } else {
+    session.args.set("urdf", loadPayload.outPath);
+    session.inheritedKeys.delete("urdf");
+  }
+
+  openSessionFollowupPending(state, session, targetKey);
+
+  return {
+    panel: summarizeResolvedSessionSource(targetKey, loadPayload, options),
+    notice: {
+      kind: "success",
+      text: targetKey === "attach" ? "assembly source added" : "assembly base source ready",
+    },
+    clearSession: false,
   };
 };
 
@@ -4520,6 +4637,96 @@ const runReplaceSubrobotSourceAutomation = (
   });
 };
 
+const runAssembleSourceAutomation = (
+  state: ShellState,
+  session: ShellSession,
+  targetKey: string
+): AutoAutomationResult | null => {
+  if (session.command !== "assemble" || (targetKey !== "urdf" && targetKey !== "attach")) {
+    return null;
+  }
+
+  const sourceInput = session.args.get(targetKey);
+  if (typeof sourceInput !== "string" || sourceInput.trim().length === 0) {
+    return null;
+  }
+
+  const githubRef = detectGitHubReferenceInput(sourceInput);
+  const localPath = detectLocalPathDrop(sourceInput);
+  const needsResolution =
+    Boolean(githubRef) ||
+    Boolean(localPath?.isDirectory || localPath?.isZipFile || localPath?.isXacroFile);
+
+  if (!needsResolution) {
+    return null;
+  }
+
+  const loadArgs = new Map<string, string | boolean>();
+  if (githubRef) {
+    loadArgs.set("github", githubRef);
+  } else if (localPath) {
+    loadArgs.set("path", localPath.inputPath);
+  } else {
+    return null;
+  }
+
+  const prepared = prepareLoadSourceArgs(session, loadArgs);
+  if ("error" in prepared) {
+    return prepared.error;
+  }
+
+  const { execArgs, extractedArchivePath } = prepared;
+  const preview = inspectRepositoryCandidatesForLoad(session, execArgs, {
+    extractedArchivePath,
+  });
+  if (preview) {
+    if (preview.panel.kind === "error") {
+      clearCandidatePicker(state);
+      return {
+        panel: preview.panel,
+        notice: { kind: "error", text: "preview failed" },
+        clearSession: false,
+      };
+    }
+
+    if (preview.payload.candidateCount === 0) {
+      clearCandidatePicker(state);
+      return {
+        panel: preview.panel,
+        notice: { kind: "warning", text: "no robot entrypoint found for the assembly source" },
+        clearSession: false,
+      };
+    }
+
+    if (preview.payload.candidateCount > 1) {
+      state.candidatePicker = {
+        mode: "session-source",
+        candidates: preview.payload.candidates,
+        selectedIndex: 0,
+        loadArgs: cloneArgsMap(execArgs),
+        extractedArchivePath,
+        targetKey,
+        sourceInput,
+      };
+      return {
+        panel: preview.panel,
+        notice: { kind: "info", text: getSessionSourcePickerNotice(targetKey) },
+        clearSession: false,
+      };
+    }
+
+    if (preview.payload.primaryCandidatePath) {
+      execArgs.set("entry", preview.payload.primaryCandidatePath);
+    }
+  }
+
+  return resolveAssembleSourceLoad(state, session, targetKey, execArgs, {
+    sourceInput,
+    extractedArchivePath,
+    requestedEntryPath: typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
+  });
+};
+
 const runSelectedCandidatePicker = (
   state: ShellState,
   picker: CandidatePickerState,
@@ -4537,6 +4744,13 @@ const runSelectedCandidatePicker = (
 
     const execArgs = cloneArgsMap(picker.loadArgs);
     execArgs.set("entry", selectionPath);
+    if (session.command === "assemble" && (picker.targetKey === "urdf" || picker.targetKey === "attach")) {
+      return resolveAssembleSourceLoad(state, session, picker.targetKey, execArgs, {
+        sourceInput: picker.sourceInput,
+        extractedArchivePath: picker.extractedArchivePath,
+        requestedEntryPath: selectionPath,
+      });
+    }
     return resolveSessionSourceLoad(state, session, picker.targetKey, execArgs, {
       sourceInput: picker.sourceInput,
       extractedArchivePath: picker.extractedArchivePath,
@@ -4896,8 +5110,7 @@ const activateRepoIntentPrompt = (
 ) => {
   state.session = null;
   state.rootTask = null;
-  clearCandidatePicker(state);
-  clearXacroRetry(state);
+  clearTransientShellState(state);
   const sourceLabel =
     extractedArchivePath ??
     payload.repositoryUrl ??
@@ -5184,28 +5397,10 @@ const runLoadPreflightAsync = async (state: ShellState): Promise<AutoAutomationR
   clearLoadPreflightPrompt(state);
   if (session.command === "assemble") {
     const execution = executeSessionCommand(state, session);
-    const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
-    if (compactFailurePanel) {
-      return {
-        panel: compactFailurePanel,
-        notice: buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`),
-        clearSession: false,
-      };
-    }
-
-    const successPanel = getShellExecutionSuccessPanel(state, session, execution);
+    const outcome = getSessionExecutionOutcome(state, session, execution, "assembly workspace ready");
     return {
-      panel:
-        successPanel ??
-        createOutputPanel(
-          execution.status === 0 ? "result" : "error",
-          buildExecutionPanelText(execution, session.command),
-          execution.status === 0 ? "success" : "error"
-        ),
-      notice:
-        execution.status === 0
-          ? { kind: "success", text: "assembly workspace ready" }
-          : { kind: "error", text: `[${session.command}] exited with status ${execution.status}` },
+      panel: outcome.panel,
+      notice: outcome.notice,
       clearSession: false,
     };
   }
@@ -5275,6 +5470,11 @@ const runDirectInputAutomation = (
   if (session.command === "replace-subrobot" && (changedKey === "urdf" || changedKey === "replacement")) {
     clearCandidatePicker(state);
     return runReplaceSubrobotSourceAutomation(state, session, changedKey);
+  }
+
+  if (session.command === "assemble" && (changedKey === "urdf" || changedKey === "attach")) {
+    clearCandidatePicker(state);
+    return runAssembleSourceAutomation(state, session, changedKey);
   }
 
   if (session.command === "health-check" && changedKey === "urdf") {
@@ -5725,30 +5925,53 @@ const getShellExecutionFailurePanel = (
   return null;
 };
 
+const getSessionExecutionOutcome = (
+  state: ShellState,
+  session: ShellSession,
+  execution: ReturnType<typeof executeSessionCommand>,
+  successText = "run complete",
+  fallbackToOutputPanel = true
+): {
+  panel: AutoPreviewPanel;
+  notice: ShellFeedback;
+} => {
+  const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
+  if (compactFailurePanel) {
+    return {
+      panel: compactFailurePanel,
+      notice: buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`),
+    };
+  }
+
+  const successPanel = getShellExecutionSuccessPanel(state, session, execution);
+  return {
+    panel: successPanel ?? (
+      fallbackToOutputPanel
+        ? createOutputPanel(
+            execution.status === 0 ? "result" : "error",
+            buildExecutionPanelText(execution, session.command),
+            execution.status === 0 ? "success" : "error"
+          )
+        : null
+    ),
+    notice:
+      execution.status === 0
+        ? { kind: "success", text: successText }
+        : { kind: "error", text: `[${session.command}] exited with status ${execution.status}` },
+  };
+};
+
 const printSessionCommandExecution = (
   state: ShellState,
   execution: ReturnType<typeof executeSessionCommand>,
   session: ShellSession
 ) => {
-  const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
-  if (compactFailurePanel) {
-    writeFeedback(buildShellFailureNotice(compactFailurePanel, `[${session.command}] exited with status ${execution.status}`));
-    printOutputPanel(compactFailurePanel);
-    return;
+  const outcome = getSessionExecutionOutcome(state, session, execution, "run complete", false);
+  if (outcome.panel) {
+    writeFeedback(outcome.notice);
+    printOutputPanel(outcome.panel);
   }
-
-  const successPanel = getShellExecutionSuccessPanel(state, session, execution);
-  if (successPanel) {
-    printOutputPanel(successPanel);
-    if (execution.followUp) {
-      for (const line of execution.followUp.split("\n")) {
-        if (line.startsWith("[next]")) {
-          process.stdout.write(`${SHELL_THEME.accent(line)}\n`);
-        } else {
-          process.stdout.write(`${SHELL_THEME.muted(line)}\n`);
-        }
-      }
-    }
+  if (execution.status !== 0 || outcome.panel) {
     return;
   }
 
@@ -6334,9 +6557,7 @@ const startRootTaskAction = (
   clearStartupModePrompt(state);
   state.rootTask = task;
   clearRepoIntentPrompt(state);
-  clearCandidatePicker(state);
-  clearXacroRetry(state);
-  state.session = createSession(action.command, state, action.sessionLabel, feedback);
+  openShellSession(state, action.command, action.sessionLabel, feedback);
   if (state.session) {
     openPendingForSession(state, state.session, action.openPending);
   }
@@ -6350,9 +6571,7 @@ const startRootShellCommand = (
   clearStartupModePrompt(state);
   state.rootTask = null;
   clearRepoIntentPrompt(state);
-  clearCandidatePicker(state);
-  clearXacroRetry(state);
-  state.session = createSession(entry.command, state, entry.sessionLabel, feedback);
+  openShellSession(state, entry.command, entry.sessionLabel, feedback);
   if (state.session) {
     openPendingForSession(state, state.session, entry.openPending);
   }
@@ -6365,8 +6584,7 @@ const applyStartupModeSelection = (
 ) => {
   clearStartupModePrompt(state);
   clearRepoIntentPrompt(state);
-  clearCandidatePicker(state);
-  clearXacroRetry(state);
+  clearTransientShellState(state);
   state.rootTask = null;
   state.session = null;
 
@@ -6463,11 +6681,41 @@ const printSavePromptLine = (savePrompt: SavePromptState) => {
   process.stdout.write(`${SHELL_THEME.muted(getSavePathPromptText(savePrompt))}\n`);
 };
 
+const getLineAlignBusyText = (state: ShellState): string => {
+  const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
+  return alignSuggestedAction
+    ? getSuggestedActionBusyState(alignSuggestedAction).lines[0] ?? "checking orientation..."
+    : "checking orientation...";
+};
+
+const createCommonLineShellCommandDeps = (close: () => void) => ({
+  close,
+  runDoctorShellCommand,
+  printLastUrdf,
+  getAlignBusyLine: getLineAlignBusyText,
+  runAlignOrientationAction,
+  runRepoIntentChoice,
+  runRepoBatchAction,
+  previewRepoFixesAction,
+  runCurrentGalleryAction,
+  printVisualizerShellAction,
+  printVisualizerStopShellAction,
+  getRepoIntentMenuEntries: () => REPO_INTENT_MENU_ENTRIES,
+});
+
+const lineShellSelectedRepoIntentChoiceDeps = {
+  getRepoIntentMenuEntries: () => REPO_INTENT_MENU_ENTRIES,
+  clamp,
+  runRepoIntentChoice,
+};
+
 const handleRootSlashCommand = async (
   slashCommand: string,
   state: ShellState,
   close: () => void
 ) => {
+  const commonLineShellCommandDeps = createCommonLineShellCommandDeps(close);
+
   if (!slashCommand || slashCommand === "help") {
     if (state.repoIntentPrompt) {
       printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
@@ -6491,30 +6739,7 @@ const handleRootSlashCommand = async (
     return;
   }
 
-  if (slashCommand === "exit" || slashCommand === "quit") {
-    close();
-    return;
-  }
-
-  if (slashCommand === "clear") {
-    console.clear();
-    return;
-  }
-
-  if (slashCommand === "update") {
-    runUpdateCommand();
-    return;
-  }
-
-  if (slashCommand === "doctor") {
-    const result = runDoctorShellCommand();
-    writeFeedback(result.notice);
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "last") {
-    printLastUrdf(state);
+  if (await handleCommonLineShellCommand(slashCommand, state, commonLineShellCommandDeps)) {
     return;
   }
 
@@ -6528,80 +6753,11 @@ const handleRootSlashCommand = async (
   }
 
   if (slashCommand === "run") {
+    if (await handleLineShellSelectedRepoIntentChoice(state, lineShellSelectedRepoIntentChoiceDeps)) {
+      return;
+    }
+
     process.stdout.write(`${SHELL_THEME.muted(getRootIdleMessage(state))}\n`);
-    return;
-  }
-
-  if (slashCommand === "align") {
-    const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
-    const busyLine = alignSuggestedAction
-      ? getSuggestedActionBusyState(alignSuggestedAction).lines[0]
-      : "checking orientation...";
-    process.stdout.write(`${SHELL_THEME.muted(busyLine)}\n`);
-    const result = runAlignOrientationAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "work-one") {
-    process.stdout.write(`${SHELL_THEME.muted("opening the robot picker...")}\n`);
-    const result = runRepoIntentChoice(state, "work-one");
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.candidatePicker) {
-      printCandidatePicker(state.candidatePicker);
-    }
-    return;
-  }
-
-  if (slashCommand === "gallery") {
-    process.stdout.write(`${SHELL_THEME.muted("generating cards and thumbnails...")}\n`);
-    const result = await runRepoBatchAction(state, "gallery");
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.repoIntentPrompt) {
-      printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
-    }
-    return;
-  }
-
-  if (slashCommand === "gallery-current") {
-    process.stdout.write(`${SHELL_THEME.muted("generating the current gallery assets...")}\n`);
-    const result = runCurrentGalleryAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "repo-fixes") {
-    process.stdout.write(`${SHELL_THEME.muted("reviewing shared repo issues...")}\n`);
-    const result = previewRepoFixesAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.repoIntentPrompt) {
-      printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
-    }
-    return;
-  }
-
-  if (slashCommand === "visualize") {
-    await printVisualizerShellAction(state);
-    return;
-  }
-
-  if (slashCommand === "visualize-stop") {
-    await printVisualizerStopShellAction(state);
     return;
   }
 
@@ -6650,17 +6806,14 @@ const handleRootSlashCommand = async (
   const command = slashCommand as SupportedCommandName;
   const quickSession = tryCreateLoadedRootQuickSession(state, command);
   if (quickSession) {
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    clearTransientShellState(state);
     printSessionCommandExecution(state, executeSessionCommand(state, quickSession), quickSession);
     return;
   }
 
   state.rootTask = null;
-  clearCandidatePicker(state);
-  clearXacroRetry(state);
   const feedback: ShellFeedback[] = [];
-  state.session = createSession(command, state, slashCommand, feedback);
+  openShellSession(state, command, slashCommand, feedback);
   flushFeedback(feedback);
   printSessionOptions(state, state.session);
 };
@@ -6670,6 +6823,7 @@ const handleRootTaskSlashCommand = async (
   state: ShellState,
   close: () => void
 ) => {
+  const commonLineShellCommandDeps = createCommonLineShellCommandDeps(close);
   const task = state.rootTask;
   if (!task) {
     handleRootSlashCommand(slashCommand, state, close);
@@ -6682,117 +6836,24 @@ const handleRootTaskSlashCommand = async (
   }
 
   if (slashCommand === "back") {
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    clearTransientShellState(state);
     state.rootTask = null;
     process.stdout.write(`${SHELL_THEME.muted("back to tasks")}\n`);
     return;
   }
 
-  if (slashCommand === "exit" || slashCommand === "quit") {
-    close();
-    return;
-  }
-
-  if (slashCommand === "clear") {
-    console.clear();
-    return;
-  }
-
-  if (slashCommand === "update") {
-    runUpdateCommand();
-    return;
-  }
-
-  if (slashCommand === "doctor") {
-    const result = runDoctorShellCommand();
-    writeFeedback(result.notice);
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "last") {
-    printLastUrdf(state);
+  if (await handleCommonLineShellCommand(slashCommand, state, commonLineShellCommandDeps)) {
     return;
   }
 
   if (slashCommand === "run") {
+    if (await handleLineShellSelectedRepoIntentChoice(state, lineShellSelectedRepoIntentChoiceDeps)) {
+      return;
+    }
+
     process.stdout.write(
       `${SHELL_THEME.muted("nothing is pending here. paste a source or use /")}\n`
     );
-    return;
-  }
-
-  if (slashCommand === "align") {
-    const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
-    const busyLine = alignSuggestedAction
-      ? getSuggestedActionBusyState(alignSuggestedAction).lines[0]
-      : "checking orientation...";
-    process.stdout.write(`${SHELL_THEME.muted(busyLine)}\n`);
-    const result = runAlignOrientationAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "work-one") {
-    process.stdout.write(`${SHELL_THEME.muted("opening the robot picker...")}\n`);
-    const result = runRepoIntentChoice(state, "work-one");
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.candidatePicker) {
-      printCandidatePicker(state.candidatePicker);
-    }
-    return;
-  }
-
-  if (slashCommand === "gallery") {
-    process.stdout.write(`${SHELL_THEME.muted("generating cards and thumbnails...")}\n`);
-    const result = await runRepoBatchAction(state, "gallery");
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.repoIntentPrompt) {
-      printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
-    }
-    return;
-  }
-
-  if (slashCommand === "gallery-current") {
-    process.stdout.write(`${SHELL_THEME.muted("generating the current gallery assets...")}\n`);
-    const result = runCurrentGalleryAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "repo-fixes") {
-    process.stdout.write(`${SHELL_THEME.muted("reviewing shared repo issues...")}\n`);
-    const result = previewRepoFixesAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.repoIntentPrompt) {
-      printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
-    }
-    return;
-  }
-
-  if (slashCommand === "visualize") {
-    await printVisualizerShellAction(state);
-    return;
-  }
-
-  if (slashCommand === "visualize-stop") {
-    await printVisualizerStopShellAction(state);
     return;
   }
 
@@ -6824,9 +6885,7 @@ const handleRootTaskSlashCommand = async (
 
   const feedback: ShellFeedback[] = [];
   state.rootTask = null;
-  clearCandidatePicker(state);
-  clearXacroRetry(state);
-  state.session = createSession(slashCommand as SupportedCommandName, state, slashCommand, feedback);
+  openShellSession(state, slashCommand as SupportedCommandName, slashCommand, feedback);
   flushFeedback(feedback);
   printSessionOptions(state, state.session);
 };
@@ -6837,6 +6896,7 @@ const handleSessionSlashCommand = async (
   state: ShellState,
   close: () => void
 ) => {
+  const commonLineShellCommandDeps = createCommonLineShellCommandDeps(close);
   const session = state.session;
   if (!session) {
     return;
@@ -6848,8 +6908,7 @@ const handleSessionSlashCommand = async (
   }
 
   if (slashCommand === "back") {
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    clearTransientShellState(state);
     state.session = null;
     process.stdout.write(
       `${SHELL_THEME.muted(state.rootTask ? `back to /${state.rootTask}` : "back to tasks")}\n`
@@ -6859,9 +6918,7 @@ const handleSessionSlashCommand = async (
 
   if (slashCommand === "reset") {
     const feedback: ShellFeedback[] = [];
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
-    state.session = createSession(session.command, state, session.label, feedback);
+    openShellSession(state, session.command, session.label, feedback);
     flushFeedback(feedback);
     printSessionOptions(state, state.session);
     return;
@@ -6872,66 +6929,15 @@ const handleSessionSlashCommand = async (
     return;
   }
 
-  if (slashCommand === "work-one") {
-    process.stdout.write(`${SHELL_THEME.muted("opening the robot picker...")}\n`);
-    const result = runRepoIntentChoice(state, "work-one");
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.candidatePicker) {
-      printCandidatePicker(state.candidatePicker);
-    }
-    return;
-  }
-
-  if (slashCommand === "gallery") {
-    process.stdout.write(`${SHELL_THEME.muted("generating cards and thumbnails...")}\n`);
-    const result = await runRepoBatchAction(state, "gallery");
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.repoIntentPrompt) {
-      printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
-    }
-    return;
-  }
-
-  if (slashCommand === "gallery-current") {
-    process.stdout.write(`${SHELL_THEME.muted("generating the current gallery assets...")}\n`);
-    const result = runCurrentGalleryAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "repo-fixes") {
-    process.stdout.write(`${SHELL_THEME.muted("reviewing shared repo issues...")}\n`);
-    const result = previewRepoFixesAction(state);
-    if (result.notice) {
-      writeFeedback(result.notice);
-    }
-    printOutputPanel(result.panel);
-    if (state.repoIntentPrompt) {
-      printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
-    }
-    return;
-  }
-
-  if (slashCommand === "visualize") {
-    await printVisualizerShellAction(state);
-    return;
-  }
-
-  if (slashCommand === "visualize-stop") {
-    await printVisualizerStopShellAction(state);
+  if (await handleCommonLineShellCommand(slashCommand, state, commonLineShellCommandDeps)) {
     return;
   }
 
   if (slashCommand === "run") {
+    if (await handleLineShellSelectedRepoIntentChoice(state, lineShellSelectedRepoIntentChoiceDeps)) {
+      return;
+    }
+
     clearCandidatePicker(state);
     const requirementStatus = getRequirementStatus(session);
     if (!requirementStatus.ready) {
@@ -6957,33 +6963,6 @@ const handleSessionSlashCommand = async (
     }
 
     printSessionCommandExecution(state, executeSessionCommand(state, session), session);
-    return;
-  }
-
-  if (slashCommand === "last") {
-    printLastUrdf(state);
-    return;
-  }
-
-  if (slashCommand === "update") {
-    runUpdateCommand();
-    return;
-  }
-
-  if (slashCommand === "doctor") {
-    const result = runDoctorShellCommand();
-    writeFeedback(result.notice);
-    printOutputPanel(result.panel);
-    return;
-  }
-
-  if (slashCommand === "clear") {
-    console.clear();
-    return;
-  }
-
-  if (slashCommand === "exit" || slashCommand === "quit") {
-    close();
     return;
   }
 
@@ -7120,7 +7099,7 @@ const applyFreeformInputToRootState = (
   clearStartupModePrompt(state);
   clearRepoSourceContext(state);
   state.rootTask = null;
-  state.session = createSession(plan.command, state, plan.label, feedback);
+  openShellSession(state, plan.command, plan.label, feedback);
   if (!state.session || !setSessionValue(state, state.session, plan.key, plan.value, feedback)) {
     state.session = null;
     return null;
@@ -8896,9 +8875,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     state.rootTask = null;
     clearRepoIntentPrompt(state);
     clearLoadPreflightPrompt(state);
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
-    state.session = createSession(command, state, command, feedback);
+    openShellSession(state, command, command, feedback);
     setNoticeFromFeedback(view, feedback);
     setInput(state.session?.pending ? "" : "/");
     pushTimelineUserEntry(view, `/${command}`);
@@ -8914,8 +8891,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     state.session = null;
     clearRepoIntentPrompt(state);
     clearLoadPreflightPrompt(state);
-    clearCandidatePicker(state);
-    clearXacroRetry(state);
+    clearTransientShellState(state);
     setInput("/");
     view.notice = { kind: "info", text: `${getRootTaskSummary(task)}  choose below or paste input directly` };
     pushTimelineUserEntry(view, `/${task}`);
@@ -9053,53 +9029,71 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     return result.panel?.kind === "success";
   };
 
+  const getTtyAlignBusyState = (nextState: ShellState) => {
+    const alignSuggestedAction = getAlignOrientationSuggestedAction(nextState.suggestedAction);
+    return alignSuggestedAction
+      ? getSuggestedActionBusyState(alignSuggestedAction)
+      : {
+          title: "orientation",
+          lines: ["checking orientation...", "aligning the working copy when needed..."],
+        };
+  };
+
+  const archiveAssistantState = (nextView: TtyShellViewState) => archiveAssistantStateToTimeline(nextView);
+
+  const getCommonTtyCommandDeps = () => ({
+    requestClose: requestTtyClose,
+    runBusyOperation,
+    openVisualizer: openVisualizerInTty,
+    stopVisualizer: stopVisualizerInTty,
+    runDoctorShellCommand,
+    getLastUrdfMessage,
+    pushTimelineUserEntry,
+    archiveAssistantStateToTimeline,
+    getAlignBusyState: getTtyAlignBusyState,
+    runAlignOrientationAction,
+    runRepoIntentChoice,
+    runRepoBatchAction: (nextState: ShellState, mode: "gallery") => runRepoBatchAction(nextState, mode),
+    previewRepoFixesAction,
+    runCurrentGalleryAction,
+  });
+
+  const getTtySelectedRepoIntentChoiceDeps = () => ({
+    getRepoIntentMenuEntries,
+    clamp,
+    runRepoIntentChoice,
+    runBusy: runBusyOperation,
+    pushTimelineUserEntry,
+    archiveAssistantStateToTimeline: archiveAssistantState,
+  });
+
+  const applyTtyExecutionResult = (
+    session: ShellSession,
+    execution: ReturnType<typeof executeSessionCommand>,
+    successText = "run complete"
+  ) => {
+    const outcome = getSessionExecutionOutcome(state, session, execution, successText);
+    view.output = outcome.panel;
+    view.notice = outcome.notice;
+  };
+
   const handleRootAction = async (slashCommand: string): Promise<boolean> => {
     if (!slashCommand || slashCommand === "help") {
       setInput("/");
       return true;
     }
 
-  if (getRepoSourceContext(state) && REPO_INTENT_MENU_ENTRIES.some((entry) => entry.name === slashCommand)) {
-      const result = runBusyOperation(
-        slashCommand === "gallery"
-          ? {
-              title: "gallery",
-              lines: ["generating cards...", "capturing thumbnails in URDF Studio..."],
-            }
-          : slashCommand === "repo-fixes"
-            ? {
-                title: "repo fixes",
-                lines: ["scanning repo candidates...", "applying shared safe fixes..."],
-              }
-            : {
-                title: "choosing",
-                lines: ["opening the robot picker..."],
-              },
-        () => runRepoIntentChoice(state, slashCommand as RepoIntentChoiceName)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, `/${slashCommand}`);
-      archiveAssistantStateToTimeline(view);
-      return true;
+    if (getRepoSourceContext(state) && REPO_INTENT_MENU_ENTRIES.some((entry) => entry.name === slashCommand)) {
+      return handleTtyRepoIntentChoice(state, view, slashCommand as RepoIntentChoiceName, {
+        runRepoIntentChoice,
+        runBusy: runBusyOperation,
+        commandLabel: `/${slashCommand}`,
+        pushTimelineUserEntry,
+        archiveAssistantStateToTimeline: archiveAssistantState,
+      });
     }
 
-    if (slashCommand === "exit" || slashCommand === "quit") {
-      requestTtyClose();
-      return true;
-    }
-
-    if (slashCommand === "clear") {
-      view.timeline = [];
-      view.notice = null;
-      view.output = null;
-      return true;
-    }
-
-    if (slashCommand === "last") {
-      view.notice = { kind: "info", text: getLastUrdfMessage(state) };
-      pushTimelineUserEntry(view, "/last");
-      archiveAssistantStateToTimeline(view);
+    if (await handleCommonTtyCommand(slashCommand, state, view, getCommonTtyCommandDeps())) {
       return true;
     }
 
@@ -9116,122 +9110,16 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "run") {
+      if (handleTtySelectedRepoIntentChoice(state, view, getTtySelectedRepoIntentChoiceDeps())) {
+        return true;
+      }
+
       clearCandidatePicker(state);
       view.notice = {
         kind: "info",
         text: getRootIdleMessage(state),
       };
       pushTimelineUserEntry(view, "/run");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "align") {
-      const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
-      const busy = alignSuggestedAction
-        ? getSuggestedActionBusyState(alignSuggestedAction)
-        : {
-            title: "orientation",
-            lines: ["checking orientation...", "aligning the working copy when needed..."],
-          };
-      const result = runBusyOperation(busy, () => runAlignOrientationAction(state));
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/align");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "work-one") {
-      const result = runBusyOperation(
-        {
-          title: "choosing",
-          lines: ["opening the robot picker..."],
-        },
-        () => runRepoIntentChoice(state, "work-one")
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/work-one");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "gallery") {
-      const busy = {
-        title: "gallery",
-        lines: ["generating cards...", "capturing thumbnails in URDF Studio..."],
-      };
-      const result = runBusyOperation(busy, () => runRepoBatchAction(state, "gallery"));
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/gallery");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "gallery-current") {
-      const result = runBusyOperation(
-        {
-          title: "gallery",
-          lines: ["generating the current card...", "capturing the current thumbnail..."],
-        },
-        () => runCurrentGalleryAction(state)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/gallery-current");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "repo-fixes") {
-      const result = runBusyOperation(
-        {
-          title: "repo fixes",
-          lines: ["reviewing shared repo issues...", "showing what ilu can fix safely..."],
-        },
-        () => previewRepoFixesAction(state)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/repo-fixes");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "visualize") {
-      await openVisualizerInTty();
-      pushTimelineUserEntry(view, "/visualize");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "visualize-stop") {
-      await stopVisualizerInTty();
-      pushTimelineUserEntry(view, "/visualize-stop");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "update") {
-      dismissUpdatePrompt(state);
-      try {
-        runUpdateCommand();
-        view.notice = { kind: "success", text: "ilu is up to date." };
-      } catch (error) {
-        view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
-      }
-      pushTimelineUserEntry(view, "/update");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "doctor") {
-      const result = runDoctorShellCommand();
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/doctor");
       archiveAssistantStateToTimeline(view);
       return true;
     }
@@ -9245,28 +9133,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         const execution = runBusyOperation(getBusyStateForSession(state.session), () =>
           executeSessionCommand(state, state.session as ShellSession)
         );
-        const compactFailurePanel =
-          execution.status !== 0 ? getShellExecutionFailurePanel(execution, state.session.command) : null;
-        if (compactFailurePanel) {
-          view.output = compactFailurePanel;
-          view.notice = buildShellFailureNotice(
-            compactFailurePanel,
-            `[${state.session.command}] exited with status ${execution.status}`
-          );
-        } else {
-          const successPanel = getShellExecutionSuccessPanel(state, state.session, execution);
-          view.output =
-            successPanel ??
-            createOutputPanel(
-              execution.status === 0 ? "result" : "error",
-              buildExecutionPanelText(execution, state.session.command),
-              execution.status === 0 ? "success" : "error"
-            );
-          view.notice =
-            execution.status === 0
-              ? { kind: "success", text: "run complete" }
-              : { kind: "error", text: `[${state.session.command}] exited with status ${execution.status}` };
-        }
+        applyTtyExecutionResult(state.session, execution);
         state.session = null;
         state.rootTask = null;
       } else if (state.session?.pending) {
@@ -9301,33 +9168,11 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     const command = slashCommand as SupportedCommandName;
     const quickSession = tryCreateLoadedRootQuickSession(state, command);
     if (quickSession) {
-      clearCandidatePicker(state);
-      clearXacroRetry(state);
+      clearTransientShellState(state);
       const execution = runBusyOperation(getBusyStateForSession(quickSession), () =>
         executeSessionCommand(state, quickSession)
       );
-      const compactFailurePanel =
-        execution.status !== 0 ? getShellExecutionFailurePanel(execution, quickSession.command) : null;
-      if (compactFailurePanel) {
-        view.output = compactFailurePanel;
-        view.notice = buildShellFailureNotice(
-          compactFailurePanel,
-          `[${quickSession.command}] exited with status ${execution.status}`
-        );
-      } else {
-        const successPanel = getShellExecutionSuccessPanel(state, quickSession, execution);
-        view.output =
-          successPanel ??
-          createOutputPanel(
-            execution.status === 0 ? "result" : "error",
-            buildExecutionPanelText(execution, quickSession.command),
-            execution.status === 0 ? "success" : "error"
-          );
-        view.notice =
-          execution.status === 0
-            ? { kind: "success", text: "run complete" }
-            : { kind: "error", text: `[${quickSession.command}] exited with status ${execution.status}` };
-      }
+      applyTtyExecutionResult(quickSession, execution);
       pushTimelineUserEntry(view, `/${slashCommand}`);
       archiveAssistantStateToTimeline(view);
       return true;
@@ -9350,152 +9195,28 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if (slashCommand === "back") {
       state.rootTask = null;
-      clearCandidatePicker(state);
-      clearXacroRetry(state);
+      clearTransientShellState(state);
       view.notice = { kind: "info", text: "back to tasks" };
       pushTimelineUserEntry(view, "/back");
       archiveAssistantStateToTimeline(view);
       return true;
     }
 
-    if (slashCommand === "exit" || slashCommand === "quit") {
-      requestTtyClose();
-      return true;
-    }
-
-    if (slashCommand === "clear") {
-      view.timeline = [];
-      view.notice = null;
-      view.output = null;
-      return true;
-    }
-
-    if (slashCommand === "last") {
-      view.notice = { kind: "info", text: getLastUrdfMessage(state) };
-      pushTimelineUserEntry(view, "/last");
-      archiveAssistantStateToTimeline(view);
+    if (await handleCommonTtyCommand(slashCommand, state, view, getCommonTtyCommandDeps())) {
       return true;
     }
 
     if (slashCommand === "run") {
+      if (handleTtySelectedRepoIntentChoice(state, view, getTtySelectedRepoIntentChoiceDeps())) {
+        return true;
+      }
+
       clearCandidatePicker(state);
       view.notice = {
         kind: "info",
         text: "nothing is pending here. paste a source or use /",
       };
       pushTimelineUserEntry(view, "/run");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "align") {
-      const alignSuggestedAction = getAlignOrientationSuggestedAction(state.suggestedAction);
-      const busy = alignSuggestedAction
-        ? getSuggestedActionBusyState(alignSuggestedAction)
-        : {
-            title: "orientation",
-            lines: ["checking orientation...", "aligning the working copy when needed..."],
-          };
-      const result = runBusyOperation(busy, () => runAlignOrientationAction(state));
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/align");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "work-one") {
-      const result = runBusyOperation(
-        {
-          title: "choosing",
-          lines: ["opening the robot picker..."],
-        },
-        () => runRepoIntentChoice(state, "work-one")
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/work-one");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "gallery") {
-      const result = runBusyOperation(
-        {
-          title: "gallery",
-          lines: ["generating cards...", "capturing thumbnails in URDF Studio..."],
-        },
-        () => runRepoBatchAction(state, "gallery")
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/gallery");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "gallery-current") {
-      const result = runBusyOperation(
-        {
-          title: "gallery",
-          lines: ["generating the current card...", "capturing the current thumbnail..."],
-        },
-        () => runCurrentGalleryAction(state)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/gallery-current");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "repo-fixes") {
-      const result = runBusyOperation(
-        {
-          title: "repo fixes",
-          lines: ["reviewing shared repo issues...", "showing what ilu can fix safely..."],
-        },
-        () => previewRepoFixesAction(state)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/repo-fixes");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "visualize") {
-      await openVisualizerInTty();
-      pushTimelineUserEntry(view, "/visualize");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "visualize-stop") {
-      await stopVisualizerInTty();
-      pushTimelineUserEntry(view, "/visualize-stop");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "update") {
-      dismissUpdatePrompt(state);
-      try {
-        runUpdateCommand();
-        view.notice = { kind: "success", text: "ilu is up to date." };
-      } catch (error) {
-        view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
-      }
-      pushTimelineUserEntry(view, "/update");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "doctor") {
-      const result = runDoctorShellCommand();
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/doctor");
       archiveAssistantStateToTimeline(view);
       return true;
     }
@@ -9514,28 +9235,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         const execution = runBusyOperation(getBusyStateForSession(state.session), () =>
           executeSessionCommand(state, state.session as ShellSession)
         );
-        const compactFailurePanel =
-          execution.status !== 0 ? getShellExecutionFailurePanel(execution, state.session.command) : null;
-        if (compactFailurePanel) {
-          view.output = compactFailurePanel;
-          view.notice = buildShellFailureNotice(
-            compactFailurePanel,
-            `[${state.session.command}] exited with status ${execution.status}`
-          );
-        } else {
-          const successPanel = getShellExecutionSuccessPanel(state, state.session, execution);
-          view.output =
-            successPanel ??
-            createOutputPanel(
-              execution.status === 0 ? "result" : "error",
-              buildExecutionPanelText(execution, state.session.command),
-              execution.status === 0 ? "success" : "error"
-            );
-          view.notice =
-            execution.status === 0
-              ? { kind: "success", text: "run complete" }
-              : { kind: "error", text: `[${state.session.command}] exited with status ${execution.status}` };
-        }
+        applyTtyExecutionResult(state.session, execution);
         state.session = null;
         state.rootTask = null;
         pushTimelineUserEntry(view, `/${slashCommand}`);
@@ -9584,8 +9284,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     }
 
     if (slashCommand === "back") {
-      clearCandidatePicker(state);
-      clearXacroRetry(state);
+      clearTransientShellState(state);
       state.session = null;
       view.notice = { kind: "info", text: state.rootTask ? `back to /${state.rootTask}` : "back to tasks" };
       setInput(state.rootTask ? "/" : "");
@@ -9596,9 +9295,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
 
     if (slashCommand === "reset") {
       const feedback: ShellFeedback[] = [];
-      clearCandidatePicker(state);
-      clearXacroRetry(state);
-      state.session = createSession(session.command, state, session.label, feedback);
+      openShellSession(state, session.command, session.label, feedback);
       setNoticeFromFeedback(view, feedback);
       setInput(state.session?.pending ? "" : "/");
       pushTimelineUserEntry(view, "/reset");
@@ -9617,67 +9314,15 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return true;
     }
 
-    if (slashCommand === "work-one") {
-      const result = runBusyOperation(
-        {
-          title: "choosing",
-          lines: ["opening the robot picker..."],
-        },
-        () => runRepoIntentChoice(state, "work-one")
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/work-one");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "gallery") {
-      const result = runBusyOperation(
-        {
-          title: "gallery",
-          lines: ["generating cards...", "capturing thumbnails in URDF Studio..."],
-        },
-        () => runRepoBatchAction(state, "gallery")
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/gallery");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "gallery-current") {
-      const result = runBusyOperation(
-        {
-          title: "gallery",
-          lines: ["generating the current card...", "capturing the current thumbnail..."],
-        },
-        () => runCurrentGalleryAction(state)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/gallery-current");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "repo-fixes") {
-      const result = runBusyOperation(
-        {
-          title: "repo fixes",
-          lines: ["reviewing shared repo issues...", "showing what ilu can fix safely..."],
-        },
-        () => previewRepoFixesAction(state)
-      );
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/repo-fixes");
-      archiveAssistantStateToTimeline(view);
+    if (await handleCommonTtyCommand(slashCommand, state, view, getCommonTtyCommandDeps())) {
       return true;
     }
 
     if (slashCommand === "run") {
+      if (handleTtySelectedRepoIntentChoice(state, view, getTtySelectedRepoIntentChoiceDeps())) {
+        return true;
+      }
+
       clearCandidatePicker(state);
       const requirementStatus = getRequirementStatus(session);
       if (!requirementStatus.ready) {
@@ -9716,87 +9361,9 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       const execution = runBusyOperation(getBusyStateForSession(session), () =>
         executeSessionCommand(state, session)
       );
-      const compactFailurePanel = execution.status !== 0 ? getShellExecutionFailurePanel(execution, session.command) : null;
-      if (compactFailurePanel) {
-        view.output = compactFailurePanel;
-        view.notice = buildShellFailureNotice(
-          compactFailurePanel,
-          `[${session.command}] exited with status ${execution.status}`
-        );
-        pushTimelineUserEntry(view, "/run");
-        archiveAssistantStateToTimeline(view);
-        return true;
-      }
-
-      const successPanel = getShellExecutionSuccessPanel(state, session, execution);
-      view.output =
-        successPanel ??
-        createOutputPanel(
-          execution.status === 0 ? "result" : "error",
-          buildExecutionPanelText(execution, session.command),
-          execution.status === 0 ? "success" : "error"
-        );
-      view.notice =
-        execution.status === 0
-          ? { kind: "success", text: "run complete" }
-          : { kind: "error", text: `[${session.command}] exited with status ${execution.status}` };
+      applyTtyExecutionResult(session, execution);
       pushTimelineUserEntry(view, "/run");
       archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "last") {
-      view.notice = { kind: "info", text: getLastUrdfMessage(state) };
-      pushTimelineUserEntry(view, "/last");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "visualize") {
-      await openVisualizerInTty();
-      pushTimelineUserEntry(view, "/visualize");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "visualize-stop") {
-      await stopVisualizerInTty();
-      pushTimelineUserEntry(view, "/visualize-stop");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "update") {
-      dismissUpdatePrompt(state);
-      try {
-        runUpdateCommand();
-        view.notice = { kind: "success", text: "ilu is up to date." };
-      } catch (error) {
-        view.notice = { kind: "error", text: error instanceof Error ? error.message : String(error) };
-      }
-      pushTimelineUserEntry(view, "/update");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "doctor") {
-      const result = runDoctorShellCommand();
-      view.notice = result.notice;
-      view.output = result.panel;
-      pushTimelineUserEntry(view, "/doctor");
-      archiveAssistantStateToTimeline(view);
-      return true;
-    }
-
-    if (slashCommand === "clear") {
-      view.timeline = [];
-      view.notice = null;
-      view.output = null;
-      return true;
-    }
-
-    if (slashCommand === "exit" || slashCommand === "quit") {
-      requestTtyClose();
       return true;
     }
 
@@ -10063,23 +9630,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         if (choice) {
           pushTimelineUserEntry(view, choice);
           clearRepoIntentPrompt(state);
-          const result = runBusyOperation(
-            choice === "gallery"
-              ? {
-                  title: "gallery",
-                  lines: ["selected /gallery", "generating cards...", "capturing thumbnails in URDF Studio..."],
-                }
-              : choice === "repo-fixes"
-                ? {
-                    title: "repo fixes",
-                    lines: ["selected /repo-fixes", "scanning repo candidates...", "applying shared safe fixes..."],
-                  }
-                : {
-                    title: "choosing",
-                    lines: ["selected /work-one", "opening the robot picker..."],
-                  },
-            () => runRepoIntentChoice(state, choice)
-          );
+          const result = runBusyOperation(getRepoIntentChoiceBusyState(choice), () => runRepoIntentChoice(state, choice));
           view.notice = result.notice;
           view.output = result.panel;
           if (result.clearSession) {

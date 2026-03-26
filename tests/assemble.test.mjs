@@ -116,3 +116,41 @@ test("line shell assemble reports the shared workspace explicitly", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test("line shell assembly mode accepts a repo folder without showing the generic repo action chooser", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-shell-assemble-repo-"));
+  const stateRoot = path.join(tempDir, "state");
+
+  try {
+    const repoDir = path.join(tempDir, "demo_pkg");
+    fs.mkdirSync(path.join(repoDir, "urdf"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "package.xml"), "<package><name>demo_pkg</name></package>\n", "utf8");
+    fs.writeFileSync(path.join(repoDir, "urdf", "base.urdf"), baseUrdf, "utf8");
+    fs.writeFileSync(path.join(repoDir, "urdf", "tool.urdf"), toolUrdf, "utf8");
+
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, "shell"],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          HOME: tempDir,
+          ILU_STATE_ROOT: stateRoot,
+          ILU_DISABLE_UPDATE_CHECK: "1",
+        },
+        input: `/assemble\n${repoDir}\n1\n/run\n\n/exit\n`,
+        encoding: "utf8",
+      }
+    );
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /choose the base robot entry for the assembly/i);
+    assert.doesNotMatch(result.stdout, /choose what to do with this repo/i);
+    assert.match(result.stdout, /assembly base source ready/i);
+    assert.match(result.stdout, /entry urdf\/base\.urdf/i);
+    assert.match(result.stdout, /assembly local working copy ready/i);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
