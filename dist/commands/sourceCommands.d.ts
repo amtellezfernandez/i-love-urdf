@@ -1,6 +1,7 @@
 import type { CliArgMap, CliCommandHelpers } from "./commandHelpers";
 import type { SourceCommandHelpers } from "./sourceCommandRuntime";
 declare const SOURCE_COMMAND_HANDLERS: {
+    readonly assemble: (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
     readonly "load-source": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
     readonly "urdf-to-usd": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
     readonly "xacro-to-urdf": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;

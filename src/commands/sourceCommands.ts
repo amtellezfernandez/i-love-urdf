@@ -2,6 +2,7 @@ import type { CliArgMap, CliCommandHelpers } from "./commandHelpers";
 import { SOURCE_GALLERY_COMMAND_HANDLERS } from "./sourceGalleryCommands";
 import { SOURCE_LOAD_COMMAND_HANDLERS } from "./sourceLoadCommands";
 import { SOURCE_REPOSITORY_COMMAND_HANDLERS } from "./sourceRepositoryCommands";
+import { SOURCE_STUDIO_COMMAND_HANDLERS } from "./sourceStudioCommands";
 import type { SourceCommandHandler, SourceCommandHelpers } from "./sourceCommandRuntime";
 import { SOURCE_XACRO_COMMAND_HANDLERS } from "./sourceXacroCommands";
 
@@ -10,6 +11,7 @@ const SOURCE_COMMAND_HANDLERS = {
   ...SOURCE_REPOSITORY_COMMAND_HANDLERS,
   ...SOURCE_XACRO_COMMAND_HANDLERS,
   ...SOURCE_LOAD_COMMAND_HANDLERS,
+  ...SOURCE_STUDIO_COMMAND_HANDLERS,
 } as const satisfies Record<string, SourceCommandHandler>;
 
 export type SourceCommandName = keyof typeof SOURCE_COMMAND_HANDLERS;

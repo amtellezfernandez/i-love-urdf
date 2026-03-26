@@ -87,6 +87,13 @@ exports.ROOT_SHELL_COMMANDS = [
         sessionLabel: "open",
     },
     {
+        name: "assemble",
+        summary: "Create a shared local assembly workspace from one or more URDF files.",
+        command: "assemble",
+        sessionLabel: "assemble",
+        openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+    },
+    {
         name: "inspect",
         summary: "Preview a repo or folder and suggest the best entrypoint.",
         command: "inspect-repo",
@@ -123,6 +130,7 @@ exports.ROOT_SHELL_COMMANDS = [
 ];
 exports.ROOT_START_COMMAND_NAMES = [
     "open",
+    "assemble",
     "inspect",
     "analyze",
     "health",
@@ -130,6 +138,7 @@ exports.ROOT_START_COMMAND_NAMES = [
     "orientation",
 ];
 exports.ROOT_READY_COMMAND_NAMES = [
+    "assemble",
     "analyze",
     "health",
     "validate",
@@ -142,7 +151,7 @@ exports.ROOT_TASK_ACTIONS = {
     open: [
         {
             name: "repo",
-            summary: "Open from GitHub and assemble a working URDF.",
+            summary: "Open from GitHub into a local working copy.",
             command: "load-source",
             sessionLabel: "open",
             openPending: { key: "github", slashName: "repo" },
@@ -160,6 +169,13 @@ exports.ROOT_TASK_ACTIONS = {
             command: "load-source",
             sessionLabel: "open",
             openPending: { key: "path", slashName: "file" },
+        },
+        {
+            name: "assemble",
+            summary: "Create a local assembly workspace from one or more URDF files.",
+            command: "assemble",
+            sessionLabel: "assemble",
+            openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
         },
     ],
     inspect: [
@@ -256,6 +272,7 @@ exports.ROOT_TASK_ACTIONS = {
 };
 exports.COMMAND_SUMMARY_OVERRIDES = {
     "load-source": "Load from GitHub, a local repo, or a local file.",
+    assemble: "Create a shared local assembly workspace from one or more URDF files.",
     "inspect-repo": "Preview a local or GitHub repo and suggest the right URDF or XACRO entrypoint.",
     "xacro-to-urdf": "Expand a XACRO file, repo, or GitHub source into URDF.",
     "repair-mesh-refs": "Repair or normalize mesh references in a local or GitHub repo.",
@@ -304,6 +321,7 @@ exports.ADVANCED_OPTION_KEYS = new Set([
     "wheel",
 ]);
 exports.SESSION_OPTION_ORDER = {
+    assemble: ["urdf", "attach", "name"],
     "load-source": ["github", "path", "entry", "out", "ref", "subdir", "args", "python", "wheel", "token", "root"],
     "inspect-repo": ["github", "local", "path", "ref", "max-candidates", "token", "out"],
     "repair-mesh-refs": ["github", "local", "urdf", "path", "ref", "token", "out"],
@@ -321,6 +339,9 @@ exports.MUTUALLY_EXCLUSIVE_OPTION_GROUPS = {
     "urdf-to-usd": [["urdf", "path"]],
 };
 exports.SESSION_SLASH_ALIASES = {
+    assemble: {
+        file: "urdf",
+    },
     "load-source": {
         repo: "github",
         local: "path",

@@ -11,5 +11,11 @@ export type ExtractZipArchiveResult = {
     archiveRoot: string;
     workingPath: string;
 };
+export type ZipArchiveMetadata = {
+    compressedBytes: number;
+    expandedBytes: number;
+    entryCount: number;
+};
 export declare const sanitizeArchiveEntryPath: (entryName: string) => string;
 export declare const extractZipArchiveToTempRoot: (archivePath: string, options?: ExtractZipArchiveOptions) => ExtractZipArchiveResult;
+export declare const inspectZipArchiveMetadata: (archivePath: string) => ZipArchiveMetadata;

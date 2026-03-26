@@ -1554,7 +1554,7 @@ const suggestedOrientationTranscript = execFileSync(process.execPath, [cliPath, 
   input: `${yUpOrientationSourcePath}\n/exit\n`,
 });
 if (
-  !suggestedOrientationTranscript.includes("orientation differs from +z-up / +x-forward") ||
+  !suggestedOrientationTranscript.includes("orientation differs from the default target +z-up / +x-forward") ||
   !suggestedOrientationTranscript.includes("recommended: open URDF Studio before aligning orientation") ||
   !suggestedOrientationTranscript.includes("open URDF Studio before aligning orientation?")
 ) {
@@ -1707,7 +1707,10 @@ if (
   !zipDropTranscript.includes("validation and health check passed") ||
   !zipDropTranscript.includes("opened archive") ||
   !zipDropTranscript.includes(droppedZipPath) ||
-  !zipDropTranscript.includes("loaded urdf/robot.urdf")
+  !zipDropTranscript.includes("loaded urdf/robot.urdf") ||
+  !zipDropTranscript.includes("archive opened as an extracted working copy") ||
+  !zipDropTranscript.includes("extracted folder") ||
+  !zipDropTranscript.includes("imported from")
 ) {
   throw new Error("ilu shell zip-drop smoke test failed");
 }

@@ -34,6 +34,7 @@ export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
 export type RepositoryInspectionSummary = {
   totalEntries: number;
   totalFiles: number;
+  totalBytes?: number;
   candidateCount: number;
   inspectedCandidateCount: number;
   primaryCandidatePath: string | null;
@@ -171,6 +172,10 @@ export const inspectRepositoryFiles = async <T extends InspectableRepositoryFile
 ): Promise<RepositoryInspectionSummary> => {
   const totalEntries = files.length;
   const totalFiles = files.filter((file) => file.type === "file").length;
+  const totalBytes = files.reduce((sum, file) => {
+    const fileSize = typeof (file as { size?: number }).size === "number" ? (file as { size?: number }).size : undefined;
+    return sum + (file.type === "file" && Number.isFinite(fileSize) && (fileSize ?? 0) > 0 ? (fileSize as number) : 0);
+  }, 0);
   const candidates = findRepositoryUrdfCandidates(files).filter((candidate) =>
     options.candidateFilter ? options.candidateFilter(candidate) : true
   );
@@ -187,6 +192,7 @@ export const inspectRepositoryFiles = async <T extends InspectableRepositoryFile
   return {
     totalEntries,
     totalFiles,
+    totalBytes,
     candidateCount: candidates.length,
     inspectedCandidateCount: Math.min(candidates.length, maxCandidatesToInspect),
     primaryCandidatePath: candidates[0]?.path ?? null,

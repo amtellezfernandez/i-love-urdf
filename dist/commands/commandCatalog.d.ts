@@ -117,6 +117,10 @@ export declare const COMMAND_CATALOG: {
         readonly sections: readonly ["edit"];
         readonly usage: readonly ["  set-material-color --urdf <path> --link <name> --material <name> --color <#RRGGBB> [--out <path>]"];
     };
+    readonly "merge-urdf": {
+        readonly sections: readonly ["edit"];
+        readonly usage: readonly ["  merge-urdf --urdf <path> --attach <path[,path]> [--name <robot>] [--spacing <n>] [--out <path>]"];
+    };
     readonly "mesh-to-assets": {
         readonly sections: readonly ["optimize"];
         readonly usage: readonly ["  mesh-to-assets --urdf <path> [--out <path>]"];
@@ -148,6 +152,10 @@ export declare const COMMAND_CATALOG: {
     readonly "load-source": {
         readonly sections: readonly ["load"];
         readonly usage: readonly ["  load-source --path <local-file-or-dir> [--entry <repo-path>] [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]", "  load-source --github <owner/repo|url> [--entry <repo-path>] [--ref <branch>] [--subdir <path>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]"];
+    };
+    readonly assemble: {
+        readonly sections: readonly ["load"];
+        readonly usage: readonly ["  assemble --urdf <path> [--attach <path[,path]>] [--name <label>]"];
     };
     readonly "rename-joint": {
         readonly sections: readonly ["edit"];

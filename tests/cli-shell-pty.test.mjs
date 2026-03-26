@@ -270,7 +270,7 @@ ptyTest("TTY shell lets slash commands bypass recommendation prompts", async () 
   });
 
   assert.equal(result.code, 0);
-  assert.match(result.sanitizedOutput, /align orientation to \+z-up \/ \+x-forward now\?/i);
+  assert.match(result.sanitizedOutput, /align orientation to the default target \+z-up \/ \+x-forward now\?/i);
   assert.match(result.sanitizedOutput, /\/orientation/i);
   assert.match(result.sanitizedOutput, /press Enter or type \/run/i);
 });
@@ -327,7 +327,7 @@ ptyTest("TTY shell accepts the suggested orientation fix after skipping URDF Stu
   assert.match(result.sanitizedOutput, /open URDF Studio before aligning orientation\?/i);
   assert.match(result.sanitizedOutput, /1\.\s+Open Studio/i);
   assert.match(result.sanitizedOutput, /2\.\s+Continue here/i);
-  assert.match(result.sanitizedOutput, /align orientation to \+z-up \/ \+x-forward now\?/i);
+  assert.match(result.sanitizedOutput, /align orientation to the default target \+z-up \/ \+x-forward now\?/i);
   assert.match(result.sanitizedOutput, /1\.\s+Align now/i);
   assert.match(result.sanitizedOutput, /2\.\s+Not now/i);
   assert.match(result.sanitizedOutput, /aligning orientation/i);

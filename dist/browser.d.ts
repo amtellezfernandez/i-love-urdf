@@ -1,4 +1,5 @@
 export { coerceIluSharedLoadedSource, coerceIluSharedSessionSnapshot, getIluSharedSessionGitHubSource, ILU_SHARED_SESSION_SCHEMA, ILU_SHARED_SESSION_SCHEMA_VERSION, type IluSharedLoadedSource, type IluSharedLoadedSourceKind, type IluSharedSessionGitHubSource, type IluSharedSessionSnapshot, } from "./session/sharedSessionContract";
+export { buildIluAssemblyStudioUrl, coerceIluAssemblySessionSnapshot, ILU_ASSEMBLY_SESSION_SCHEMA, ILU_ASSEMBLY_SESSION_SCHEMA_VERSION, type IluAssemblySessionRobot, type IluAssemblySessionSnapshot, type IluAssemblySessionSource, } from "./session/assemblySessionContract";
 export { parseURDF, serializeURDF, type ParsedURDF, } from "./parsing/urdfParser";
 export { parseLinkData, parseLinkDataFromDocument, type CollisionData, type InertialData, type LinkData, type OriginData, type VisualData, } from "./parsing/parseLinkData";
 export { parseSensors, parseSensorsFromDocument, type ParsedSensor, type SensorNoise, } from "./parsing/parseSensors";
@@ -23,6 +24,8 @@ export { normalizeJointAxis, normalizeJointAxes, snapJointAxes, type AxisCorrect
 export { prettyPrintURDF, } from "./utils/prettyPrintURDF";
 export { sanitizeNames, sanitizeUrdfName, type SanitizeNamesOptions, } from "./utils/urdfNames";
 export { alignJointToLocalZ, canonicalizeJointFrames, type CanonicalizeJointFrameOptions, type CanonicalizeJointFrameResult, type CanonicalizeJointFrameSkip, } from "./transforms/canonicalizeJointFrames";
+export { createAssemblySpec, validateAssemblySpec, type AssemblyMountOrigin, type AssemblyPoseLike, type AssemblySpec, type AssemblySpecRobot, type AssemblySpecValidationResult, type CreateAssemblySpecModel, type CreateAssemblySpecOptions, } from "./transforms/assemblySpec";
+export { buildAssemblyUrdf, mergeAssemblySpec, mergeUrdfs, type AssemblyUrdfModel, type BuildAssemblyUrdfOptions, type BuildAssemblyUrdfResult, type MergeUrdfModel, type MergeUrdfsOptions, type MergeUrdfsResult, } from "./transforms/mergeUrdfs";
 export { convertURDFToUSD, createInlineUsdMeshPrim, createUsdStage, mapUrdfToUsdPrim, type ConvertURDFToUSDOptions, type CreateUsdStageOptions, type InlineUsdMesh, type InlineUsdMeshPrimOptions, type MapUrdfToUsdPrimOptions, type ResolvedUsdMesh, type URDFToUSDConversionResult, type UsdMeshResolveRequest, type UsdPrim, type UsdQuaternion, type UsdStage, type UsdUpAxis, } from "./convert/urdfToUSD";
 export { buildOrientationMappingRotation, applyGlobalRotation, applyOrientationToRobot, rotateRobot90Degrees, type AxisSpec, } from "./utils/rotateRobot";
 export { rotateInertiaTensor, fixInertiaThresholds, type InertiaTensor, type Mat3, type Vec3, } from "./utils/rotationMath";

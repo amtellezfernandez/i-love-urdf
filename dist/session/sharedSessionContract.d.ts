@@ -6,6 +6,7 @@ export type IluSharedLoadedSource = {
     source: IluSharedLoadedSourceKind;
     urdfPath: string;
     localPath?: string;
+    extractedArchivePath?: string;
     githubRef?: string;
     githubRevision?: string;
     repositoryUrdfPath?: string;

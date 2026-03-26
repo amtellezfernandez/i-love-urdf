@@ -94,6 +94,34 @@ const extensionNoiseUrdf = `<?xml version="1.0" encoding="UTF-8"?>
   </gazebo>
 </robot>`;
 
+const mergeFixtureBaseUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="base_robot">
+  <material name="steel">
+    <color rgba="0.8 0.8 0.8 1"/>
+  </material>
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="1 1 1"/>
+      </geometry>
+      <material name="steel"/>
+    </visual>
+  </link>
+</robot>`;
+
+const mergeFixtureToolUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="tool_robot">
+  <material name="steel">
+    <color rgba="0.2 0.2 0.2 1"/>
+  </material>
+  <link name="tool_base"/>
+  <link name="finger_link"/>
+  <joint name="finger_joint" type="fixed">
+    <parent link="tool_base"/>
+    <child link="finger_link"/>
+  </joint>
+</robot>`;
+
 test("canonical ordering is idempotent", () => {
   const first = lib.canonicalOrderURDF(canonicalOrderingUrdf);
   const second = lib.canonicalOrderURDF(first);
@@ -221,4 +249,83 @@ test("analysis, orientation, and USD conversion ignore extension-only link and j
   assert.equal(mjcf.stats.jointsConverted, 1);
   assert.equal(mjcf.mjcfContent.includes("plugin_wheel_link"), false);
   assert.equal(mjcf.mjcfContent.includes("plugin_wheel_joint"), false);
+});
+
+test("mergeUrdfs prefixes conflicting names and mounts robots under assembly_root", () => {
+  const result = lib.mergeUrdfs(
+    [
+      {
+        id: "base",
+        name: "base.urdf",
+        urdfContent: mergeFixtureBaseUrdf,
+        originX: 0,
+      },
+      {
+        id: "tool",
+        name: "tool.urdf",
+        urdfContent: mergeFixtureToolUrdf,
+        originX: 2.5,
+      },
+    ],
+    { robotName: "combined_robot" }
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.robotName, "combined_robot");
+  assert.equal(result.merged.length, 2);
+
+  const parsed = lib.parseURDF(result.content);
+  assert.equal(parsed.isValid, true);
+  const robot = parsed.document.querySelector("robot");
+  assert.equal(robot?.getAttribute("name"), "combined_robot");
+  assert.ok(parsed.document.querySelector('link[name="assembly_root"]'));
+  assert.ok(parsed.document.querySelector('link[name="base__base_link"]'));
+  assert.ok(parsed.document.querySelector('link[name="tool__tool_base"]'));
+  assert.ok(parsed.document.querySelector('joint[name="base__mount"]'));
+  assert.ok(parsed.document.querySelector('joint[name="tool__mount"]'));
+  assert.ok(parsed.document.querySelector('joint[name="tool__finger_joint"]'));
+  assert.equal(
+    parsed.document.querySelector('material[name="base__steel"]')?.getAttribute("name"),
+    "base__steel"
+  );
+  assert.equal(
+    parsed.document.querySelector('material[name="tool__steel"]')?.getAttribute("name"),
+    "tool__steel"
+  );
+  assert.equal(
+    parsed.document.querySelector('joint[name="tool__mount"] origin')?.getAttribute("xyz"),
+    "2.5 0 0"
+  );
+});
+
+test("createAssemblySpec preserves visual assembly poses for export", () => {
+  const spec = lib.createAssemblySpec(
+    [
+      {
+        id: "base",
+        name: "base.urdf",
+        urdfContent: mergeFixtureBaseUrdf,
+        isPrimary: true,
+      },
+      {
+        id: "tool",
+        name: "tool.urdf",
+        urdfContent: mergeFixtureToolUrdf,
+      },
+    ],
+    {
+      robotName: "demo assembly",
+      poses: {
+        base: { x: 0, y: 0, z: 0, yaw: 0 },
+        tool: { x: 1.2, y: 0.1, z: -0.4, yaw: 0.5 },
+      },
+      primaryRobotId: "base",
+    }
+  );
+
+  assert.equal(spec.robotName, "demo_assembly");
+  assert.deepEqual(spec.robots[1]?.mount, {
+    xyz: [1.2, 0.1, -0.4],
+    rpy: [0, 0.5, 0],
+  });
 });

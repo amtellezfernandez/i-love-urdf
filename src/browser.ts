@@ -10,6 +10,15 @@ export {
   type IluSharedSessionSnapshot,
 } from "./session/sharedSessionContract";
 export {
+  buildIluAssemblyStudioUrl,
+  coerceIluAssemblySessionSnapshot,
+  ILU_ASSEMBLY_SESSION_SCHEMA,
+  ILU_ASSEMBLY_SESSION_SCHEMA_VERSION,
+  type IluAssemblySessionRobot,
+  type IluAssemblySessionSnapshot,
+  type IluAssemblySessionSource,
+} from "./session/assemblySessionContract";
+export {
   parseURDF,
   serializeURDF,
   type ParsedURDF,
@@ -160,6 +169,28 @@ export {
   type CanonicalizeJointFrameResult,
   type CanonicalizeJointFrameSkip,
 } from "./transforms/canonicalizeJointFrames";
+export {
+  createAssemblySpec,
+  validateAssemblySpec,
+  type AssemblyMountOrigin,
+  type AssemblyPoseLike,
+  type AssemblySpec,
+  type AssemblySpecRobot,
+  type AssemblySpecValidationResult,
+  type CreateAssemblySpecModel,
+  type CreateAssemblySpecOptions,
+} from "./transforms/assemblySpec";
+export {
+  buildAssemblyUrdf,
+  mergeAssemblySpec,
+  mergeUrdfs,
+  type AssemblyUrdfModel,
+  type BuildAssemblyUrdfOptions,
+  type BuildAssemblyUrdfResult,
+  type MergeUrdfModel,
+  type MergeUrdfsOptions,
+  type MergeUrdfsResult,
+} from "./transforms/mergeUrdfs";
 export {
   convertURDFToUSD,
   createInlineUsdMeshPrim,

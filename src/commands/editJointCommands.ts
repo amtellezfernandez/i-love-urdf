@@ -1,4 +1,6 @@
+import * as path from "node:path";
 import {
+  mergeUrdfs,
   removeJointsFromUrdf,
   renameJointInUrdf,
   renameLinkInUrdf,
@@ -11,6 +13,7 @@ import {
 } from "../index";
 import { canonicalizeJointFrames } from "../transforms/canonicalizeJointFrames";
 import {
+  emitJson,
   emitWrittenPayload,
   readSelectedJointNames,
   type EditCommandHandler,
@@ -100,6 +103,39 @@ export const EDIT_JOINT_COMMAND_HANDLERS = {
     emitWrittenPayload(helpers, outPath, result.content, result);
   },
 
+  "merge-urdf": ({ args, helpers, urdfContent, urdfPath, outPath }) => {
+    const attachPaths = helpers.getDelimitedStringArg(args, "attach");
+    if (attachPaths.length === 0) {
+      helpers.fail("merge-urdf requires --attach with at least one URDF path.");
+    }
+
+    const spacing = helpers.getOptionalNumberArg(args, "spacing");
+    const result = mergeUrdfs(
+      [
+        {
+          id: path.basename(urdfPath, path.extname(urdfPath)) || "primary_robot",
+          name: path.basename(urdfPath),
+          urdfContent,
+          originX: 0,
+        },
+        ...attachPaths.map((attachPath) => ({
+          id: path.basename(attachPath, path.extname(attachPath)) || "attached_robot",
+          name: path.basename(attachPath),
+          urdfContent: helpers.readText(attachPath),
+        })),
+      ],
+      {
+        robotName: helpers.getOptionalStringArg(args, "name"),
+        spacing,
+      }
+    );
+    if (!result.success) {
+      emitJson({ ...result, outPath: null });
+      return;
+    }
+    emitWrittenPayload(helpers, outPath, result.content, result);
+  },
+
   "rename-joint": ({ args, helpers, urdfContent, outPath }) => {
     const result = renameJointInUrdf(
       urdfContent,
@@ -126,6 +162,7 @@ export const EDIT_JOINT_COMMAND_HANDLERS = {
   | "remove-joints"
   | "reassign-joint"
   | "set-material-color"
+  | "merge-urdf"
   | "rename-joint"
   | "rename-link",
   EditCommandHandler

@@ -86,6 +86,10 @@ exports.inspectRepositoryCandidates = inspectRepositoryCandidates;
 const inspectRepositoryFiles = async (files, readText, options = {}) => {
     const totalEntries = files.length;
     const totalFiles = files.filter((file) => file.type === "file").length;
+    const totalBytes = files.reduce((sum, file) => {
+        const fileSize = typeof file.size === "number" ? file.size : undefined;
+        return sum + (file.type === "file" && Number.isFinite(fileSize) && (fileSize ?? 0) > 0 ? fileSize : 0);
+    }, 0);
     const candidates = (0, repositoryUrdfDiscovery_1.findRepositoryUrdfCandidates)(files).filter((candidate) => options.candidateFilter ? options.candidateFilter(candidate) : true);
     const inspectedCandidates = await (0, exports.inspectRepositoryCandidates)(candidates, files, readText, {
         maxCandidatesToInspect: options.maxCandidatesToInspect,
@@ -96,6 +100,7 @@ const inspectRepositoryFiles = async (files, readText, options = {}) => {
     return {
         totalEntries,
         totalFiles,
+        totalBytes,
         candidateCount: candidates.length,
         inspectedCandidateCount: Math.min(candidates.length, maxCandidatesToInspect),
         primaryCandidatePath: candidates[0]?.path ?? null,

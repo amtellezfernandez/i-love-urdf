@@ -19,6 +19,12 @@ export type ExtractZipArchiveResult = {
   workingPath: string;
 };
 
+export type ZipArchiveMetadata = {
+  compressedBytes: number;
+  expandedBytes: number;
+  entryCount: number;
+};
+
 const resolveExtractedArchiveRoot = (archiveRoot: string): string => {
   const entries = fs
     .readdirSync(archiveRoot, { withFileTypes: true })
@@ -115,4 +121,23 @@ export const extractZipArchiveToTempRoot = (
     fs.rmSync(archiveRoot, { recursive: true, force: true });
     throw error;
   }
+};
+
+export const inspectZipArchiveMetadata = (archivePath: string): ZipArchiveMetadata => {
+  const archive = new AdmZip(archivePath);
+  const entries = archive.getEntries();
+  const compressedBytes = fs.statSync(archivePath).size;
+  const expandedBytes = entries.reduce((sum, entry) => {
+    if (entry.isDirectory) {
+      return sum;
+    }
+    const size = Number(entry.header.size ?? 0);
+    return sum + (Number.isFinite(size) && size > 0 ? size : 0);
+  }, 0);
+
+  return {
+    compressedBytes,
+    expandedBytes,
+    entryCount: entries.length,
+  };
 };

@@ -13,6 +13,7 @@ export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
 export type RepositoryInspectionSummary = {
     totalEntries: number;
     totalFiles: number;
+    totalBytes?: number;
     candidateCount: number;
     inspectedCandidateCount: number;
     primaryCandidatePath: string | null;

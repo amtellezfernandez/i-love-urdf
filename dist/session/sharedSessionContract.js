@@ -21,6 +21,7 @@ const coerceIluSharedLoadedSource = (raw, fallbackUrdfPath) => {
         source: raw.source,
         urdfPath: typeof raw.urdfPath === "string" ? raw.urdfPath : fallbackUrdfPath,
         localPath: typeof raw.localPath === "string" ? raw.localPath : undefined,
+        extractedArchivePath: typeof raw.extractedArchivePath === "string" ? raw.extractedArchivePath : undefined,
         githubRef: typeof raw.githubRef === "string" ? raw.githubRef : undefined,
         githubRevision: typeof raw.githubRevision === "string" ? raw.githubRevision : undefined,
         repositoryUrdfPath: typeof raw.repositoryUrdfPath === "string" ? raw.repositoryUrdfPath : undefined,

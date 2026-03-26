@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import * as process from "node:process";
-import { extractZipArchiveToTempRoot } from "./archiveExtraction";
+import { extractZipArchiveToTempRoot, inspectZipArchiveMetadata } from "./archiveExtraction";
 import { CLI_HELP_SECTIONS, type SupportedCommandName } from "./commandCatalog";
 import {
   COMMAND_COMPLETION_SPEC_BY_NAME,
@@ -71,6 +71,7 @@ import type {
   FreeformRootPlan,
   FreeformSessionTarget,
   Keypress,
+  LoadPreflightPromptState,
   LocalPathDrop,
   PendingValuePrompt,
   RepoIntentChoiceName,
@@ -206,6 +207,7 @@ const clearInteractiveFlowState = (state: ShellState) => {
   clearCandidatePicker(state);
   clearRepoIntentPrompt(state);
   clearRepoSourceContext(state);
+  clearLoadPreflightPrompt(state);
   state.visualizerPromptResolved = false;
   clearXacroRetry(state);
   state.session = null;
@@ -499,10 +501,16 @@ type TtyChoicePrompt =
       prompt: SuggestedActionPrompt;
       text: string;
       options: readonly [string, string];
+    }
+  | {
+      kind: "load-preflight";
+      prompt: LoadPreflightPromptState;
+      text: string;
+      options: readonly [string, string];
     };
 
 const getActiveTtyChoicePrompt = (
-  state: Pick<ShellState, "savePrompt" | "exitPrompt" | "suggestedAction" | "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">
+  state: Pick<ShellState, "savePrompt" | "exitPrompt" | "suggestedAction" | "loadPreflightPrompt" | "session" | "rootTask" | "repoIntentPrompt" | "candidatePicker">
 ): TtyChoicePrompt | null => {
   const activeSavePrompt = getActiveSavePrompt(state);
   if (activeSavePrompt?.phase === "confirm") {
@@ -523,6 +531,15 @@ const getActiveTtyChoicePrompt = (
       options: activeExitPrompt.canStopVisualizer
         ? ["Quit Studio and exit", "Keep Studio open"]
         : ["Exit shell", "Stay here"],
+    };
+  }
+
+  if (state.loadPreflightPrompt) {
+    return {
+      kind: "load-preflight",
+      prompt: state.loadPreflightPrompt,
+      text: state.loadPreflightPrompt.prompt,
+      options: [state.loadPreflightPrompt.acceptOptionLabel, state.loadPreflightPrompt.skipOptionLabel],
     };
   }
 
@@ -550,6 +567,10 @@ const getTtyChoicePromptSelectionKey = (prompt: TtyChoicePrompt | null): string 
 
   if (prompt.kind === "exit") {
     return `exit:${prompt.prompt.canStopVisualizer ? "managed" : "external"}:${prompt.prompt.sessionId ?? ""}`;
+  }
+
+  if (prompt.kind === "load-preflight") {
+    return `load-preflight:${prompt.prompt.sourceKind}:${prompt.prompt.sourceLabel}:${prompt.prompt.lines.join("|")}`;
   }
 
   return `suggested:${prompt.prompt.kind}:${prompt.prompt.prompt}:${prompt.prompt.acceptOptionLabel}:${prompt.prompt.skipOptionLabel}`;
@@ -590,6 +611,66 @@ const getSaveDecisionHint = (mode: "tty" | "line" = "tty"): string =>
   mode === "tty"
     ? "Up/down choose. Enter confirms. 1 saves the working URDF. 2 exits without saving."
     : "Press Enter to choose a save path, or type n to exit without saving.";
+
+const formatByteEstimate = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "unknown";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+};
+
+const getSessionStorageRoot = (): string => path.join(os.homedir(), ".i-love-urdf", "sessions");
+
+const buildLoadPreflightPanel = (prompt: LoadPreflightPromptState): AutoPreviewPanel => ({
+  title: "load locally",
+  kind: "info",
+  lines: [prompt.sourceLabel, ...prompt.lines],
+});
+
+const clearLoadPreflightPrompt = (state: ShellState) => {
+  state.loadPreflightPrompt = null;
+};
+
+const printLoadPreflightPrompt = (prompt: LoadPreflightPromptState, mode: "line" | "tty" = "line") => {
+  printOutputPanel(buildLoadPreflightPanel(prompt));
+  process.stdout.write(`${SHELL_THEME.muted(prompt.prompt)}\n`);
+  process.stdout.write(
+    `  ${SHELL_THEME.command(mode === "line" ? "Enter" : "1")} ${SHELL_THEME.muted("loads locally")}  ${SHELL_THEME.command(mode === "line" ? "n" : "2")} ${SHELL_THEME.muted("cancels")}\n`
+  );
+};
+
+const createLoadPreflightPrompt = (params: {
+  sourceKind: "archive" | "github";
+  sourceLabel: string;
+  lines: string[];
+  args: Map<string, string | boolean>;
+  skipZipPreflight?: boolean;
+  skipWorkingCopyPreflight?: boolean;
+}): LoadPreflightPromptState => ({
+  sourceKind: params.sourceKind,
+  sourceLabel: params.sourceLabel,
+  lines: params.lines,
+  prompt: "load this source into local working storage?",
+  acceptOptionLabel: "Load locally",
+  skipOptionLabel: "Cancel",
+  args: params.args,
+  skipZipPreflight: params.skipZipPreflight,
+  skipWorkingCopyPreflight: params.skipWorkingCopyPreflight,
+});
+
+const getLoadPreflightDecisionHint = (mode: "tty" | "line" = "tty"): string =>
+  mode === "tty"
+    ? "Up/down choose. Enter confirms. 1 loads locally. 2 cancels."
+    : "Press Enter to load locally, or type n to cancel.";
 
 const getVisualizerDisconnectNotice = (state: Pick<ShellState, "sharedSessionId">): ShellFeedback => ({
   kind: "info",
@@ -752,12 +833,24 @@ const getLoadedSourceContextRows = (
   } else if (loadedSource.source === "local-repo") {
     rows.push({
       label: "source",
-      value: `folder ${quoteForPreview(loadedSource.localPath ?? loadedSource.urdfPath)}`,
+      value: loadedSource.extractedArchivePath
+        ? `extracted folder ${quoteForPreview(loadedSource.localPath ?? loadedSource.urdfPath)}`
+        : `folder ${quoteForPreview(loadedSource.localPath ?? loadedSource.urdfPath)}`,
     });
   } else {
     rows.push({
       label: "source",
-      value: describeLocalSourceValue(loadedSource.localPath ?? loadedSource.urdfPath),
+      value: loadedSource.extractedArchivePath
+        ? `extracted file ${quoteForPreview(loadedSource.localPath ?? loadedSource.urdfPath)}`
+        : describeLocalSourceValue(loadedSource.localPath ?? loadedSource.urdfPath),
+    });
+  }
+
+  if (loadedSource.extractedArchivePath) {
+    rows.push({
+      label: "imported from",
+      value: `archive ${quoteForPreview(loadedSource.extractedArchivePath)}`,
+      tone: "muted",
     });
   }
 
@@ -854,6 +947,10 @@ const getSessionSourceValue = (
 };
 
 const getSessionPurposeText = (session: ShellSession): string => {
+  if (session.command === "assemble") {
+    return "Create a shared local assembly workspace from one or more URDF files.";
+  }
+
   if (session.command === "urdf-to-mjcf") {
     return "Export the current URDF as MJCF.";
   }
@@ -893,6 +990,10 @@ const getSessionNextText = (session: ShellSession): string => {
     return "paste repo or local folder";
   }
 
+  if (session.label === "assemble" && session.args.size === 0) {
+    return "paste a base URDF path";
+  }
+
   const requirementStatus = getRequirementStatus(session);
   if (requirementStatus.ready) {
     if (session.command === "urdf-to-mjcf" || session.command === "urdf-to-usd") {
@@ -912,6 +1013,20 @@ const getSessionContextRows = (
   session: ShellSession
 ): readonly ShellContextRow[] => {
   const rows: ShellContextRow[] = [];
+  const getExtractedArchivePathForSource = (candidatePath: string): string | undefined => {
+    const loadedSource = state.loadedSource;
+    if (!loadedSource?.extractedArchivePath || !loadedSource.localPath) {
+      return undefined;
+    }
+    if (loadedSource.localPath === candidatePath) {
+      return loadedSource.extractedArchivePath;
+    }
+    const normalizedCandidate = path.resolve(candidatePath);
+    const normalizedLoaded = path.resolve(loadedSource.localPath);
+    return normalizedLoaded.startsWith(`${normalizedCandidate}${path.sep}`)
+      ? loadedSource.extractedArchivePath
+      : undefined;
+  };
   const githubSource = getSessionSourceValue(session, ["github"]);
   const localSource = getSessionSourceValue(session, ["local"]);
   const pathSource = getSessionSourceValue(session, ["path"]);
@@ -929,9 +1044,27 @@ const getSessionContextRows = (
   if (githubSource) {
     rows.push({ label: "source", value: `GitHub ${quoteForPreview(githubSource)}` });
   } else if (localSource) {
-    rows.push({ label: "source", value: `folder ${quoteForPreview(localSource)}` });
+    const extractedArchivePath = getExtractedArchivePathForSource(localSource);
+    rows.push({
+      label: "source",
+      value: extractedArchivePath
+        ? `extracted folder ${quoteForPreview(localSource)}`
+        : `folder ${quoteForPreview(localSource)}`,
+    });
+    if (extractedArchivePath) {
+      rows.push({ label: "imported from", value: `archive ${quoteForPreview(extractedArchivePath)}`, tone: "muted" });
+    }
   } else if (pathSource) {
-    rows.push({ label: "source", value: describeLocalSourceValue(pathSource) });
+    const extractedArchivePath = getExtractedArchivePathForSource(pathSource);
+    rows.push({
+      label: "source",
+      value: extractedArchivePath
+        ? `extracted folder ${quoteForPreview(pathSource)}`
+        : describeLocalSourceValue(pathSource),
+    });
+    if (extractedArchivePath) {
+      rows.push({ label: "imported from", value: `archive ${quoteForPreview(extractedArchivePath)}`, tone: "muted" });
+    }
   } else if (xacroSource) {
     rows.push({ label: "source", value: `xacro ${quoteForPreview(xacroSource)}` });
   } else if (urdfSource && !canReuseLoadedSource) {
@@ -945,6 +1078,29 @@ const getSessionContextRows = (
     const inlineUrdfValue = quoteForPreview(urdfSource);
     if (!sourceValue.includes(inlineUrdfValue)) {
       rows.push({ label: "working urdf", value: inlineUrdfValue });
+    }
+  }
+
+  if (session.command === "assemble") {
+    const attachValue = session.args.get("attach");
+    if (typeof attachValue === "string" && attachValue.trim().length > 0) {
+      const attachments = attachValue
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+      rows.push({
+        label: "attach",
+        value:
+          attachments.length <= 2
+            ? attachments.map((entry) => quoteForPreview(entry)).join(", ")
+            : `${quoteForPreview(attachments[0] ?? "")}, ${quoteForPreview(attachments[1] ?? "")}, +${attachments.length - 2} more`,
+        tone: "muted",
+      });
+    }
+
+    const assemblyName = session.args.get("name");
+    if (typeof assemblyName === "string" && assemblyName.trim().length > 0) {
+      rows.push({ label: "label", value: quoteForPreview(assemblyName), tone: "muted" });
     }
   }
 
@@ -983,7 +1139,7 @@ const getPersistentTtyContextRows = (
     return rows;
   }
 
-  const importantLabels = new Set(["source", "entry", "selected", "output", "working urdf", "next"]);
+  const importantLabels = new Set(["source", "imported from", "entry", "selected", "output", "working urdf", "next"]);
   const compactRows = rows.filter((row) => importantLabels.has(row.label));
   return compactRows.length > 0 ? compactRows : rows;
 };
@@ -1011,6 +1167,10 @@ const buildSessionHeadline = (session: ShellSession): string => {
     case "open": {
       const source = getSessionSourceValue(session, ["github", "path"]);
       return source ? `open ${quoteForPreview(source)}` : "open a repo, folder, or file";
+    }
+    case "assemble": {
+      const source = getSessionSourceValue(session, ["urdf"]);
+      return source ? `assemble from ${quoteForPreview(source)}` : "assemble local URDF files";
     }
     case "inspect": {
       const source = getSessionSourceValue(session, ["github", "local", "urdf"]);
@@ -1087,6 +1247,14 @@ const getOptionSummary = (
 
   if (key === "urdf") {
     return "URDF file path.";
+  }
+
+  if (key === "attach") {
+    return "Additional URDF file paths to include in the assembly.";
+  }
+
+  if (key === "name") {
+    return "Label for the shared assembly workspace.";
   }
 
   if (key === "xacro") {
@@ -1725,6 +1893,28 @@ const getPendingValuePrompt = (
     };
   }
 
+  if (key === "attach") {
+    return {
+      key,
+      slashName,
+      title: "Attached URDF path",
+      examples: ["./tool.urdf", "./tool.urdf,./fixture.urdf"],
+      notes: [],
+      expectsPath: true,
+    };
+  }
+
+  if (key === "name") {
+    return {
+      key,
+      slashName,
+      title: "Assembly label",
+      examples: ["bench assembly"],
+      notes: [],
+      expectsPath: false,
+    };
+  }
+
   if (key === "xacro") {
     return {
       key,
@@ -1830,6 +2020,23 @@ const setSessionValue = (
   }
 
   clearMutuallyExclusiveArgs(session, key);
+  if (session.command === "assemble" && key === "attach") {
+    const existingAttach = session.args.get("attach");
+    if (typeof existingAttach === "string" && existingAttach.trim().length > 0) {
+      const merged = Array.from(
+        new Set(
+          `${existingAttach},${value}`
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0)
+        )
+      ).join(",");
+      session.args.set(key, merged);
+      session.inheritedKeys.delete(key);
+      pushFeedback(feedback, "success", `[set] --${key} ${quoteForPreview(merged)}`);
+      return true;
+    }
+  }
   session.args.set(key, value);
   session.inheritedKeys.delete(key);
   syncSuggestedExportOutPath(state, session, feedback);
@@ -1883,6 +2090,7 @@ const rememberLoadedSource = (
   options: {
     githubRef?: string;
     githubRevision?: string;
+    extractedArchivePath?: string;
   } = {}
 ) => {
   clearRepoSourceContext(state);
@@ -1916,6 +2124,7 @@ const rememberLoadedSource = (
       source: "local-repo",
       urdfPath: originalUrdfPath,
       localPath,
+      extractedArchivePath: options.extractedArchivePath,
       repositoryUrdfPath: payload.entryPath,
       meshReferenceCorrectionCount: payload.meshReferenceCorrectionCount,
       meshReferenceUnresolvedCount: payload.meshReferenceUnresolvedCount,
@@ -1927,6 +2136,7 @@ const rememberLoadedSource = (
     source: "local-file",
     urdfPath: payload.entryFormat === "urdf" ? payload.inspectedPath : payload.outPath || state.lastUrdfPath || "",
     localPath: payload.inspectedPath,
+    extractedArchivePath: options.extractedArchivePath,
   };
 };
 
@@ -1954,6 +2164,10 @@ const getFollowUpSuggestionMessage = (
   state: ShellState,
   command: SupportedCommandName
 ): string | null => {
+  if (command === "assemble") {
+    return null;
+  }
+
   if ((command === "load-source" || command === "xacro-to-urdf") && state.lastUrdfPath) {
     return `[next] /align /analyze /health /validate /orientation\nusing ${state.lastUrdfPath}`;
   }
@@ -2143,6 +2357,50 @@ const runXacroBangCommand = (state: ShellState): ShellBangCommandResult => {
 
 const formatCount = (count: number, singular: string, plural = `${singular}s`): string =>
   `${count} ${count === 1 ? singular : plural}`;
+
+const summarizeAssemblyResult = (payload: {
+  ok: boolean;
+  sessionId: string;
+  sessionDir: string;
+  workspaceRoot: string;
+  studioUrl: string;
+  copiedFiles: number;
+  robotCount: number;
+  selectedPaths: string[];
+  visualizerOpened: boolean;
+  visualizerStart:
+    | { ok: true; studioRoot: string | null }
+    | { ok: false; code: string; reason: string; studioRoot: string | null };
+}): AutoPreviewPanel => {
+  const lines = [
+    "assembly local working copy ready",
+    `session ${payload.sessionId}`,
+    `workspace ${quoteForPreview(payload.workspaceRoot)}`,
+    `robots ${formatCount(payload.robotCount, "robot")}`,
+    `copied ${formatCount(payload.copiedFiles, "file")}`,
+  ];
+
+  if (payload.selectedPaths.length > 0) {
+    lines.push(
+      payload.selectedPaths.length <= 2
+        ? `selected ${payload.selectedPaths.map((entry) => quoteForPreview(entry)).join(", ")}`
+        : `selected ${quoteForPreview(payload.selectedPaths[0] ?? "")}, ${quoteForPreview(payload.selectedPaths[1] ?? "")}, +${payload.selectedPaths.length - 2} more`
+    );
+  }
+
+  lines.push(`studio ${quoteForPreview(payload.studioUrl)}`);
+  if (payload.visualizerStart.ok) {
+    lines.push(payload.visualizerOpened ? "opened URDF Studio for the assembly" : "URDF Studio is ready for the assembly");
+  } else {
+    lines.push(`URDF Studio not ready: ${payload.visualizerStart.reason}`);
+  }
+
+  return {
+    title: "assembly",
+    kind: payload.visualizerStart.ok ? "success" : "info",
+    lines,
+  };
+};
 
 const buildPreviewErrorPanel = (
   title: string,
@@ -2676,9 +2934,13 @@ const getResumePromptSourceLabel = (snapshot: ResumePromptState): string => {
     return `GitHub ${quoteForPreview(source.githubRef ?? snapshot.workingUrdfPath)}`;
   }
   if (source.source === "local-repo") {
-    return `folder ${quoteForPreview(source.localPath ?? snapshot.workingUrdfPath)}`;
+    return source.extractedArchivePath
+      ? `extracted folder ${quoteForPreview(source.localPath ?? snapshot.workingUrdfPath)}`
+      : `folder ${quoteForPreview(source.localPath ?? snapshot.workingUrdfPath)}`;
   }
-  return describeLocalSourceValue(source.localPath ?? snapshot.workingUrdfPath);
+  return source.extractedArchivePath
+    ? `extracted file ${quoteForPreview(source.localPath ?? snapshot.workingUrdfPath)}`
+    : describeLocalSourceValue(source.localPath ?? snapshot.workingUrdfPath);
 };
 
 const formatResumePromptLine = (snapshot: ResumePromptState): string =>
@@ -3481,7 +3743,8 @@ const cloneArgsMap = (args: ReadonlyMap<string, string | boolean>): Map<string, 
   new Map(args.entries());
 
 const prepareLoadSourceArgs = (
-  session: ShellSession
+  session: ShellSession,
+  inputArgs: ReadonlyMap<string, string | boolean> = session.args
 ):
   | {
       execArgs: Map<string, string | boolean>;
@@ -3490,7 +3753,7 @@ const prepareLoadSourceArgs = (
   | {
       error: AutoAutomationResult;
     } => {
-  const execArgs = cloneArgsMap(session.args);
+  const execArgs = cloneArgsMap(inputArgs);
   let extractedArchivePath: string | undefined;
 
   const sourcePath = execArgs.get("path");
@@ -3622,6 +3885,7 @@ const executeLoadSourceChecks = (
   rememberLoadedSource(state, loadPayload, {
     githubRef: typeof execArgs.get("github") === "string" ? String(execArgs.get("github")) : undefined,
     githubRevision: typeof execArgs.get("ref") === "string" ? String(execArgs.get("ref")) : undefined,
+    extractedArchivePath: options.extractedArchivePath,
   });
   const sharedSnapshot = persistShellSharedSession(state, {
     sourceUrdfPath: loadPayload.outPath,
@@ -3663,6 +3927,78 @@ const executeLoadSourceChecks = (
     clearSession: true,
   };
 };
+
+const createArchiveLoadPreflightPrompt = (
+  sourcePath: string,
+  args: ReadonlyMap<string, string | boolean>,
+  options: {
+    skipWorkingCopyPreflight?: boolean;
+  } = {}
+): LoadPreflightPromptState | null => {
+  const localPath = detectLocalPathDrop(sourcePath);
+  if (!localPath?.isZipFile) {
+    return null;
+  }
+
+  try {
+    const metadata = inspectZipArchiveMetadata(localPath.absolutePath);
+    return createLoadPreflightPrompt({
+      sourceKind: "archive",
+      sourceLabel: `archive ${quoteForPreview(localPath.inputPath)}`,
+      lines: [
+        "this will create a local working copy",
+        `archive size ${formatByteEstimate(metadata.compressedBytes)} compressed`,
+        `estimated extracted size ${formatByteEstimate(metadata.expandedBytes)} across ${metadata.entryCount} entries`,
+        `temporary extracted files will be created under ${quoteForPreview(path.join(os.tmpdir(), "ilu-archive-*"))}`,
+        `session files are stored under ${quoteForPreview(getSessionStorageRoot())}`,
+        "cleanup is manual today for extracted source folders and saved sessions",
+      ],
+      args: cloneArgsMap(args),
+      skipZipPreflight: true,
+      skipWorkingCopyPreflight: options.skipWorkingCopyPreflight,
+    });
+  } catch (error) {
+    return createLoadPreflightPrompt({
+      sourceKind: "archive",
+      sourceLabel: `archive ${quoteForPreview(localPath.inputPath)}`,
+      lines: [
+        "this will create a local working copy",
+        `temporary extracted files will be created under ${quoteForPreview(path.join(os.tmpdir(), "ilu-archive-*"))}`,
+        `session files are stored under ${quoteForPreview(getSessionStorageRoot())}`,
+        error instanceof Error ? `size estimate unavailable: ${error.message}` : "size estimate unavailable",
+        "cleanup is manual today for extracted source folders and saved sessions",
+      ],
+      args: cloneArgsMap(args),
+      skipZipPreflight: true,
+      skipWorkingCopyPreflight: options.skipWorkingCopyPreflight,
+    });
+  }
+};
+
+const createGitHubLoadPreflightPrompt = (
+  githubRef: string,
+  payload: RepositoryPreviewPayload,
+  args: ReadonlyMap<string, string | boolean>,
+  options: {
+    skipZipPreflight?: boolean;
+  } = {}
+): LoadPreflightPromptState =>
+  createLoadPreflightPrompt({
+    sourceKind: "github",
+    sourceLabel: `GitHub ${quoteForPreview(githubRef)}`,
+    lines: [
+      "this will create a local working copy",
+      typeof payload.totalBytes === "number" && payload.totalBytes > 0
+        ? `estimated source data ${formatByteEstimate(payload.totalBytes)} across ${formatCount(payload.candidateCount, "robot entrypoint")}`
+        : `found ${formatCount(payload.candidateCount, "robot entrypoint")}`,
+      `session files are stored under ${quoteForPreview(getSessionStorageRoot())}`,
+      "the repo is inspected remotely first; no full local git clone is created here",
+      "cleanup is manual today for saved sessions",
+    ],
+    args: cloneArgsMap(args),
+    skipZipPreflight: options.skipZipPreflight,
+    skipWorkingCopyPreflight: true,
+  });
 
 const runSelectedCandidatePicker = (
   state: ShellState,
@@ -3707,6 +4043,11 @@ const summarizeAutoLoadChecks = (
   const attentionLines = collectAttentionLines(validation.issues, health.findings, isMeshAction ? 3 : 2);
   const meshAttentionLines = attentionLines.filter((line) => /mesh/i.test(line));
 
+  if (options.extractedArchivePath) {
+    lines.push("archive opened as an extracted working copy");
+    lines.push("reload the archive after editing the zip contents");
+  }
+
   if (isMeshAction) {
     if (meshAttentionLines.length > 0) {
       lines.push(...meshAttentionLines.slice(0, 2));
@@ -3723,6 +4064,7 @@ const summarizeAutoLoadChecks = (
     if (health.orientationGuess?.likelyUpAxis && health.orientationGuess?.likelyForwardAxis) {
       lines.push(`orientation likely ${formatOrientationGuessSummary(health.orientationGuess)}`);
     }
+
 
     for (const line of attentionLines) {
       lines.push(line);
@@ -4154,6 +4496,164 @@ const summarizeDirectUrdfChecks = (
   };
 };
 
+const runLoadSourceAutomation = (
+  state: ShellState,
+  session: ShellSession,
+  inputArgs: ReadonlyMap<string, string | boolean>,
+  options: {
+    skipZipPreflight?: boolean;
+    skipWorkingCopyPreflight?: boolean;
+  } = {}
+): AutoAutomationResult | null => {
+  const rawSourcePath = inputArgs.get("path");
+  if (
+    !options.skipZipPreflight &&
+    typeof rawSourcePath === "string" &&
+    detectLocalPathDrop(rawSourcePath)?.isZipFile
+  ) {
+    state.loadPreflightPrompt = createArchiveLoadPreflightPrompt(rawSourcePath, inputArgs, {
+      skipWorkingCopyPreflight: options.skipWorkingCopyPreflight,
+    });
+    if (state.loadPreflightPrompt) {
+      return {
+        panel: buildLoadPreflightPanel(state.loadPreflightPrompt),
+        notice: { kind: "info", text: "confirm local working copy" },
+        clearSession: false,
+      };
+    }
+  }
+
+  const prepared = prepareLoadSourceArgs(session, inputArgs);
+  if ("error" in prepared) {
+    return prepared.error;
+  }
+
+  const { execArgs, extractedArchivePath } = prepared;
+  const hasExplicitEntry =
+    typeof execArgs.get("entry") === "string" && String(execArgs.get("entry")).trim().length > 0;
+  const githubRef = typeof execArgs.get("github") === "string" ? String(execArgs.get("github")) : null;
+
+  if (!hasExplicitEntry && (githubRef || rawSourcePath)) {
+    const preview = inspectRepositoryCandidatesForLoad(session, execArgs, {
+      extractedArchivePath,
+    });
+    if (preview) {
+      if (preview.panel.kind === "error") {
+        clearCandidatePicker(state);
+        return {
+          panel: preview.panel,
+          notice: { kind: "error", text: "preview failed" },
+          clearSession: true,
+        };
+      }
+
+      if (
+        githubRef &&
+        !options.skipWorkingCopyPreflight &&
+        preview.payload.candidateCount > 0
+      ) {
+        state.loadPreflightPrompt = createGitHubLoadPreflightPrompt(githubRef, preview.payload, execArgs, {
+          skipZipPreflight: true,
+        });
+        return {
+          panel: buildLoadPreflightPanel(state.loadPreflightPrompt),
+          notice: { kind: "info", text: "confirm local working copy" },
+          clearSession: false,
+        };
+      }
+
+      if (preview.payload.candidateCount === 0) {
+        clearCandidatePicker(state);
+        return {
+          panel: preview.panel,
+          notice: { kind: "info", text: "preview ready" },
+          clearSession: false,
+        };
+      }
+
+      if (preview.payload.candidateCount > 1) {
+        activateRepoIntentPrompt(state, preview.payload, cloneArgsMap(execArgs), extractedArchivePath);
+        clearCandidatePicker(state);
+        return {
+          panel: preview.panel,
+          notice: { kind: "info", text: "choose what to do with this repo" },
+          clearSession: false,
+        };
+      }
+
+      if (preview.payload.primaryCandidatePath) {
+        execArgs.set("entry", preview.payload.primaryCandidatePath);
+      }
+
+      const selectedCandidate =
+        typeof execArgs.get("entry") === "string"
+          ? preview.payload.candidates.find((candidate) => candidate.path === execArgs.get("entry"))
+          : undefined;
+      clearCandidatePicker(state);
+      return executeLoadSourceChecks(state, execArgs, {
+        extractedArchivePath,
+        requestedEntryPath:
+          typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
+        selectedCandidate,
+      });
+    } else {
+      clearCandidatePicker(state);
+    }
+  }
+
+  if (githubRef && !options.skipWorkingCopyPreflight) {
+    state.loadPreflightPrompt = createGitHubLoadPreflightPrompt(
+      githubRef,
+      {
+        repositoryUrl: githubRef,
+        candidateCount: 1,
+        primaryCandidatePath: typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : null,
+        candidates: [],
+      },
+      execArgs,
+      {
+        skipZipPreflight: true,
+      }
+    );
+    return {
+      panel: buildLoadPreflightPanel(state.loadPreflightPrompt),
+      notice: { kind: "info", text: "confirm local working copy" },
+      clearSession: false,
+    };
+  }
+
+  clearCandidatePicker(state);
+  return executeLoadSourceChecks(state, execArgs, {
+    extractedArchivePath,
+    requestedEntryPath:
+      typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
+  });
+};
+
+const runLoadPreflightAsync = async (state: ShellState): Promise<AutoAutomationResult> => {
+  const prompt = state.loadPreflightPrompt;
+  const session = state.session;
+  if (!prompt || !session || session.command !== "load-source") {
+    return {
+      panel: null,
+      notice: { kind: "info", text: "no pending local-load confirmation" },
+      clearSession: false,
+    };
+  }
+
+  clearLoadPreflightPrompt(state);
+  return (
+    runLoadSourceAutomation(state, session, prompt.args, {
+      skipZipPreflight: prompt.skipZipPreflight,
+      skipWorkingCopyPreflight: prompt.skipWorkingCopyPreflight,
+    }) ?? {
+      panel: null,
+      notice: { kind: "info", text: "load cancelled" },
+      clearSession: false,
+    }
+  );
+};
+
 const runDirectInputAutomation = (
   state: ShellState,
   session: ShellSession,
@@ -4164,75 +4664,7 @@ const runDirectInputAutomation = (
     if (!requirementStatus.ready) {
       return null;
     }
-
-    const prepared = prepareLoadSourceArgs(session);
-    if ("error" in prepared) {
-      return prepared.error;
-    }
-
-    const { execArgs, extractedArchivePath } = prepared;
-    const hasExplicitEntry =
-      typeof execArgs.get("entry") === "string" && String(execArgs.get("entry")).trim().length > 0;
-
-    if (!hasExplicitEntry && (changedKey === "github" || changedKey === "path")) {
-      const preview = inspectRepositoryCandidatesForLoad(session, execArgs, {
-        extractedArchivePath,
-      });
-      if (preview) {
-        if (preview.panel.kind === "error") {
-          clearCandidatePicker(state);
-          return {
-            panel: preview.panel,
-            notice: { kind: "error", text: "preview failed" },
-            clearSession: true,
-          };
-        }
-
-        if (preview.payload.candidateCount === 0) {
-          clearCandidatePicker(state);
-          return {
-            panel: preview.panel,
-            notice: { kind: "info", text: "preview ready" },
-            clearSession: false,
-          };
-        }
-
-        if (preview.payload.candidateCount > 1) {
-          activateRepoIntentPrompt(state, preview.payload, cloneArgsMap(execArgs), extractedArchivePath);
-          clearCandidatePicker(state);
-          return {
-            panel: preview.panel,
-            notice: { kind: "info", text: "choose what to do with this repo" },
-            clearSession: false,
-          };
-        }
-
-        if (preview.payload.primaryCandidatePath) {
-          execArgs.set("entry", preview.payload.primaryCandidatePath);
-        }
-
-        const selectedCandidate =
-          typeof execArgs.get("entry") === "string"
-            ? preview.payload.candidates.find((candidate) => candidate.path === execArgs.get("entry"))
-            : undefined;
-        clearCandidatePicker(state);
-        return executeLoadSourceChecks(state, execArgs, {
-          extractedArchivePath,
-          requestedEntryPath:
-            typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
-          selectedCandidate,
-        });
-      } else {
-        clearCandidatePicker(state);
-      }
-    }
-
-    clearCandidatePicker(state);
-    return executeLoadSourceChecks(state, execArgs, {
-      extractedArchivePath,
-      requestedEntryPath:
-        typeof execArgs.get("entry") === "string" ? String(execArgs.get("entry")) : undefined,
-    });
+    return runLoadSourceAutomation(state, session, session.args);
   }
 
   if (
@@ -4623,6 +5055,23 @@ const getShellExecutionSuccessPanel = (
       const payload = parseExecutionJson<ShellOrientationPayload>(execution);
       const urdfPath = session.args.get("urdf");
       return payload && typeof urdfPath === "string" ? summarizeOrientationResult(payload, urdfPath, state.suggestedAction) : null;
+    }
+    case "assemble": {
+      const payload = parseExecutionJson<{
+        ok: boolean;
+        sessionId: string;
+        sessionDir: string;
+        workspaceRoot: string;
+        studioUrl: string;
+        copiedFiles: number;
+        robotCount: number;
+        selectedPaths: string[];
+        visualizerOpened: boolean;
+        visualizerStart:
+          | { ok: true; studioRoot: string | null }
+          | { ok: false; code: string; reason: string; studioRoot: string | null };
+      }>(execution);
+      return payload ? summarizeAssemblyResult(payload) : null;
     }
     case "urdf-to-mjcf": {
       const payload = parseExecutionJson<{
@@ -5030,6 +5479,14 @@ const inferFreeformSessionTarget = (
     return {
       key: "urdf",
       slashName: "file",
+      value: localPath.inputPath,
+    };
+  }
+
+  if (session.command === "assemble" && localPath.isUrdfFile && getOptionSpecByKey(session, "attach")) {
+    return {
+      key: "attach",
+      slashName: "attach",
       value: localPath.inputPath,
     };
   }
@@ -5833,6 +6290,9 @@ const handleSessionSlashCommand = async (
           writeFeedback(automation.notice);
         }
         printOutputPanel(automation.panel);
+        if (state.loadPreflightPrompt) {
+          printLoadPreflightPrompt(state.loadPreflightPrompt);
+        }
         if (state.candidatePicker) {
           printCandidatePicker(state.candidatePicker);
         }
@@ -5875,6 +6335,9 @@ const handlePendingValue = (input: string, state: ShellState) => {
         writeFeedback(automation.notice);
       }
       printOutputPanel(automation.panel);
+      if (state.loadPreflightPrompt) {
+        printLoadPreflightPrompt(state.loadPreflightPrompt);
+      }
       if (state.candidatePicker) {
         printCandidatePicker(state.candidatePicker);
       }
@@ -5952,6 +6415,13 @@ const resolveCandidateSelectionInput = (
   }
 
   const trimmed = rawValue.trim();
+  const filteredCandidates =
+    trimmed.length === 0 || /^\d+$/.test(trimmed)
+      ? picker.candidates
+      : picker.candidates.filter((candidate) => {
+          const haystack = `${candidate.path} ${getCandidateDetails(candidate).join(" ")}`.toLowerCase();
+          return haystack.includes(trimmed.toLowerCase());
+        });
   if (trimmed.length === 0) {
     return picker.candidates[clamp(picker.selectedIndex, 0, picker.candidates.length - 1)]?.path ?? null;
   }
@@ -5965,7 +6435,36 @@ const resolveCandidateSelectionInput = (
     return null;
   }
 
+  const exactMatch = picker.candidates.find((candidate) => candidate.path === trimmed);
+  if (exactMatch) {
+    picker.selectedIndex = picker.candidates.findIndex((candidate) => candidate.path === exactMatch.path);
+    return exactMatch.path;
+  }
+
+  if (filteredCandidates.length > 0) {
+    const selected = filteredCandidates[clamp(picker.selectedIndex, 0, filteredCandidates.length - 1)];
+    if (selected) {
+      const absoluteIndex = picker.candidates.findIndex((candidate) => candidate.path === selected.path);
+      picker.selectedIndex = absoluteIndex >= 0 ? absoluteIndex : picker.selectedIndex;
+      return selected.path;
+    }
+  }
+
   return normalizeShellInput(rawValue);
+};
+
+const getVisibleCandidatePickerEntries = (
+  picker: CandidatePickerState,
+  rawInput: string
+): RepositoryPreviewCandidate[] => {
+  const trimmed = rawInput.trim().toLowerCase();
+  if (trimmed.length === 0 || /^\d+$/.test(trimmed)) {
+    return picker.candidates;
+  }
+  return picker.candidates.filter((candidate) => {
+    const haystack = `${candidate.path} ${getCandidateDetails(candidate).join(" ")}`.toLowerCase();
+    return haystack.includes(trimmed);
+  });
 };
 
 const ROOT_SYSTEM_MENU_ENTRIES = SHELL_BUILTIN_COMMANDS.map((entry) => ({
@@ -6347,10 +6846,12 @@ const buildTimelineResponseLines = (
               ? "estimated orientation"
               : panel?.title === "preview"
                 ? "previewed the source"
-                : panel?.title === "context"
-                  ? "current context"
-                  : panel?.title === "xacro"
-                    ? "xacro runtime"
+        : panel?.title === "context"
+          ? "current context"
+          : panel?.title === "xacro"
+            ? "xacro runtime"
+            : panel?.title === "assembly"
+              ? "prepared the assembly workspace"
                     : null;
 
   if (panelNarrative && !suppressLoadedNarrative) {
@@ -6807,19 +7308,27 @@ const buildTtyShellFrame = (state: ShellState, view: TtyShellViewState) => {
       lines.push(renderMenuEntry(entry, selected, columns - 2));
     }
   } else if (state.candidatePicker && !view.input.startsWith("/")) {
+    const visibleCandidates = getVisibleCandidatePickerEntries(state.candidatePicker, view.input);
     lines.push(SHELL_THEME.section("picker"));
-    for (const [index, candidate] of state.candidatePicker.candidates.slice(0, 8).entries()) {
+    if (view.input.trim().length > 0 && !/^\d+$/.test(view.input.trim())) {
+      lines.push(
+        `  ${SHELL_THEME.muted(`filter: ${visibleCandidates.length}/${state.candidatePicker.candidates.length} matches`)}`
+      );
+    }
+    for (const [index, candidate] of visibleCandidates.slice(0, 8).entries()) {
       const details = getCandidateDetails(candidate);
-      const line = `${candidate.path}${details.length > 0 ? `  ${details.join("  ")}` : ""}`;
-      const selected = index === state.candidatePicker.selectedIndex;
+      const absoluteIndex = state.candidatePicker.candidates.findIndex((entry) => entry.path === candidate.path);
+      const selected = absoluteIndex === state.candidatePicker.selectedIndex;
       lines.push(
         selected
           ? `  ${SHELL_THEME.accent(">")} ${SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${SHELL_THEME.muted(truncateText(details.join("  "), columns - candidate.path.length - 8))}` : ""}`
           : `  ${SHELL_THEME.command(candidate.path)}${details.length > 0 ? `  ${SHELL_THEME.muted(truncateText(details.join("  "), columns - candidate.path.length - 8))}` : ""}`
       );
     }
-    if (state.candidatePicker.candidates.length > 8) {
+    if (visibleCandidates.length > 8) {
       lines.push(`  ${SHELL_THEME.muted("...")}`);
+    } else if (visibleCandidates.length === 0) {
+      lines.push(`  ${SHELL_THEME.warning("no matches")}`);
     }
   } else if (shouldTreatAsSlashInput(view.input, state)) {
     lines.push(SHELL_THEME.section("picker"));
@@ -6965,6 +7474,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     repoIntentPrompt: null,
     repoSourceContext: null,
     candidatePicker: null,
+    loadPreflightPrompt: null,
     xacroRetry: null,
     loadedSource: null,
     sharedSessionId: undefined,
@@ -7062,6 +7572,7 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
     const bangCommand = parseBangInput(line);
     const activeSavePrompt = getActiveSavePrompt(state);
     const activeResumePrompt = getActiveResumePrompt(state);
+    const activeLoadPreflightPrompt = state.loadPreflightPrompt;
     const activeSuggestedAction = getActiveSuggestedAction(state);
 
     if (!activeSavePrompt && activeSuggestedAction && (isSlashInput || bangCommand)) {
@@ -7163,6 +7674,43 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
       }
 
       dismissResumePrompt(state);
+    }
+
+    if (activeLoadPreflightPrompt && !isSlashInput && !bangCommand) {
+      const normalizedDecision = trimmed.toLowerCase();
+      if (!trimmed || normalizedDecision === "y" || normalizedDecision === "yes") {
+        process.stdout.write(`${SHELL_THEME.muted("loading locally...")}\n`);
+        const result = await runLoadPreflightAsync(state);
+        if (result.notice) {
+          writeFeedback(result.notice);
+        }
+        printOutputPanel(result.panel);
+      } else if (
+        normalizedDecision === "n" ||
+        normalizedDecision === "no" ||
+        normalizedDecision === "later" ||
+        normalizedDecision === "cancel" ||
+        normalizedDecision === "not now"
+      ) {
+        clearLoadPreflightPrompt(state);
+        writeFeedback({ kind: "info", text: "load cancelled" });
+      } else {
+        process.stdout.write(`${SHELL_THEME.muted(getLoadPreflightDecisionHint("line"))}\n`);
+      }
+
+      if (!isClosed && state.loadPreflightPrompt) {
+        printOutputPanel(buildLoadPreflightPanel(state.loadPreflightPrompt));
+        process.stdout.write(`${SHELL_THEME.muted(state.loadPreflightPrompt.prompt)}\n`);
+        process.stdout.write(`  ${SHELL_THEME.command(`Enter`)} ${SHELL_THEME.muted("loads locally")}  ${SHELL_THEME.command(`n`)} ${SHELL_THEME.muted("cancels")}\n`);
+      }
+
+      if (isClosed) {
+        break;
+      }
+
+      rl.setPrompt(formatShellPrompt(state));
+      rl.prompt();
+      continue;
     }
 
     if (activeSuggestedAction && !isSlashInput && !bangCommand) {
@@ -7294,6 +7842,9 @@ const runLineInteractiveShell = async (options: ShellOptions = {}) => {
             writeFeedback(automated.notice);
           }
           printOutputPanel(automated.panel);
+          if (state.loadPreflightPrompt) {
+            printLoadPreflightPrompt(state.loadPreflightPrompt);
+          }
           if (state.repoIntentPrompt) {
             printRepoIntentPrompt(state.repoIntentPrompt, getRepoIntentMenuEntries());
           }
@@ -7379,6 +7930,7 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
     repoIntentPrompt: null,
     repoSourceContext: null,
     candidatePicker: null,
+    loadPreflightPrompt: null,
     xacroRetry: null,
     loadedSource: null,
     sharedSessionId: undefined,
@@ -7557,6 +8109,29 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
       return;
     }
 
+    if (activeChoicePrompt.kind === "load-preflight") {
+      if (normalizedIndex === 0) {
+        pushTimelineUserEntry(view, "yes, load locally");
+        const result = await runBusyOperationAsync(
+          {
+            title: "loading",
+            lines: ["creating the local working copy..."],
+          },
+          () => runLoadPreflightAsync(state)
+        );
+        view.notice = result.notice;
+        view.output = result.panel;
+        archiveAssistantStateToTimeline(view);
+        setInput("");
+        return;
+      }
+
+      clearLoadPreflightPrompt(state);
+      view.notice = { kind: "info", text: "load cancelled" };
+      setInput("");
+      return;
+    }
+
     if (normalizedIndex === 0) {
       pushTimelineUserEntry(view, `yes, ${activeChoicePrompt.prompt.acceptLabel}`);
       const result = await runBusyOperationAsync(
@@ -7575,10 +8150,11 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
   };
 
   const openSession = (command: SupportedCommandName) => {
-    const feedback: ShellFeedback[] = [];
-    state.rootTask = null;
-    clearRepoIntentPrompt(state);
-    clearCandidatePicker(state);
+  const feedback: ShellFeedback[] = [];
+  state.rootTask = null;
+  clearRepoIntentPrompt(state);
+  clearLoadPreflightPrompt(state);
+  clearCandidatePicker(state);
     clearXacroRetry(state);
     state.session = createSession(command, state, command, feedback);
     setNoticeFromFeedback(view, feedback);
@@ -7591,10 +8167,11 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
   };
 
   const openRootTask = (task: RootTaskName) => {
-    state.rootTask = task;
-    state.session = null;
-    clearRepoIntentPrompt(state);
-    clearCandidatePicker(state);
+  state.rootTask = task;
+  state.session = null;
+  clearRepoIntentPrompt(state);
+  clearLoadPreflightPrompt(state);
+  clearCandidatePicker(state);
     clearXacroRetry(state);
     setInput("/");
     view.notice = { kind: "info", text: `${getRootTaskSummary(task)}  choose below or paste input directly` };
@@ -9142,11 +9719,23 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return;
       }
       if (state.candidatePicker && !view.input.startsWith("/")) {
-        state.candidatePicker.selectedIndex = clamp(
-          state.candidatePicker.selectedIndex - 1,
+        const visibleCandidates = getVisibleCandidatePickerEntries(state.candidatePicker, view.input);
+        if (visibleCandidates.length === 0) {
+          queueRender("navigation");
+          return;
+        }
+        const currentVisibleIndex = Math.max(
           0,
-          state.candidatePicker.candidates.length - 1
+          visibleCandidates.findIndex(
+            (candidate) =>
+              candidate.path ===
+              state.candidatePicker?.candidates[state.candidatePicker.selectedIndex]?.path
+          )
         );
+        const nextVisibleIndex = clamp(currentVisibleIndex - 1, 0, visibleCandidates.length - 1);
+        const nextPath = visibleCandidates[nextVisibleIndex]?.path;
+        const absoluteIndex = state.candidatePicker.candidates.findIndex((candidate) => candidate.path === nextPath);
+        state.candidatePicker.selectedIndex = absoluteIndex >= 0 ? absoluteIndex : state.candidatePicker.selectedIndex;
         queueRender("navigation");
         return;
       }
@@ -9174,11 +9763,23 @@ const runTtyInteractiveShell = async (options: ShellOptions = {}) => {
         return;
       }
       if (state.candidatePicker && !view.input.startsWith("/")) {
-        state.candidatePicker.selectedIndex = clamp(
-          state.candidatePicker.selectedIndex + 1,
+        const visibleCandidates = getVisibleCandidatePickerEntries(state.candidatePicker, view.input);
+        if (visibleCandidates.length === 0) {
+          queueRender("navigation");
+          return;
+        }
+        const currentVisibleIndex = Math.max(
           0,
-          state.candidatePicker.candidates.length - 1
+          visibleCandidates.findIndex(
+            (candidate) =>
+              candidate.path ===
+              state.candidatePicker?.candidates[state.candidatePicker.selectedIndex]?.path
+          )
         );
+        const nextVisibleIndex = clamp(currentVisibleIndex + 1, 0, visibleCandidates.length - 1);
+        const nextPath = visibleCandidates[nextVisibleIndex]?.path;
+        const absoluteIndex = state.candidatePicker.candidates.findIndex((candidate) => candidate.path === nextPath);
+        state.candidatePicker.selectedIndex = absoluteIndex >= 0 ? absoluteIndex : state.candidatePicker.selectedIndex;
         queueRender("navigation");
         return;
       }

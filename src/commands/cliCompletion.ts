@@ -25,6 +25,7 @@ type CompletionTopLevelSpec = {
 const COMPLETION_SHELL_SET = new Set<string>(COMPLETION_SHELLS);
 const FILESYSTEM_HINT_PATTERN = /(?:^|[-_])(path|dir|file|wheel|venv)(?:$|[-_])/i;
 const FILESYSTEM_FLAG_KEYS = new Set([
+  "attach",
   "entry",
   "left",
   "local",

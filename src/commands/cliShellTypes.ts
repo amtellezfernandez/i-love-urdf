@@ -29,6 +29,7 @@ export type LoadedSourceContext = {
   source: "local-file" | "local-repo" | "github";
   urdfPath: string;
   localPath?: string;
+  extractedArchivePath?: string;
   githubRef?: string;
   githubRevision?: string;
   repositoryUrdfPath?: string;
@@ -80,6 +81,7 @@ export type ShellState = {
   repoIntentPrompt: RepoIntentPromptState | null;
   repoSourceContext: RepoSourceContext | null;
   candidatePicker: CandidatePickerState | null;
+  loadPreflightPrompt: LoadPreflightPromptState | null;
   xacroRetry: ((pythonExecutable?: string) => AutoAutomationResult) | null;
   loadedSource: LoadedSourceContext | null;
   sharedSessionId?: string;
@@ -244,9 +246,22 @@ export type RepositoryPreviewPayload = {
   repo?: string;
   repositoryUrl?: string;
   inspectedPath?: string;
+  totalBytes?: number;
   candidateCount: number;
   primaryCandidatePath: string | null;
   candidates: RepositoryPreviewCandidate[];
+};
+
+export type LoadPreflightPromptState = {
+  sourceKind: "archive" | "github";
+  sourceLabel: string;
+  lines: string[];
+  prompt: string;
+  acceptOptionLabel: string;
+  skipOptionLabel: string;
+  args: Map<string, string | boolean>;
+  skipZipPreflight?: boolean;
+  skipWorkingCopyPreflight?: boolean;
 };
 
 export type RepoIntentChoiceName = "work-one" | "gallery" | "repo-fixes";

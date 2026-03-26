@@ -6,6 +6,7 @@ exports.COMPLETION_SHELLS = ["bash", "zsh", "fish"];
 const COMPLETION_SHELL_SET = new Set(exports.COMPLETION_SHELLS);
 const FILESYSTEM_HINT_PATTERN = /(?:^|[-_])(path|dir|file|wheel|venv)(?:$|[-_])/i;
 const FILESYSTEM_FLAG_KEYS = new Set([
+    "attach",
     "entry",
     "left",
     "local",

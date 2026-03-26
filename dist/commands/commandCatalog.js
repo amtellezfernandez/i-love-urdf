@@ -178,6 +178,12 @@ exports.COMMAND_CATALOG = {
             "  set-material-color --urdf <path> --link <name> --material <name> --color <#RRGGBB> [--out <path>]",
         ],
     },
+    "merge-urdf": {
+        sections: ["edit"],
+        usage: [
+            "  merge-urdf --urdf <path> --attach <path[,path]> [--name <robot>] [--spacing <n>] [--out <path>]",
+        ],
+    },
     "mesh-to-assets": {
         sections: ["optimize"],
         usage: ["  mesh-to-assets --urdf <path> [--out <path>]"],
@@ -219,6 +225,10 @@ exports.COMMAND_CATALOG = {
             "  load-source --path <local-file-or-dir> [--entry <repo-path>] [--root <dir>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
             "  load-source --github <owner/repo|url> [--entry <repo-path>] [--ref <branch>] [--subdir <path>] [--token <token>] [--args name=value,...] [--python <path>] [--wheel <path>] [--out <path>]",
         ],
+    },
+    assemble: {
+        sections: ["load"],
+        usage: ["  assemble --urdf <path> [--attach <path[,path]>] [--name <label>]"],
     },
     "rename-joint": {
         sections: ["edit"],

@@ -4,12 +4,14 @@ exports.runSourceCommand = exports.isSourceCommand = exports.SOURCE_COMMANDS = v
 const sourceGalleryCommands_1 = require("./sourceGalleryCommands");
 const sourceLoadCommands_1 = require("./sourceLoadCommands");
 const sourceRepositoryCommands_1 = require("./sourceRepositoryCommands");
+const sourceStudioCommands_1 = require("./sourceStudioCommands");
 const sourceXacroCommands_1 = require("./sourceXacroCommands");
 const SOURCE_COMMAND_HANDLERS = {
     ...sourceGalleryCommands_1.SOURCE_GALLERY_COMMAND_HANDLERS,
     ...sourceRepositoryCommands_1.SOURCE_REPOSITORY_COMMAND_HANDLERS,
     ...sourceXacroCommands_1.SOURCE_XACRO_COMMAND_HANDLERS,
     ...sourceLoadCommands_1.SOURCE_LOAD_COMMAND_HANDLERS,
+    ...sourceStudioCommands_1.SOURCE_STUDIO_COMMAND_HANDLERS,
 };
 exports.SOURCE_COMMANDS = Object.keys(SOURCE_COMMAND_HANDLERS);
 const SOURCE_COMMAND_SET = new Set(exports.SOURCE_COMMANDS);

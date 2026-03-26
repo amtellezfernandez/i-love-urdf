@@ -46,9 +46,9 @@ export const buildAlignOrientationSuggestion = (
   plan: OrientationSuggestedActionPlan
 ): SuggestedActionPrompt => ({
   kind: "align-orientation",
-  summary: `orientation differs from ${formatOrientationTarget(plan)}`,
-  recommendedLine: `recommended: align orientation to ${formatOrientationTarget(plan)}`,
-  prompt: `align orientation to ${formatOrientationTarget(plan)} now?`,
+  summary: `orientation differs from the default target ${formatOrientationTarget(plan)}`,
+  recommendedLine: `recommended: align orientation to the default target ${formatOrientationTarget(plan)}`,
+  prompt: `align orientation to the default target ${formatOrientationTarget(plan)} now?`,
   acceptLabel: "align orientation",
   acceptOptionLabel: "Align now",
   skipOptionLabel: "Not now",

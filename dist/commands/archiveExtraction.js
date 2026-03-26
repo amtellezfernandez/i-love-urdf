@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.extractZipArchiveToTempRoot = exports.sanitizeArchiveEntryPath = exports.MAX_ARCHIVE_TOTAL_BYTES = exports.MAX_ARCHIVE_ENTRY_BYTES = exports.MAX_ARCHIVE_ENTRY_COUNT = void 0;
+exports.inspectZipArchiveMetadata = exports.extractZipArchiveToTempRoot = exports.sanitizeArchiveEntryPath = exports.MAX_ARCHIVE_TOTAL_BYTES = exports.MAX_ARCHIVE_ENTRY_BYTES = exports.MAX_ARCHIVE_ENTRY_COUNT = void 0;
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -89,3 +89,21 @@ const extractZipArchiveToTempRoot = (archivePath, options = {}) => {
     }
 };
 exports.extractZipArchiveToTempRoot = extractZipArchiveToTempRoot;
+const inspectZipArchiveMetadata = (archivePath) => {
+    const archive = new AdmZip(archivePath);
+    const entries = archive.getEntries();
+    const compressedBytes = fs.statSync(archivePath).size;
+    const expandedBytes = entries.reduce((sum, entry) => {
+        if (entry.isDirectory) {
+            return sum;
+        }
+        const size = Number(entry.header.size ?? 0);
+        return sum + (Number.isFinite(size) && size > 0 ? size : 0);
+    }, 0);
+    return {
+        compressedBytes,
+        expandedBytes,
+        entryCount: entries.length,
+    };
+};
+exports.inspectZipArchiveMetadata = inspectZipArchiveMetadata;

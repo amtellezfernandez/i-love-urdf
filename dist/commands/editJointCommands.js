@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EDIT_JOINT_COMMAND_HANDLERS = void 0;
+const path = require("node:path");
 const index_1 = require("../index");
 const canonicalizeJointFrames_1 = require("../transforms/canonicalizeJointFrames");
 const editCommandRuntime_1 = require("./editCommandRuntime");
@@ -47,6 +48,34 @@ exports.EDIT_JOINT_COMMAND_HANDLERS = {
     },
     "set-material-color": ({ args, helpers, urdfContent, outPath }) => {
         const result = (0, index_1.updateMaterialColorInUrdf)(urdfContent, helpers.requireStringArg(args, "link"), helpers.requireStringArg(args, "material"), helpers.requireHexColorArg(args, "color"));
+        (0, editCommandRuntime_1.emitWrittenPayload)(helpers, outPath, result.content, result);
+    },
+    "merge-urdf": ({ args, helpers, urdfContent, urdfPath, outPath }) => {
+        const attachPaths = helpers.getDelimitedStringArg(args, "attach");
+        if (attachPaths.length === 0) {
+            helpers.fail("merge-urdf requires --attach with at least one URDF path.");
+        }
+        const spacing = helpers.getOptionalNumberArg(args, "spacing");
+        const result = (0, index_1.mergeUrdfs)([
+            {
+                id: path.basename(urdfPath, path.extname(urdfPath)) || "primary_robot",
+                name: path.basename(urdfPath),
+                urdfContent,
+                originX: 0,
+            },
+            ...attachPaths.map((attachPath) => ({
+                id: path.basename(attachPath, path.extname(attachPath)) || "attached_robot",
+                name: path.basename(attachPath),
+                urdfContent: helpers.readText(attachPath),
+            })),
+        ], {
+            robotName: helpers.getOptionalStringArg(args, "name"),
+            spacing,
+        });
+        if (!result.success) {
+            (0, editCommandRuntime_1.emitJson)({ ...result, outPath: null });
+            return;
+        }
         (0, editCommandRuntime_1.emitWrittenPayload)(helpers, outPath, result.content, result);
     },
     "rename-joint": ({ args, helpers, urdfContent, outPath }) => {

@@ -37,9 +37,9 @@ exports.buildReviewAttentionSuggestion = buildReviewAttentionSuggestion;
 const formatOrientationTarget = (plan) => `${plan.targetUpAxis}-up / ${plan.targetForwardAxis}-forward`;
 const buildAlignOrientationSuggestion = (plan) => ({
     kind: "align-orientation",
-    summary: `orientation differs from ${formatOrientationTarget(plan)}`,
-    recommendedLine: `recommended: align orientation to ${formatOrientationTarget(plan)}`,
-    prompt: `align orientation to ${formatOrientationTarget(plan)} now?`,
+    summary: `orientation differs from the default target ${formatOrientationTarget(plan)}`,
+    recommendedLine: `recommended: align orientation to the default target ${formatOrientationTarget(plan)}`,
+    prompt: `align orientation to the default target ${formatOrientationTarget(plan)} now?`,
     acceptLabel: "align orientation",
     acceptOptionLabel: "Align now",
     skipOptionLabel: "Not now",
