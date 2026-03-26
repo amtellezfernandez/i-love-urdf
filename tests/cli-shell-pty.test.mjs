@@ -119,7 +119,7 @@ ptyTest("TTY substitute mode starts with a compact source prompt", async () => {
 
   assert.equal(result.code, 0);
   assert.match(result.sanitizedOutput, /\/substitute-mode/i);
-  assert.match(result.sanitizedOutput, /paste or drop 1 source file to replace/i);
+  assert.match(result.sanitizedOutput, /paste or drop 1 host source file/i);
   assert.doesNotMatch(result.sanitizedOutput, /source\s+none yet/i);
   assert.doesNotMatch(result.sanitizedOutput, /embedded arm or subrobot you want to replace/i);
 });

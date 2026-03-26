@@ -664,7 +664,7 @@ const getEmptySessionInputText = (session) => {
         case "assemble":
             return "paste or drop 1 base source file";
         case "replace":
-            return "paste or drop 1 source file to replace";
+            return "paste or drop 1 host source file";
         default:
             return null;
     }
@@ -911,7 +911,7 @@ const getOptionSummary = (session, key, option) => {
     }
     if (key === "urdf") {
         if (session.command === "replace-subrobot") {
-            return "Source file that contains the robot subtree you want to replace.";
+            return "Host source file that contains the robot subtree you want to replace.";
         }
         return "URDF file path.";
     }
@@ -1462,7 +1462,7 @@ const getPendingValuePrompt = (state, session, key, slashName) => {
             return {
                 key,
                 slashName,
-                title: "1 source file to replace",
+                title: "1 host source file",
                 examples: ["./amr.urdf"],
                 notes: [],
                 expectsPath: true,
