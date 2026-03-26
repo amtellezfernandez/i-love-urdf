@@ -78,6 +78,7 @@ export type SavePromptState = {
 export type ShellState = {
   session: ShellSession | null;
   rootTask: RootTaskName | null;
+  startupModePrompt: StartupModePromptState | null;
   repoIntentPrompt: RepoIntentPromptState | null;
   repoSourceContext: RepoSourceContext | null;
   candidatePicker: CandidatePickerState | null;
@@ -160,6 +161,10 @@ export type Keypress = {
 };
 
 export type RootTaskName = "open" | "inspect" | "check" | "convert" | "fix";
+
+export type StartupModeName = "single" | "assembly" | "substitute" | "preview";
+
+export type StartupModePromptState = Record<string, never>;
 
 export type RootTaskDefinition = {
   name: RootTaskName;
@@ -305,6 +310,7 @@ export type ShellTheme = {
   enabled: boolean;
   brand: (text: string) => string;
   command: (text: string) => string;
+  inputBand: (text: string) => string;
   icon: (text: string) => string;
   muted: (text: string) => string;
   section: (text: string) => string;

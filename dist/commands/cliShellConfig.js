@@ -40,6 +40,7 @@ const createTheme = (enabled) => ({
     enabled,
     brand: (text) => paint(enabled, text, ANSI.bold, ANSI.brightMagenta),
     command: (text) => paint(enabled, text, ANSI.brightMagenta),
+    inputBand: (text) => paint(enabled, text, ANSI.reverse, ANSI.gray),
     icon: (text) => paint(enabled, text, ANSI.gray),
     muted: (text) => paint(enabled, text, ANSI.gray),
     section: (text) => paint(enabled, text, ANSI.dim, ANSI.gray),
@@ -337,8 +338,8 @@ exports.SESSION_OPTION_ORDER = {
     assemble: ["urdf", "attach", "name"],
     "replace-subrobot": [
         "urdf",
-        "replace-root",
         "replacement",
+        "replace-root",
         "replacement-root",
         "mount-parent",
         "mount-joint",
@@ -400,7 +401,7 @@ exports.SESSION_SLASH_ALIASES = {
     },
 };
 exports.CLI_ENTRY_PATH = path.resolve(__dirname, "..", "cli.js");
-exports.ROOT_GUIDANCE = "paste repo or local path  / actions  !xacro setup  ctrl+c quit";
+exports.ROOT_GUIDANCE = "1 single  2 assembly  3 substitute  4 preview";
 let cachedGitHubAuthState;
 const formatShellPrompt = (_state) => "/> ";
 exports.formatShellPrompt = formatShellPrompt;

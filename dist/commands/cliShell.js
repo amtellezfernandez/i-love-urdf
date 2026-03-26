@@ -209,6 +209,63 @@ const beginVisualizerExitPrompt = (state) => {
 };
 const getVisualizerExitPrompt = (state) => state.exitPrompt;
 const getSaveExitPromptText = () => "save the working URDF before exit?";
+const getExitResumeCommand = (state) => {
+    const sessionId = state.sharedSessionId?.trim();
+    return sessionId ? `ilu attach ${sessionId}` : null;
+};
+const printExitResumeHint = (state) => {
+    const resumeCommand = getExitResumeCommand(state);
+    if (!resumeCommand) {
+        return;
+    }
+    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("reopen this session with:")}\n`);
+    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(resumeCommand)}\n`);
+};
+const STARTUP_MODE_ENTRIES = [
+    { name: "single", summary: "one robot" },
+    { name: "assembly", summary: "combine robots" },
+    { name: "substitute", summary: "replace robot/subtree" },
+    { name: "preview", summary: "gallery output" },
+];
+const clearStartupModePrompt = (state) => {
+    state.startupModePrompt = null;
+};
+const hasStartupModePrompt = (state) => state.startupModePrompt !== null;
+const isStartupModeName = (value) => STARTUP_MODE_ENTRIES.some((entry) => entry.name === value);
+const getStartupModeByIndex = (index) => STARTUP_MODE_ENTRIES[(0, cliShellConfig_1.clamp)(index, 0, STARTUP_MODE_ENTRIES.length - 1)]?.name ?? null;
+const getStartupModeDisplayValue = (mode) => `/${mode}-mode`;
+const printStartupModePromptLine = () => {
+    for (const [index, entry] of STARTUP_MODE_ENTRIES.entries()) {
+        process.stdout.write(`  ${cliShellConfig_1.SHELL_THEME.command(String(index + 1))} ${cliShellConfig_1.SHELL_THEME.command(entry.name.padEnd(10))} ${cliShellConfig_1.SHELL_THEME.muted(entry.summary)}\n`);
+    }
+};
+const resolveStartupModeInput = (rawValue) => {
+    const normalized = rawValue.trim().toLowerCase().replace(/^\//, "");
+    if (!normalized) {
+        return STARTUP_MODE_ENTRIES[0]?.name ?? null;
+    }
+    if (normalized === "1" || normalized === "single" || normalized === "single-mode" || normalized === "single-robot" || normalized === "robot") {
+        return "single";
+    }
+    if (normalized === "2" || normalized === "assembly" || normalized === "assembly-mode" || normalized === "assemble") {
+        return "assembly";
+    }
+    if (normalized === "3" || normalized === "substitute" || normalized === "substitute-mode" || normalized === "replace") {
+        return "substitute";
+    }
+    if (normalized === "4" || normalized === "preview" || normalized === "preview-mode" || normalized === "gallery" || normalized === "preview-generation") {
+        return "preview";
+    }
+    return null;
+};
+const resolveStartupModeSelection = (rawValue, options = {}) => {
+    const normalized = rawValue.trim();
+    if (normalized.length === 0) {
+        return options.allowEmptySelection ? getStartupModeByIndex(options.selectedIndex ?? 0) : null;
+    }
+    const resolved = resolveStartupModeInput(normalized);
+    return resolved && isStartupModeName(resolved) ? resolved : null;
+};
 const getSavePathPromptText = (savePrompt) => `save path  Enter uses ${(0, cliShellConfig_1.quoteForPreview)(savePrompt.defaultPath)}`;
 const getVisualizerExitPromptText = (exitPrompt) => exitPrompt.canStopVisualizer
     ? exitPrompt.sessionId
@@ -418,6 +475,9 @@ const describeLocalSourceValue = (value) => {
 const getLoadedSourceContextRows = (state) => {
     const loadedSource = state.loadedSource;
     if (!loadedSource) {
+        if (state.startupModePrompt) {
+            return [];
+        }
         if (state.repoSourceContext) {
             return [
                 { label: "source", value: state.repoSourceContext.sourceLabel },
@@ -521,7 +581,11 @@ const printRootOptions = (state) => {
     (0, cliShellUi_1.printSectionTitle)("context");
     (0, cliShellUi_1.printContextRows)(getLoadedSourceContextRows(state));
     (0, cliShellUi_1.printSectionTitle)("actions");
-    (0, cliShellUi_1.printCommandList)(getReadySourceLabel(state) ? getLoadedRootCommandList(state) : START_ROOT_MENU_ENTRIES);
+    (0, cliShellUi_1.printCommandList)(state.startupModePrompt
+        ? STARTUP_MODE_ENTRIES
+        : getReadySourceLabel(state)
+            ? getLoadedRootCommandList(state)
+            : START_ROOT_MENU_ENTRIES);
     (0, cliShellUi_1.printSectionTitle)("system");
     (0, cliShellUi_1.printCommandList)(cliShellConfig_1.SHELL_BUILTIN_COMMANDS);
 };
@@ -531,6 +595,7 @@ const printRootTaskOptions = (_task) => {
         lastUrdfPath: undefined,
         loadedSource: null,
         sharedSessionId: undefined,
+        startupModePrompt: null,
         repoIntentPrompt: null,
         repoSourceContext: null,
     });
@@ -559,10 +624,10 @@ const getSessionSourceValue = (session, keys) => {
 };
 const getSessionPurposeText = (session) => {
     if (session.command === "assemble") {
-        return "Create a shared local assembly workspace from one or more URDF files.";
+        return "Provide the base file, then add more files if needed.";
     }
     if (session.command === "replace-subrobot") {
-        return "Replace an embedded robot with a new one and save an updated URDF.";
+        return "Provide the host and replacement files.";
     }
     if (session.command === "urdf-to-mjcf") {
         return "Export the current URDF as MJCF.";
@@ -587,21 +652,44 @@ const getSessionPurposeText = (session) => {
             return getShellCommandSummary(session.command);
     }
 };
+const getPendingPromptText = (pending) => pending.expectsPath
+    ? `paste or drop ${pending.title.toLowerCase()}`
+    : `enter ${pending.title.toLowerCase()}`;
+const getEmptySessionInputText = (session) => {
+    switch (session.label) {
+        case "open":
+            return "paste or drop a file, folder, zip, or GitHub repo";
+        case "inspect":
+            return "paste or drop a folder, file, or GitHub repo";
+        case "assemble":
+            return "paste or drop 1 base source file";
+        case "replace":
+            return "paste or drop 1 source file to replace";
+        default:
+            return null;
+    }
+};
+const getRootTaskInputText = (task) => {
+    switch (task) {
+        case "open":
+            return "paste or drop a file, folder, zip, or GitHub repo";
+        case "inspect":
+            return "paste or drop a folder, file, or GitHub repo";
+        case "check":
+            return "paste or drop a URDF file, or use /health /validate /orientation";
+        case "convert":
+            return "paste or drop a XACRO file, or use /xacro /mjcf /usd";
+        case "fix":
+            return "paste or drop a folder or URDF file";
+    }
+};
 const getSessionNextText = (session) => {
     if (session.pending) {
-        return `paste ${session.pending.title.toLowerCase()}`;
+        return getPendingPromptText(session.pending);
     }
-    if (session.label === "open" && session.args.size === 0) {
-        return "paste repo or local path";
-    }
-    if (session.label === "inspect" && session.args.size === 0) {
-        return "paste repo or local folder";
-    }
-    if (session.label === "assemble" && session.args.size === 0) {
-        return "paste a base URDF path";
-    }
-    if (session.label === "replace" && session.args.size === 0) {
-        return "paste the host robot file";
+    const emptyInputText = session.args.size === 0 ? getEmptySessionInputText(session) : null;
+    if (emptyInputText) {
+        return emptyInputText;
     }
     const requirementStatus = getRequirementStatus(session);
     if (requirementStatus.ready) {
@@ -677,7 +765,12 @@ const getSessionContextRows = (state, session) => {
         rows.push({ label: "source", value: describeLocalSourceValue(urdfSource) });
     }
     else {
-        rows.push(...getLoadedSourceContextRows(state).filter((row) => row.label === "source" || row.label === "entry"));
+        if (!((session.command === "replace-subrobot" || session.command === "assemble") && session.args.size === 0)) {
+            rows.push(...getLoadedSourceContextRows({
+                ...state,
+                startupModePrompt: null,
+            }).filter((row) => row.label === "source" || row.label === "entry"));
+        }
     }
     if (urdfSource) {
         const sourceValue = rows.find((row) => row.label === "source")?.value ?? "";
@@ -736,6 +829,7 @@ const getPersistentTtyContextRows = (rows, hasHistory) => {
     const compactRows = rows.filter((row) => importantLabels.has(row.label));
     return compactRows.length > 0 ? compactRows : rows;
 };
+const shouldHideEmptyStateNextRow = (state, hasHistory) => !hasHistory && Boolean(state.session || state.rootTask) && !state.repoIntentPrompt && !state.candidatePicker;
 const buildSessionNarrativeLines = (state, session) => getSessionContextRows(state, session)
     .filter((row) => row.label === "source" || row.label === "action" || row.label === "next")
     .map((row) => `${row.label} ${row.value}`);
@@ -815,7 +909,7 @@ const getOptionSummary = (session, key, option) => {
     }
     if (key === "urdf") {
         if (session.command === "replace-subrobot") {
-            return "Host URDF or XACRO that already contains the embedded robot you want to update.";
+            return "Source file that contains the robot subtree you want to replace.";
         }
         return "URDF file path.";
     }
@@ -871,7 +965,7 @@ const getOptionSummary = (session, key, option) => {
         return "Treat warnings as failures.";
     }
     if (key === "replacement") {
-        return "Replacement URDF file to import into the host robot.";
+        return "Replacement source file.";
     }
     if (key === "replace-root") {
         return "Root link of the old embedded robot subtree to remove from the host.";
@@ -1039,7 +1133,7 @@ const getRunPromptForOptionalSessionStep = (state, session) => {
 };
 const printSessionStatus = (state, session) => {
     (0, cliShellUi_1.printSectionTitle)("context");
-    (0, cliShellUi_1.printContextRows)(getSessionContextRows(state, session));
+    (0, cliShellUi_1.printContextRows)(getSessionContextRows(state, session).filter((row) => !(session.pending && row.label === "next")));
 };
 const printSessionPreview = (state, session) => {
     (0, cliShellUi_1.printSectionTitle)("context");
@@ -1352,13 +1446,23 @@ const getPendingValuePrompt = (state, session, key, slashName) => {
         };
     }
     if (key === "urdf") {
+        if (session.command === "assemble") {
+            return {
+                key,
+                slashName,
+                title: "1 base source file",
+                examples: ["./robot.urdf"],
+                notes: [],
+                expectsPath: true,
+            };
+        }
         if (session.command === "replace-subrobot") {
             return {
                 key,
                 slashName,
-                title: "Host robot file",
-                examples: ["./amr.urdf", "./amr.urdf.xacro"],
-                notes: ["This is the robot that already contains the embedded arm or subrobot you want to replace."],
+                title: "1 source file to replace",
+                examples: ["./amr.urdf"],
+                notes: [],
                 expectsPath: true,
             };
         }
@@ -1430,9 +1534,9 @@ const getPendingValuePrompt = (state, session, key, slashName) => {
         return {
             key,
             slashName,
-            title: "Replacement robot file",
+            title: "1 replacement source file",
             examples: ["./new-arm.urdf"],
-            notes: ["This is the new robot that will replace the embedded subtree in the host."],
+            notes: [],
             expectsPath: true,
         };
     }
@@ -1491,15 +1595,6 @@ const getPendingValuePrompt = (state, session, key, slashName) => {
 const printPendingValuePrompt = (pending) => {
     process.stdout.write(`\n${cliShellConfig_1.SHELL_THEME.section("input")}\n`);
     process.stdout.write(`${cliShellConfig_1.SHELL_THEME.command(pending.title)}\n`);
-    if (pending.examples.length === 1) {
-        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(`example: ${pending.examples[0]}`)}\n`);
-    }
-    else if (pending.examples.length > 1) {
-        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("examples:")}\n`);
-        for (const example of pending.examples) {
-            process.stdout.write(`  ${cliShellConfig_1.SHELL_THEME.muted(example)}\n`);
-        }
-    }
     for (const note of pending.notes) {
         process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning(note)}\n`);
     }
@@ -2126,46 +2221,6 @@ const applyWorkingUrdfSnapshot = (state, urdfPath) => {
         return;
     }
     rememberDirectUrdfSource(state, urdfPath);
-};
-const dismissResumePrompt = (state) => {
-    state.resumePrompt = null;
-};
-const getResumePromptSourceLabel = (snapshot) => {
-    const source = snapshot.loadedSource;
-    if (!source) {
-        return (0, cliShellConfig_1.quoteForPreview)(snapshot.workingUrdfPath);
-    }
-    if (source.source === "github") {
-        return `GitHub ${(0, cliShellConfig_1.quoteForPreview)(source.githubRef ?? snapshot.workingUrdfPath)}`;
-    }
-    if (source.source === "local-repo") {
-        return source.extractedArchivePath
-            ? `extracted folder ${(0, cliShellConfig_1.quoteForPreview)(source.localPath ?? snapshot.workingUrdfPath)}`
-            : `folder ${(0, cliShellConfig_1.quoteForPreview)(source.localPath ?? snapshot.workingUrdfPath)}`;
-    }
-    return source.extractedArchivePath
-        ? `extracted file ${(0, cliShellConfig_1.quoteForPreview)(source.localPath ?? snapshot.workingUrdfPath)}`
-        : describeLocalSourceValue(source.localPath ?? snapshot.workingUrdfPath);
-};
-const formatResumePromptLine = (snapshot) => `resume ${snapshot.sessionId} from ${getResumePromptSourceLabel(snapshot)}  Enter resumes  Esc skips`;
-const startStartupResumeCheck = (state, onAvailable) => {
-    const snapshot = (0, sharedSession_1.readLatestIluSharedSession)();
-    if (!snapshot || state.resumePrompt) {
-        return;
-    }
-    state.resumePrompt = snapshot;
-    onAvailable(snapshot);
-};
-const getActiveResumePrompt = (state) => !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker ? state.resumePrompt : null;
-const acceptResumePrompt = (state) => {
-    const snapshot = state.resumePrompt;
-    if (!snapshot) {
-        throw new Error("No resumable ilu session is available.");
-    }
-    dismissResumePrompt(state);
-    const attached = (0, sharedSession_1.attachShellToSharedSession)(state, snapshot.sessionId);
-    syncSaveBaselineFromSnapshot(state, attached);
-    return attached;
 };
 const runValidationAndHealthChecks = (urdfPath) => {
     const validationExecution = executeCliCommand("validate", new Map([["urdf", urdfPath]]));
@@ -4116,6 +4171,11 @@ const openPendingForSession = (state, session, pending) => {
     }
     session.pending = getPendingValuePrompt(state, session, pending.key, pending.slashName);
 };
+const openSessionFollowupPending = (state, session, changedKey) => {
+    if (session.command === "replace-subrobot" && changedKey === "urdf" && !session.args.has("replacement")) {
+        session.pending = getPendingValuePrompt(state, session, "replacement", getPreferredSlashName(session, "replacement"));
+    }
+};
 const inferFreeformSessionTarget = (session, rawValue) => {
     const githubValue = detectGitHubReferenceInput(rawValue);
     if (githubValue &&
@@ -4371,6 +4431,7 @@ const shouldTreatAsSlashInput = (rawValue, state) => {
     return true;
 };
 const startRootTaskAction = (task, action, state, feedback) => {
+    clearStartupModePrompt(state);
     state.rootTask = task;
     clearRepoIntentPrompt(state);
     (0, cliShellConfig_1.clearCandidatePicker)(state);
@@ -4381,6 +4442,7 @@ const startRootTaskAction = (task, action, state, feedback) => {
     }
 };
 const startRootShellCommand = (entry, state, feedback) => {
+    clearStartupModePrompt(state);
     state.rootTask = null;
     clearRepoIntentPrompt(state);
     (0, cliShellConfig_1.clearCandidatePicker)(state);
@@ -4389,6 +4451,59 @@ const startRootShellCommand = (entry, state, feedback) => {
     if (state.session) {
         openPendingForSession(state, state.session, entry.openPending);
     }
+};
+const applyStartupModeSelection = (state, mode, feedback) => {
+    clearStartupModePrompt(state);
+    clearRepoIntentPrompt(state);
+    (0, cliShellConfig_1.clearCandidatePicker)(state);
+    (0, cliShellConfig_1.clearXacroRetry)(state);
+    state.rootTask = null;
+    state.session = null;
+    if (mode === "single") {
+        state.rootTask = "open";
+        (0, cliShellConfig_1.pushFeedback)(feedback, "info", "single robot mode");
+        return;
+    }
+    if (mode === "preview") {
+        state.rootTask = "open";
+        (0, cliShellConfig_1.pushFeedback)(feedback, "info", "preview generation mode");
+        return;
+    }
+    const rootEntry = cliShellConfig_1.ROOT_SHELL_COMMANDS.find((entry) => mode === "assembly" ? entry.name === "assemble" : entry.name === "replace");
+    if (!rootEntry) {
+        throw new Error(`Startup mode ${mode} is not available.`);
+    }
+    startRootShellCommand(rootEntry, state, feedback);
+};
+const printStartupModeSelectionResult = (state) => {
+    if (state.session?.pending) {
+        printPendingValuePrompt(state.session.pending);
+        return;
+    }
+    if (state.session) {
+        printSessionOptions(state, state.session);
+        return;
+    }
+    if (state.rootTask) {
+        printRootTaskOptions(state.rootTask);
+    }
+};
+const syncStartupModePromptInput = (state, selectedIndex, setInput) => {
+    if (!hasStartupModePrompt(state)) {
+        return;
+    }
+    const mode = getStartupModeByIndex(selectedIndex);
+    if (!mode) {
+        return;
+    }
+    setInput(getStartupModeDisplayValue(mode));
+};
+const isStartupModeDisplayInput = (value, selectedIndex) => {
+    const mode = getStartupModeByIndex(selectedIndex);
+    if (!mode) {
+        return false;
+    }
+    return value.trim().toLowerCase() === getStartupModeDisplayValue(mode);
 };
 const printVisualizerShellAction = async (state) => {
     process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("starting URDF Studio if needed...")}\n`);
@@ -4459,6 +4574,14 @@ const handleRootSlashCommand = async (slashCommand, state, close) => {
     }
     if (slashCommand === "last") {
         printLastUrdf(state);
+        return;
+    }
+    const startupModeSlash = resolveStartupModeSelection(slashCommand);
+    if (startupModeSlash) {
+        const feedback = [];
+        applyStartupModeSelection(state, startupModeSlash, feedback);
+        (0, cliShellConfig_1.flushFeedback)(feedback);
+        printStartupModeSelectionResult(state);
         return;
     }
     if (slashCommand === "run") {
@@ -4914,6 +5037,7 @@ const handlePendingValue = (input, state) => {
     if (setSessionValue(state, session, session.pending.key, input, feedback)) {
         const changedKey = session.pending.key;
         session.pending = null;
+        openSessionFollowupPending(state, session, changedKey);
         (0, cliShellConfig_1.flushFeedback)(feedback);
         const { automation, preview } = applyValueChangeEffects(state, session, changedKey);
         if (automation) {
@@ -4953,6 +5077,7 @@ const applyFreeformInputToSession = (state, session, rawValue, feedback) => {
     if (!setSessionValue(state, session, target.key, target.value, feedback)) {
         return null;
     }
+    openSessionFollowupPending(state, session, target.key);
     return {
         session,
         key: target.key,
@@ -4963,6 +5088,7 @@ const applyFreeformInputToRootState = (state, rawValue, feedback) => {
     if (!plan) {
         return null;
     }
+    clearStartupModePrompt(state);
     clearRepoSourceContext(state);
     state.rootTask = null;
     state.session = createSession(plan.command, state, plan.label, feedback);
@@ -5158,6 +5284,16 @@ const getFullRootMenuEntries = () => {
     return entries;
 };
 const getRootMenuEntries = (state) => {
+    if (state.startupModePrompt) {
+        return [
+            ...STARTUP_MODE_ENTRIES.map((entry) => ({
+                name: entry.name,
+                summary: entry.summary,
+                kind: "task",
+            })),
+            ...ROOT_SYSTEM_MENU_ENTRIES,
+        ];
+    }
     if (state.repoIntentPrompt) {
         return getRepoIntentMenuEntries();
     }
@@ -5250,7 +5386,13 @@ const getSlashMenuEntries = (state, input) => {
     if (!parsed || parsed.inlineValue) {
         return [];
     }
-    const primaryEntries = matchMenuEntries(state.session ? getSessionMenuEntries(state, state.session) : getRootMenuEntries(state), parsed.slashCommand);
+    const rootEntries = !state.session &&
+        hasStartupModePrompt(state) &&
+        parsed.slashCommand &&
+        !STARTUP_MODE_ENTRIES.some((entry) => entry.name.startsWith(parsed.slashCommand))
+        ? getFullRootMenuEntries()
+        : getRootMenuEntries(state);
+    const primaryEntries = matchMenuEntries(state.session ? getSessionMenuEntries(state, state.session) : rootEntries, parsed.slashCommand);
     if (state.session ||
         state.rootTask ||
         !state.lastUrdfPath ||
@@ -5482,11 +5624,11 @@ const getPromptPlaceholder = (state) => {
             ? "up/down choose, Enter confirms, 1 quits Studio, 2 keeps it open"
             : "up/down choose, Enter confirms, 1 exits, 2 stays here";
     }
-    if (!state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && state.resumePrompt) {
-        return "Enter resumes the last session or Esc skips";
-    }
     if (!state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && state.updatePrompt) {
         return "Enter updates now or Esc skips";
+    }
+    if (!state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && state.startupModePrompt) {
+        return "1 single  2 assembly  3 substitute  4 preview";
     }
     if (state.repoIntentPrompt) {
         return "arrows choose what to do with this repo, Enter selects";
@@ -5495,27 +5637,14 @@ const getPromptPlaceholder = (state) => {
         return "arrows choose a match, Enter loads it";
     }
     if (state.session?.pending) {
-        return state.session.pending.examples[0] ?? state.session.pending.title;
+        return getPendingPromptText(state.session.pending);
     }
-    if (state.session?.label === "open" && state.session.args.size === 0) {
-        return "paste repo or local path";
-    }
-    if (state.session?.label === "inspect" && state.session.args.size === 0) {
-        return "paste repo or local folder";
+    const emptySessionInputText = state.session && state.session.args.size === 0 ? getEmptySessionInputText(state.session) : null;
+    if (emptySessionInputText) {
+        return emptySessionInputText;
     }
     if (!state.session && state.rootTask) {
-        switch (state.rootTask) {
-            case "open":
-                return "paste repo or local path";
-            case "inspect":
-                return "paste repo or local folder or .urdf";
-            case "check":
-                return "drop a local .urdf or use /health /validate /orientation";
-            case "convert":
-                return "drop a local .xacro or use /xacro /mjcf /usd";
-            case "fix":
-                return "paste repo or local folder or .urdf";
-        }
+        return getRootTaskInputText(state.rootTask);
     }
     if (!state.session) {
         if (state.repoSourceContext) {
@@ -5524,7 +5653,7 @@ const getPromptPlaceholder = (state) => {
         if (state.lastUrdfPath) {
             return "use /align /analyze /health /validate /orientation or paste another source";
         }
-        return "paste repo or local path  / for actions";
+        return state.startupModePrompt ? "1 single  2 assembly  3 substitute  4 preview" : "paste or drop a file, folder, zip, or GitHub repo  / for actions";
     }
     const requirementStatus = getRequirementStatus(state.session);
     if (requirementStatus.ready) {
@@ -5545,12 +5674,17 @@ const buildTtyShellFrame = (state, view) => {
         view.promptSelectionKey = promptSelectionKey;
         view.promptOptionIndex = 0;
     }
-    const menuEntries = getSlashMenuEntries(state, view.input);
-    const menuWindow = getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
-    view.menuIndex = menuWindow.selectedIndex;
+    const menuEntries = hasStartupModePrompt(state) ? [] : getSlashMenuEntries(state, view.input);
+    const menuWindow = hasStartupModePrompt(state)
+        ? { selectedIndex: view.menuIndex, start: 0, visible: [] }
+        : getMenuWindow(menuEntries, view.menuIndex, Math.max(4, Math.min(8, rows - 16)));
+    if (!hasStartupModePrompt(state)) {
+        view.menuIndex = menuWindow.selectedIndex;
+    }
     const hasHistory = view.timeline.length > 0 || Boolean(view.output) || Boolean(view.notice);
     const lines = [];
-    lines.push(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)} ${cliShellConfig_1.SHELL_THEME.muted("urdf shell")}`);
+    lines.push(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)}`);
+    lines.push("");
     if (!hasHistory) {
         lines.push(cliShellConfig_1.SHELL_THEME.muted(cliShellConfig_1.ROOT_GUIDANCE));
     }
@@ -5586,7 +5720,7 @@ const buildTtyShellFrame = (state, view) => {
         }
     }
     else if (state.session) {
-        for (const row of getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory)) {
+        for (const row of getPersistentTtyContextRows(getSessionContextRows(state, state.session), hasHistory).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state, hasHistory)))) {
             lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
     }
@@ -5595,7 +5729,7 @@ const buildTtyShellFrame = (state, view) => {
             { label: "source", value: "none yet", tone: "muted" },
             { label: "action", value: getRootTaskSummary(state.rootTask), tone: "muted" },
             { label: "next", value: "paste input directly or type /", tone: "accent" },
-        ], hasHistory)) {
+        ], hasHistory).filter((row) => !(row.label === "next" && shouldHideEmptyStateNextRow(state, hasHistory)))) {
             lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
     }
@@ -5603,7 +5737,15 @@ const buildTtyShellFrame = (state, view) => {
         for (const row of getPersistentTtyContextRows(getLoadedSourceContextRows(state), hasHistory).filter((row) => !(hasHistory && row.label === "next"))) {
             lines.push((0, cliShellUi_1.renderContextRow)(row));
         }
-        if (!getReadySourceLabel(state) && !hasHistory) {
+        if (state.startupModePrompt && !hasHistory) {
+            for (const [index, entry] of STARTUP_MODE_ENTRIES.entries()) {
+                const prefix = index === (0, cliShellConfig_1.clamp)(view.menuIndex, 0, STARTUP_MODE_ENTRIES.length - 1)
+                    ? cliShellConfig_1.SHELL_THEME.accent(">")
+                    : cliShellConfig_1.SHELL_THEME.muted(String(index + 1));
+                lines.push(`  ${prefix} ${cliShellConfig_1.SHELL_THEME.command(entry.name.padEnd(10))} ${cliShellConfig_1.SHELL_THEME.muted(entry.summary)}`);
+            }
+        }
+        else if (!getReadySourceLabel(state) && !hasHistory) {
             lines.push((0, cliShellUi_1.renderContextRow)({ label: "help", value: "/ shows direct actions when you need them", tone: "muted" }));
         }
     }
@@ -5617,10 +5759,7 @@ const buildTtyShellFrame = (state, view) => {
     if (view.busy) {
         lines.push(`  ${cliShellConfig_1.SHELL_THEME.icon("…")} ${cliShellConfig_1.SHELL_THEME.muted(`${view.busy.title}  ${view.busy.lines.join("  ")}`)}`);
     }
-    if (state.resumePrompt && !view.busy) {
-        lines.push(`  ${cliShellConfig_1.SHELL_THEME.icon("↺")} ${cliShellConfig_1.SHELL_THEME.muted(formatResumePromptLine(state.resumePrompt))}`);
-    }
-    if (state.updatePrompt && !state.resumePrompt && !view.busy) {
+    if (state.updatePrompt && !view.busy) {
         lines.push(`  ${cliShellConfig_1.SHELL_THEME.icon("↑")} ${cliShellConfig_1.SHELL_THEME.muted((0, cliShellConfig_1.formatUpdatePromptLine)(state.updatePrompt))}`);
     }
     if (activeChoicePrompt && !view.busy) {
@@ -5643,8 +5782,15 @@ const buildTtyShellFrame = (state, view) => {
         !activeSuggestedAction &&
         (view.timeline.length === 0 || Boolean(state.session) || Boolean(state.candidatePicker));
     const placeholder = shouldShowPlaceholder ? getPromptPlaceholder(state) : "";
-    lines.push(`${cliShellConfig_1.SHELL_THEME.command(promptLabel)} ${view.input}${view.busy ? cliShellConfig_1.SHELL_THEME.muted("working...") : placeholder ? cliShellConfig_1.SHELL_THEME.muted(placeholder) : ""}`);
-    if (state.session?.pending && !view.input.startsWith("/")) {
+    const promptValue = view.input.length > 0
+        ? view.input
+        : view.busy
+            ? cliShellConfig_1.SHELL_THEME.muted("working...")
+            : placeholder
+                ? cliShellConfig_1.SHELL_THEME.muted(placeholder)
+                : "";
+    lines.push(`  ${cliShellConfig_1.SHELL_THEME.inputBand(` ${promptLabel} ${promptValue} `)}`);
+    if (state.session?.pending && !view.input.startsWith("/") && hasHistory) {
         const hasExamples = state.session.pending.examples.length > 0;
         const hasNotes = state.session.pending.notes.length > 0;
         if (hasExamples) {
@@ -5727,6 +5873,7 @@ const printTtyShellSnapshot = (state, view) => {
     process.stdout.write("\u001b[H\u001b[J");
     process.stdout.write(lines.join("\n"));
     process.stdout.write("\n");
+    printExitResumeHint(state);
 };
 const completeTtyPathInput = (input, state) => {
     if (state.session?.pending && state.session.pending.expectsPath) {
@@ -5801,6 +5948,7 @@ const runLineInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
         rootTask: null,
+        startupModePrompt: options.attachSessionId || options.initialSlashCommand ? null : {},
         repoIntentPrompt: null,
         repoSourceContext: null,
         candidatePicker: null,
@@ -5833,6 +5981,7 @@ const runLineInteractiveShell = async (options = {}) => {
     const closeLineShell = () => {
         clearSavePrompt(state);
         clearExitPrompt(state);
+        printExitResumeHint(state);
         close();
     };
     const requestLineClose = () => {
@@ -5864,6 +6013,9 @@ const runLineInteractiveShell = async (options = {}) => {
         }
     });
     (0, cliShellUi_1.printRootQuickStart)();
+    if (state.startupModePrompt) {
+        printStartupModePromptLine();
+    }
     if (options.attachSessionId) {
         try {
             const snapshot = (0, sharedSession_1.attachShellToSharedSession)(state, options.attachSessionId);
@@ -5874,11 +6026,6 @@ const runLineInteractiveShell = async (options = {}) => {
         catch (error) {
             process.stdout.write(`${cliShellConfig_1.SHELL_THEME.warning(error instanceof Error ? error.message : String(error))}\n`);
         }
-    }
-    else if (!options.initialSlashCommand) {
-        startStartupResumeCheck(state, (snapshot) => {
-            process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(formatResumePromptLine(snapshot))}\n`);
-        });
     }
     if (options.initialSlashCommand) {
         const parsed = parseSlashInput(options.initialSlashCommand);
@@ -5895,11 +6042,22 @@ const runLineInteractiveShell = async (options = {}) => {
             const isSlashInput = shouldTreatAsSlashInput(line, state);
             const bangCommand = parseBangInput(line);
             const activeSavePrompt = getActiveSavePrompt(state);
-            const activeResumePrompt = getActiveResumePrompt(state);
             const activeLoadPreflightPrompt = state.loadPreflightPrompt;
             const activeSuggestedAction = getActiveSuggestedAction(state);
+            const startupMode = hasStartupModePrompt(state)
+                ? resolveStartupModeSelection(line, { allowEmptySelection: true })
+                : null;
             if (!activeSavePrompt && activeSuggestedAction && (isSlashInput || bangCommand)) {
                 bypassSuggestedAction(state, activeSuggestedAction);
+            }
+            if (hasStartupModePrompt(state) && !isSlashInput && !bangCommand && startupMode) {
+                const feedback = [];
+                applyStartupModeSelection(state, startupMode, feedback);
+                (0, cliShellConfig_1.flushFeedback)(feedback);
+                printStartupModeSelectionResult(state);
+                rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
+                rl.prompt();
+                continue;
             }
             if (activeSavePrompt) {
                 if (activeSavePrompt.phase === "confirm") {
@@ -5958,37 +6116,6 @@ const runLineInteractiveShell = async (options = {}) => {
                     rl.prompt();
                 }
                 continue;
-            }
-            if (activeResumePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker) {
-                const normalizedDecision = trimmed.toLowerCase();
-                if (!trimmed) {
-                    try {
-                        const snapshot = acceptResumePrompt(state);
-                        process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(`resumed session ${snapshot.sessionId}`)}\n`);
-                        (0, cliShellUi_1.printContextRows)(getLoadedSourceContextRows(state));
-                    }
-                    catch (error) {
-                        (0, cliShellConfig_1.writeFeedback)({
-                            kind: "warning",
-                            text: error instanceof Error ? error.message : String(error),
-                        });
-                    }
-                    rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
-                    rl.prompt();
-                    continue;
-                }
-                if (normalizedDecision === "n" ||
-                    normalizedDecision === "no" ||
-                    normalizedDecision === "skip" ||
-                    normalizedDecision === "fresh" ||
-                    normalizedDecision === "later") {
-                    dismissResumePrompt(state);
-                    (0, cliShellConfig_1.writeFeedback)({ kind: "info", text: "starting fresh" });
-                    rl.setPrompt((0, cliShellConfig_1.formatShellPrompt)(state));
-                    rl.prompt();
-                    continue;
-                }
-                dismissResumePrompt(state);
             }
             if (activeLoadPreflightPrompt && !isSlashInput && !bangCommand) {
                 const normalizedDecision = trimmed.toLowerCase();
@@ -6190,7 +6317,7 @@ const runLineInteractiveShell = async (options = {}) => {
                 }
                 else {
                     (0, cliShellConfig_1.flushFeedback)(feedback);
-                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste or drop a file, folder, zip, or GitHub repo  / for actions")}\n`);
                 }
             }
             else {
@@ -6225,7 +6352,7 @@ const runLineInteractiveShell = async (options = {}) => {
                 }
                 else {
                     (0, cliShellConfig_1.flushFeedback)(feedback);
-                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste repo or local path  / for actions")}\n`);
+                    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted("paste or drop a file, folder, zip, or GitHub repo  / for actions")}\n`);
                 }
             }
             const nextSuggestedAction = getActiveSuggestedAction(state);
@@ -6248,6 +6375,7 @@ const runTtyInteractiveShell = async (options = {}) => {
     const state = {
         session: null,
         rootTask: null,
+        startupModePrompt: options.attachSessionId || options.initialSlashCommand ? null : {},
         repoIntentPrompt: null,
         repoSourceContext: null,
         candidatePicker: null,
@@ -6282,7 +6410,17 @@ const runTtyInteractiveShell = async (options = {}) => {
         closed = true;
     };
     const setInput = (nextInput) => {
+        if (hasStartupModePrompt(state) && nextInput.length === 0) {
+            const startupMode = getStartupModeByIndex(view.menuIndex);
+            if (startupMode) {
+                view.input = getStartupModeDisplayValue(startupMode);
+                return;
+            }
+        }
         view.input = nextInput;
+        if (hasStartupModePrompt(state)) {
+            return;
+        }
         const menuEntries = getSlashMenuEntries(state, view.input);
         view.menuIndex = menuEntries.length === 0 ? 0 : (0, cliShellConfig_1.clamp)(view.menuIndex, 0, menuEntries.length - 1);
     };
@@ -6450,6 +6588,7 @@ const runTtyInteractiveShell = async (options = {}) => {
         }
     };
     const openRootTask = (task) => {
+        clearStartupModePrompt(state);
         state.rootTask = task;
         state.session = null;
         clearRepoIntentPrompt(state);
@@ -6478,14 +6617,6 @@ const runTtyInteractiveShell = async (options = {}) => {
                 text: error instanceof Error ? error.message : String(error),
             };
         }
-    }
-    else if (!options.initialSlashCommand) {
-        startStartupResumeCheck(state, (snapshot) => {
-            view.notice = {
-                kind: "info",
-                text: `resume ${snapshot.sessionId} or press Esc to start fresh`,
-            };
-        });
     }
     const getBusyStateForSession = (session, changedKey) => {
         if (session.command === "load-source") {
@@ -6608,6 +6739,17 @@ const runTtyInteractiveShell = async (options = {}) => {
             view.notice = { kind: "info", text: getLastUrdfMessage(state) };
             pushTimelineUserEntry(view, "/last");
             archiveAssistantStateToTimeline(view);
+            return true;
+        }
+        if (slashCommand === "single" || slashCommand === "assembly" || slashCommand === "substitute") {
+            const feedback = [];
+            applyStartupModeSelection(state, slashCommand, feedback);
+            setNoticeFromFeedback(view, feedback);
+            pushTimelineUserEntry(view, `/${slashCommand}`);
+            archiveAssistantStateToTimeline(view);
+            if (state.session) {
+                pushTimelineAssistantEntry(view, buildSessionNarrativeLines(state, state.session), "info");
+            }
             return true;
         }
         if (slashCommand === "run") {
@@ -7245,6 +7387,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             pushTimelineUserEntry(view, `/${session.pending.slashName}${(0, cliShellConfig_1.formatInlineValue)(view.input)}`);
             const changedKey = session.pending.key;
             session.pending = null;
+            openSessionFollowupPending(state, session, changedKey);
             const { automation, preview } = runBusyOperation(getBusyStateForSession(session, changedKey), () => applyValueChangeEffects(state, session, changedKey));
             if (automation) {
                 view.notice = automation.notice;
@@ -7271,7 +7414,6 @@ const runTtyInteractiveShell = async (options = {}) => {
         const activeChoicePrompt = syncActivePromptSelection();
         const activeSavePrompt = getActiveSavePrompt(state);
         const activeExitPrompt = activeChoicePrompt?.kind === "exit" ? activeChoicePrompt.prompt : null;
-        const activeResumePrompt = getActiveResumePrompt(state);
         if (activeSavePrompt?.phase === "path") {
             if (isSlashInput || bangCommand) {
                 view.notice = { kind: "info", text: getSavePathPromptText(activeSavePrompt) };
@@ -7315,39 +7457,12 @@ const runTtyInteractiveShell = async (options = {}) => {
             await runPromptSelection(view.promptOptionIndex);
             return;
         }
-        if (activeResumePrompt &&
-            !state.session &&
-            !state.rootTask &&
-            !state.repoIntentPrompt &&
-            !state.candidatePicker &&
-            trimmed.length === 0) {
-            try {
-                const snapshot = acceptResumePrompt(state);
-                pushTimelineAssistantEntry(view, [
-                    `resumed session ${snapshot.sessionId}`,
-                    `source ${getReadySourceLabel(state) ?? (0, cliShellConfig_1.quoteForPreview)(snapshot.workingUrdfPath)}`,
-                    "next /visualize /analyze /health /validate or paste another source",
-                ], "success");
-                view.notice = {
-                    kind: "success",
-                    text: `resumed session ${snapshot.sessionId}`,
-                };
-            }
-            catch (error) {
-                dismissResumePrompt(state);
-                view.notice = {
-                    kind: "warning",
-                    text: error instanceof Error ? error.message : String(error),
-                };
-            }
-            return;
-        }
         if (state.updatePrompt &&
             !state.session &&
             !state.rootTask &&
             !state.repoIntentPrompt &&
             !state.candidatePicker &&
-            trimmed.length === 0) {
+            (trimmed.length === 0 || (hasStartupModePrompt(state) && isStartupModeDisplayInput(trimmed, view.menuIndex)))) {
             const update = state.updatePrompt;
             (0, cliShellConfig_1.dismissUpdatePrompt)(state);
             pushTimelineUserEntry(view, "/update");
@@ -7371,6 +7486,24 @@ const runTtyInteractiveShell = async (options = {}) => {
             }
             archiveAssistantStateToTimeline(view);
             setInput("");
+            return;
+        }
+        const startupModeSelection = hasStartupModePrompt(state)
+            ? resolveStartupModeSelection(trimmed, {
+                allowEmptySelection: true,
+                selectedIndex: view.menuIndex,
+            })
+            : null;
+        if (hasStartupModePrompt(state) && !bangCommand && startupModeSelection) {
+            const feedback = [];
+            applyStartupModeSelection(state, startupModeSelection, feedback);
+            setNoticeFromFeedback(view, feedback);
+            pushTimelineUserEntry(view, trimmed || startupModeSelection);
+            archiveAssistantStateToTimeline(view);
+            setInput("");
+            if (state.session) {
+                pushTimelineAssistantEntry(view, buildSessionNarrativeLines(state, state.session), "info");
+            }
             return;
         }
         const activeSuggestedAction = activeChoicePrompt?.kind === "suggested" ? activeChoicePrompt.prompt : null;
@@ -7596,7 +7729,7 @@ const runTtyInteractiveShell = async (options = {}) => {
             }
             setNoticeFromFeedback(view, feedback);
         }
-        view.notice = { kind: "info", text: "paste repo or local path  / for actions" };
+        view.notice = { kind: "info", text: "paste or drop a file, folder, zip, or GitHub repo  / for actions" };
         setInput("");
     };
     const render = () => {
@@ -7662,9 +7795,13 @@ const runTtyInteractiveShell = async (options = {}) => {
             await handleRootAction(parsed.slashCommand);
         }
     }
+    else if (hasStartupModePrompt(state)) {
+        syncStartupModePromptInput(state, view.menuIndex, setInput);
+    }
     startStartupUpdateCheck(state, () => {
         if (closed ||
-            view.input.length > 0 ||
+            (view.input.length > 0 &&
+                !(hasStartupModePrompt(state) && isStartupModeDisplayInput(view.input, view.menuIndex))) ||
             view.timeline.length > 0 ||
             state.session ||
             state.rootTask ||
@@ -7743,6 +7880,22 @@ const runTtyInteractiveShell = async (options = {}) => {
             }
             return;
         }
+        if (hasStartupModePrompt(state) && !key.ctrl && !key.meta) {
+            const startupShortcut = resolveStartupModeSelection(key.sequence ?? input ?? key.name ?? "");
+            if (startupShortcut) {
+                const feedback = [];
+                applyStartupModeSelection(state, startupShortcut, feedback);
+                setNoticeFromFeedback(view, feedback);
+                pushTimelineUserEntry(view, startupShortcut);
+                archiveAssistantStateToTimeline(view);
+                setInput("");
+                if (state.session) {
+                    pushTimelineAssistantEntry(view, buildSessionNarrativeLines(state, state.session), "info");
+                }
+                queueRender("force");
+                return;
+            }
+        }
         if (key.name === "return" || key.name === "enter") {
             void handleEnter()
                 .then(() => {
@@ -7762,6 +7915,12 @@ const runTtyInteractiveShell = async (options = {}) => {
         if (key.name === "up" || (key.shift && key.name === "tab")) {
             if (activeChoicePrompt && view.input.length === 0) {
                 setPromptOptionIndex(view.promptOptionIndex - 1);
+                queueRender("navigation");
+                return;
+            }
+            if (hasStartupModePrompt(state)) {
+                view.menuIndex = (0, cliShellConfig_1.clamp)(view.menuIndex - 1, 0, STARTUP_MODE_ENTRIES.length - 1);
+                syncStartupModePromptInput(state, view.menuIndex, setInput);
                 queueRender("navigation");
                 return;
             }
@@ -7795,6 +7954,12 @@ const runTtyInteractiveShell = async (options = {}) => {
         if (key.name === "down") {
             if (activeChoicePrompt && view.input.length === 0) {
                 setPromptOptionIndex(view.promptOptionIndex + 1);
+                queueRender("navigation");
+                return;
+            }
+            if (hasStartupModePrompt(state)) {
+                view.menuIndex = (0, cliShellConfig_1.clamp)(view.menuIndex + 1, 0, STARTUP_MODE_ENTRIES.length - 1);
+                syncStartupModePromptInput(state, view.menuIndex, setInput);
                 queueRender("navigation");
                 return;
             }
@@ -7867,9 +8032,9 @@ const runTtyInteractiveShell = async (options = {}) => {
                 });
                 return;
             }
-            if (state.resumePrompt && view.input.length === 0 && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker) {
-                dismissResumePrompt(state);
-                view.notice = { kind: "info", text: "starting fresh" };
+            if (hasStartupModePrompt(state)) {
+                syncStartupModePromptInput(state, view.menuIndex, setInput);
+                view.notice = null;
                 queueRender("navigation");
                 return;
             }
@@ -7942,13 +8107,14 @@ const runTtyInteractiveShell = async (options = {}) => {
             return;
         }
         if (input && !key.ctrl && !key.meta) {
+            if (hasStartupModePrompt(state)) {
+                queueRender("navigation");
+                return;
+            }
             if (activeExitPrompt) {
                 view.notice = { kind: "info", text: getVisualizerExitDecisionHint(activeExitPrompt) };
                 queueRender("navigation");
                 return;
-            }
-            if (state.resumePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && view.input.length === 0) {
-                dismissResumePrompt(state);
             }
             if (state.updatePrompt && !state.session && !state.rootTask && !state.repoIntentPrompt && !state.candidatePicker && view.input.length === 0) {
                 (0, cliShellConfig_1.dismissUpdatePrompt)(state);
@@ -8018,7 +8184,6 @@ const renderShellHelp = () => {
         "  ./robot.urdf       Run validation and a health check",
         "  ./robot.zip        Unpack and check an uploaded archive",
         "  ./robot-folder/    Load a local repo or folder and auto-run checks",
-        "  resume prompt      Reopen the last session with Enter or skip with Esc",
         "  update prompt      If a newer release exists, Enter updates and Esc skips",
         "  exit prompt        If the working copy changed, ilu asks where to save it before quitting",
         "  !xacro            Install or verify the local XACRO runtime",

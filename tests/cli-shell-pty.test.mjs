@@ -39,6 +39,7 @@ ptyTest("TTY shell keeps slash completion on Tab", async () => {
       ILU_DISABLE_UPDATE_CHECK: "1",
     },
     steps: [
+      { delayMs: 150, data: "\r" },
       { delayMs: 150, data: "/v" },
       { delayMs: 300, data: "\t" },
       { delayMs: 300, data: "\r" },
@@ -48,7 +49,126 @@ ptyTest("TTY shell keeps slash completion on Tab", async () => {
 
   assert.equal(result.code, 0);
   assert.match(result.sanitizedOutput, /\/validate/);
-  assert.match(result.sanitizedOutput, /paste urdf file path/i);
+  assert.match(result.sanitizedOutput, /set \/urdf/i);
+});
+
+ptyTest("TTY shell asks for a startup mode before loading", async () => {
+  const result = await runPtyShellSession({
+    env: {
+      ILU_DISABLE_UPDATE_CHECK: "1",
+    },
+    steps: [{ delayMs: 350, data: "\u0003" }],
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.sanitizedOutput, /1 single/i);
+  assert.match(result.sanitizedOutput, /single/i);
+  assert.match(result.sanitizedOutput, /assembly/i);
+  assert.match(result.sanitizedOutput, /substitute/i);
+  assert.match(result.sanitizedOutput, /preview/i);
+});
+
+ptyTest("TTY startup mode selector uses arrows, blocks free typing, and auto-fills the mode command", async () => {
+  const result = await runPtyShellSession({
+    env: {
+      ILU_DISABLE_UPDATE_CHECK: "1",
+    },
+    steps: [
+      { delayMs: 150, data: "\u001b[B" },
+      { delayMs: 250, data: "x" },
+      { delayMs: 350, data: "\u0003" },
+    ],
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.sanitizedOutput, /\/assembly-mode/i);
+  assert.match(result.sanitizedOutput, /> assembly\s+combine robots/i);
+  assert.doesNotMatch(result.sanitizedOutput, /\/assembly-modex/i);
+});
+
+ptyTest("TTY startup mode selector reaches preview with repeated down arrows", async () => {
+  const result = await runPtyShellSession({
+    env: {
+      ILU_DISABLE_UPDATE_CHECK: "1",
+    },
+    steps: [
+      { delayMs: 150, data: "\u001b[B" },
+      { delayMs: 200, data: "\u001b[B" },
+      { delayMs: 200, data: "\u001b[B" },
+      { delayMs: 350, data: "\u0003" },
+    ],
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.sanitizedOutput, /\/preview-mode/i);
+  assert.match(result.sanitizedOutput, /> preview\s+gallery output/i);
+});
+
+ptyTest("TTY substitute mode starts with a compact source prompt", async () => {
+  const result = await runPtyShellSession({
+    env: {
+      ILU_DISABLE_UPDATE_CHECK: "1",
+    },
+    steps: [
+      { delayMs: 150, data: "\u001b[B" },
+      { delayMs: 200, data: "\u001b[B" },
+      { delayMs: 250, data: "\r" },
+      { delayMs: 350, data: "\u0003" },
+    ],
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.sanitizedOutput, /\/substitute-mode/i);
+  assert.match(result.sanitizedOutput, /paste or drop 1 source file to replace/i);
+  assert.doesNotMatch(result.sanitizedOutput, /source\s+none yet/i);
+  assert.doesNotMatch(result.sanitizedOutput, /embedded arm or subrobot you want to replace/i);
+});
+
+ptyTest("TTY assembly mode starts with a compact base-source prompt", async () => {
+  const result = await runPtyShellSession({
+    env: {
+      ILU_DISABLE_UPDATE_CHECK: "1",
+    },
+    steps: [
+      { delayMs: 150, data: "\u001b[B" },
+      { delayMs: 250, data: "\r" },
+      { delayMs: 350, data: "\u0003" },
+    ],
+  });
+
+  assert.equal(result.code, 0);
+  assert.match(result.sanitizedOutput, /\/assembly-mode/i);
+  assert.match(result.sanitizedOutput, /paste or drop 1 base source file/i);
+  assert.doesNotMatch(result.sanitizedOutput, /source\s+none yet/i);
+  assert.doesNotMatch(result.sanitizedOutput, /shared local assembly workspace from one or more urdf files/i);
+});
+
+ptyTest("TTY substitute mode asks for the replacement source after the first file", async () => {
+  const tempDir = createTempDir("ilu-pty-substitute-");
+  const hostUrdfPath = path.join(tempDir, "host.urdf");
+  fs.writeFileSync(hostUrdfPath, '<robot name="host"><link name="base"/></robot>');
+
+  try {
+    const result = await runPtyShellSession({
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+      },
+      steps: [
+        { delayMs: 150, data: "\u001b[B" },
+        { delayMs: 200, data: "\u001b[B" },
+        { delayMs: 250, data: "\r" },
+        { delayMs: 250, data: `${hostUrdfPath}\n` },
+        { delayMs: 500, data: "\u0003" },
+      ],
+      timeoutMs: 8_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /paste or drop 1 replacement source file/i);
+    assert.doesNotMatch(result.sanitizedOutput, /replacement urdf file to import into the host robot/i);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 ptyTest("TTY shell lets arrows pick a candidate entrypoint", async () => {
@@ -69,7 +189,8 @@ ptyTest("TTY shell lets arrows pick a candidate entrypoint", async () => {
         URDF_STUDIO_REPO: missingStudioRepoPath,
       },
       steps: [
-        { delayMs: 150, data: `${tempDir}\n` },
+        { delayMs: 150, data: "\r" },
+        { delayMs: 250, data: `${tempDir}\n` },
         { delayMs: 1_250, data: "\r" },
         { delayMs: 600, data: "\u001b[B" },
         { delayMs: 350, data: "\r" },
@@ -108,7 +229,8 @@ ptyTest("TTY shell lets work-one bypass the repo-fixes review prompt", async () 
         ILU_DISABLE_STUDIO_THUMBNAILS: "1",
       },
       steps: [
-        { delayMs: 150, data: `${tempDir}\n` },
+        { delayMs: 150, data: "\r" },
+        { delayMs: 250, data: `${tempDir}\n` },
         { delayMs: 1_200, data: "\u001b[B" },
         { delayMs: 200, data: "\u001b[B" },
         { delayMs: 300, data: "\r" },
@@ -152,7 +274,7 @@ ptyTest("TTY shell accepts the startup update prompt with Enter", async () => {
   assert.match(result.sanitizedOutput, /npm install -g --ignore-scripts --install-links=true/i);
 });
 
-ptyTest("TTY shell resumes the most recent session on startup", async () => {
+ptyTest("TTY shell starts clean even when a previous session exists", async () => {
   const tempHome = createTempDir("ilu-pty-resume-home-");
   const urdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
   const seedResult = spawnSync(
@@ -200,16 +322,16 @@ ptyTest("TTY shell resumes the most recent session on startup", async () => {
         HOME: tempHome,
       },
       steps: [
-        { delayMs: 350, data: "\r" },
+        { delayMs: 350, data: "" },
         { delayMs: 850, data: "\u0003" },
       ],
       timeoutMs: 8_000,
     });
 
     assert.equal(result.code, 0);
-    assert.match(result.sanitizedOutput, new RegExp(`resume ${sessionId}`));
-    assert.match(result.sanitizedOutput, new RegExp(`resumed session ${sessionId}`));
-    assert.match(result.sanitizedOutput, /working urdf .*research_wheeled_y_up\.urdf/i);
+    assert.doesNotMatch(result.sanitizedOutput, new RegExp(`resume ${sessionId}`));
+    assert.doesNotMatch(result.sanitizedOutput, new RegExp(`resumed session ${sessionId}`));
+    assert.match(result.sanitizedOutput, /1 single\s+2 assembly\s+3 substitute/i);
   } finally {
     fs.rmSync(tempHome, { recursive: true, force: true });
   }
@@ -230,6 +352,7 @@ ptyTest("TTY shell asks to open URDF Studio before the repair recommendation", a
         URDF_STUDIO_REPO: missingStudioRepoPath,
       },
       steps: [
+        { delayMs: 150, data: "\r" },
         { delayMs: 150, data: `${brokenUrdfPath}\n` },
         { delayMs: 1_100, data: "\u001b" },
         { delayMs: 1_100, data: "\r" },
@@ -247,7 +370,7 @@ ptyTest("TTY shell asks to open URDF Studio before the repair recommendation", a
     assert.match(result.sanitizedOutput, /\[Esc\]\s+Continue here/i);
     assert.match(result.sanitizedOutput, /repair mesh paths now\?/i);
     assert.match(result.sanitizedOutput, /repairing mesh paths/i);
-    assert.match(result.sanitizedOutput, /working urdf .*broken\.urdf/i);
+    assert.match(result.sanitizedOutput, /source\s+file .*broken\.urdf/i);
     assert.doesNotMatch(result.sanitizedOutput, /health check passed/i);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -261,6 +384,7 @@ ptyTest("TTY shell lets slash commands bypass recommendation prompts", async () 
       ILU_DISABLE_UPDATE_CHECK: "1",
     },
     steps: [
+      { delayMs: 150, data: "\r" },
       { delayMs: 150, data: `${yUpUrdfPath}\n` },
       { delayMs: 1_100, data: "/orientation" },
       { delayMs: 250, data: "\r" },
@@ -285,6 +409,7 @@ ptyTest("TTY shell offers Studio install when the visualizer is missing", async 
       URDF_STUDIO_API_URL: "http://127.0.0.1:65535/health",
     },
     steps: [
+      { delayMs: 150, data: "\r" },
       { delayMs: 150, data: `${yUpUrdfPath}\n` },
       { delayMs: 1_100, data: "\r" },
       { delayMs: 2_000, data: "2" },
@@ -312,11 +437,12 @@ ptyTest("TTY shell accepts the suggested orientation fix after skipping URDF Stu
       ILU_DISABLE_UPDATE_CHECK: "1",
       URDF_STUDIO_REPO: missingStudioRepoPath,
     },
-      steps: [
-        { delayMs: 150, data: `${yUpUrdfPath}\n` },
-        { delayMs: 1_100, data: "\u001b[B" },
-        { delayMs: 500, data: "\r" },
-        { delayMs: 1_100, data: "1" },
+    steps: [
+      { delayMs: 150, data: "\r" },
+      { delayMs: 150, data: `${yUpUrdfPath}\n` },
+      { delayMs: 1_100, data: "\u001b[B" },
+      { delayMs: 500, data: "\r" },
+      { delayMs: 1_100, data: "1" },
         { delayMs: 1_100, data: "\u0003" },
         { delayMs: 900, data: "2" },
       ],
@@ -379,6 +505,7 @@ ptyTest("TTY shell asks whether to quit URDF Studio on Ctrl+C when Studio is ope
         URDF_STUDIO_API_URL: `http://127.0.0.1:${apiAddress.port}/health`,
       },
       steps: [
+        { delayMs: 150, data: "\r" },
         { delayMs: 150, data: `${yUpUrdfPath}\n` },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "\u0003" },
@@ -466,6 +593,7 @@ ptyTest("TTY shell saves the working URDF before the Studio exit prompt", async 
         URDF_STUDIO_API_URL: `http://127.0.0.1:${apiAddress.port}/health`,
       },
       steps: [
+        { delayMs: 150, data: "\r" },
         { delayMs: 150, data: `${sourcePath}\n` },
         { delayMs: 1_100, data: "\r" },
         { delayMs: 1_100, data: "1" },
@@ -518,6 +646,7 @@ ptyTest("TTY shell applies /align without opening the URDF manually", async () =
       ILU_DISABLE_UPDATE_CHECK: "1",
     },
     steps: [
+      { delayMs: 150, data: "\r" },
       { delayMs: 150, data: `${yUpUrdfPath}\n` },
       { delayMs: 1_100, data: "/align" },
       { delayMs: 250, data: "\r" },
@@ -549,6 +678,7 @@ ptyTest("TTY shell offers a remaining-issues review after a partial repair", asy
         URDF_STUDIO_REPO: missingStudioRepoPath,
       },
       steps: [
+        { delayMs: 150, data: "\r" },
         { delayMs: 150, data: `${brokenUrdfPath}\n` },
         { delayMs: 1_100, data: "\u001b" },
         { delayMs: 1_100, data: "\r" },
@@ -579,6 +709,66 @@ ptyTest("TTY shell exits cleanly on Ctrl+C", async () => {
 
   assert.equal(result.code, 0);
   assert.equal(result.signal, null);
-  assert.match(result.sanitizedOutput, /urdf shell/i);
+  assert.match(result.sanitizedOutput, /i<3urdf/i);
   assert.doesNotMatch(result.output, /\u001b\[H\u001b\[J\n?$/);
+});
+
+ptyTest("TTY shell prints an explicit attach command on exit when a session is open", async () => {
+  const tempHome = createTempDir("ilu-pty-exit-attach-home-");
+  const urdfPath = path.resolve("examples", "orientation-card", "research_wheeled_y_up.urdf");
+  const seedResult = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+        import fs from "node:fs";
+        import path from "node:path";
+        import { writeIluSharedSession } from ${JSON.stringify(pathToFileURL(path.join(rootDir, "dist", "session", "sharedSession.js")).href)};
+        const urdfPath = ${JSON.stringify(urdfPath)};
+        const urdfContent = fs.readFileSync(urdfPath, "utf8");
+        const snapshot = writeIluSharedSession({
+          urdfContent,
+          fileNameHint: "research_wheeled_y_up.urdf",
+          lastUrdfPath: urdfPath,
+          loadedSource: {
+            source: "local-file",
+            urdfPath,
+            localPath: urdfPath,
+          },
+        });
+        process.stdout.write(snapshot.sessionId);
+      `,
+    ],
+    {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        HOME: tempHome,
+      },
+      encoding: "utf8",
+    }
+  );
+
+  try {
+    assert.equal(seedResult.status, 0);
+    const sessionId = seedResult.stdout.trim();
+    assert.match(sessionId, /^[a-f0-9-]+$/i);
+
+    const result = await runPtyShellSession({
+      cliArgs: ["attach", sessionId],
+      env: {
+        ILU_DISABLE_UPDATE_CHECK: "1",
+        HOME: tempHome,
+      },
+      steps: [{ delayMs: 350, data: "\u0003" }],
+      timeoutMs: 8_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.match(result.sanitizedOutput, /reopen this session with:/i);
+    assert.match(result.sanitizedOutput, new RegExp(`ilu attach ${sessionId}`));
+  } finally {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
 });

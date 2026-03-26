@@ -175,9 +175,8 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
         "9. run `ilu bug-report --out <dir>` if you need a support bundle with diagnostics and local inputs",
         "10. use `/` only when you want direct actions like `/analyze` or `/validate`",
         "11. use `/visualize` to open the current robot in URDF Studio",
-        "12. if you reopen ilu after Ctrl+C, ilu offers to resume the last session",
-        "13. use `ilu attach <session-id>` to resume the same robot from another terminal",
-        "14. run `ilu resume` to reopen the most recent session explicitly",
+        "12. use `ilu attach <session-id>` to resume the same robot from another terminal",
+        "13. run `ilu resume` to reopen the most recent session explicitly",
       ],
       theme
     ),
@@ -196,7 +195,7 @@ export const renderHelp = (options: RenderHelpOptions = {}): string => {
     "",
     formatBlock(
       "Shell",
-      ["ilu", "ilu shell", "ilu resume", "ilu attach <session-id>", "Paste owner/repo or drop a local path directly to start. ilu auto-loads the source and runs validation plus a health check when it can. When a repo has many robots, ilu lets you work on one, run /gallery for the repo, or apply /repo-fixes. If you reopen ilu after Ctrl+C, it offers to resume the last session. If a newer release is available, the shell asks whether you want to update. If XACRO runtime is missing, run !xacro in the shell. Use / when you want direct actions like /align, /analyze, /health, /validate, /orientation, /gallery, /repo-fixes, /open, /inspect, or /visualize. Use /show to inspect the current context, /update for latest, and Ctrl+C to quit."],
+      ["ilu", "ilu shell", "ilu resume", "ilu attach <session-id>", "Paste owner/repo or drop a local path directly to start. ilu auto-loads the source and runs validation plus a health check when it can. When a repo has many robots, ilu lets you work on one, run /gallery for the repo, or apply /repo-fixes. Plain `ilu` always starts clean. Use `ilu resume` or `ilu attach <session-id>` when you want to reopen a shared session explicitly. If a newer release is available, the shell asks whether you want to update. If XACRO runtime is missing, run !xacro in the shell. Use / when you want direct actions like /align, /analyze, /health, /validate, /orientation, /gallery, /repo-fixes, /open, /inspect, or /visualize. Use /show to inspect the current context, /update for latest, and Ctrl+C to quit."],
       theme
     ),
     "",
@@ -259,7 +258,7 @@ export const renderResumeHelp = (options: RenderHelpOptions = {}): string => {
     formatBlock(
       "Notes",
       [
-        "Launching plain `ilu` also offers to resume the last session automatically after an interrupted shell.",
+        "Plain `ilu` starts a new shell without reopening the last session automatically.",
         "Use `ilu attach <session-id>` when you need a specific shared session instead of the most recent one.",
       ],
       theme

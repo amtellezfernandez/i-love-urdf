@@ -118,7 +118,7 @@ const printCommandList = (entries, prefix = "/", includeSummary = true) => {
 };
 exports.printCommandList = printCommandList;
 const printRootQuickStart = () => {
-    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)} ${cliShellConfig_1.SHELL_THEME.muted("urdf shell")}\n`);
+    process.stdout.write(`${cliShellConfig_1.SHELL_THEME.brand(cliShellConfig_1.SHELL_BRAND)}\n\n`);
     process.stdout.write(`${cliShellConfig_1.SHELL_THEME.muted(cliShellConfig_1.ROOT_GUIDANCE)}\n`);
 };
 exports.printRootQuickStart = printRootQuickStart;

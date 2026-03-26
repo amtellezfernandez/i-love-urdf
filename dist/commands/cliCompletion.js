@@ -15,6 +15,7 @@ const FILESYSTEM_FLAG_KEYS = new Set([
     "out-dir",
     "path",
     "python",
+    "replacement",
     "right",
     "root",
     "urdf",

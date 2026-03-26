@@ -304,7 +304,7 @@ export declare const URDF_OUTPUT_COMMANDS: Set<"inspect-meshes" | "compress-mesh
 export declare const ADVANCED_OPTION_KEYS: Set<string>;
 export declare const SESSION_OPTION_ORDER: {
     readonly assemble: readonly ["urdf", "attach", "name"];
-    readonly "replace-subrobot": readonly ["urdf", "replace-root", "replacement", "replacement-root", "mount-parent", "mount-joint", "prefix", "xyz", "rpy", "calibrate", "portable", "out"];
+    readonly "replace-subrobot": readonly ["urdf", "replacement", "replace-root", "replacement-root", "mount-parent", "mount-joint", "prefix", "xyz", "rpy", "calibrate", "portable", "out"];
     readonly "bundle-mesh-assets": readonly ["urdf", "out"];
     readonly "set-joint-origin": readonly ["urdf", "joint", "xyz", "rpy", "out"];
     readonly "load-source": readonly ["github", "path", "entry", "out", "ref", "subdir", "args", "python", "wheel", "token", "root"];
@@ -319,7 +319,7 @@ export declare const SESSION_OPTION_ORDER: {
 export declare const MUTUALLY_EXCLUSIVE_OPTION_GROUPS: Partial<Record<SupportedCommandName, readonly (readonly string[])[]>>;
 export declare const SESSION_SLASH_ALIASES: Partial<Record<SupportedCommandName, Readonly<Record<string, string>>>>;
 export declare const CLI_ENTRY_PATH: string;
-export declare const ROOT_GUIDANCE = "paste repo or local path  / actions  !xacro setup  ctrl+c quit";
+export declare const ROOT_GUIDANCE = "1 single  2 assembly  3 substitute  4 preview";
 export declare const formatShellPrompt: (_state: ShellState) => string;
 export declare const hasPendingUpdatePrompt: (state: ShellState) => boolean;
 export declare const dismissUpdatePrompt: (state: ShellState) => void;
