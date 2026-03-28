@@ -6,6 +6,7 @@ import {
   type FixMissingMeshReferencesResult,
 } from "./fixMissingMeshReferences";
 import {
+  createEmptyRepositoryRepoMetadata,
   inspectRepositoryFiles,
   type InspectRepositoryFilesOptions,
   type RepositoryInspectionSummary,
@@ -342,6 +343,7 @@ export const inspectLocalRepositoryUrdfs = async (
     rootPath,
     inspectedPath,
     ...summary,
+    repoMetadata: createEmptyRepositoryRepoMetadata(),
   };
 };
 

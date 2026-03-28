@@ -41,6 +41,10 @@ export declare const COMMAND_CATALOG: {
         readonly sections: readonly ["analyze"];
         readonly usage: readonly ["  gallery-generate --urdf <path> [--out <path>]", "  gallery-generate --local <repo> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--out <path>]"];
     };
+    readonly "gallery-render": {
+        readonly sections: readonly ["analyze"];
+        readonly usage: readonly ["  gallery-render --local <repo> | --github <owner/repo|url> --app <url> --urdf <repo-path> [--urdf <repo-path> ...] [--asset image] [--asset video] --out <path>"];
+    };
     readonly "guess-orientation": {
         readonly sections: readonly ["analyze"];
         readonly usage: readonly ["  guess-orientation --urdf <path> [--target-up <x|y|z>] [--target-forward <x|y|z>]"];
@@ -52,6 +56,10 @@ export declare const COMMAND_CATALOG: {
     readonly "fix-mesh-paths": {
         readonly sections: readonly ["optimize"];
         readonly usage: readonly ["  fix-mesh-paths --urdf <path> [--package <name>] [--out <path>]"];
+    };
+    readonly "bundle-mesh-assets": {
+        readonly sections: readonly ["optimize"];
+        readonly usage: readonly ["  bundle-mesh-assets --urdf <path> [--out <path>]"];
     };
     readonly "mesh-refs": {
         readonly sections: readonly ["analyze"];
@@ -76,6 +84,10 @@ export declare const COMMAND_CATALOG: {
     readonly "set-joint-axis": {
         readonly sections: readonly ["edit"];
         readonly usage: readonly ["  set-joint-axis --urdf <path> --joint <name> --xyz \"0 1 0\" [--out <path>]"];
+    };
+    readonly "set-joint-origin": {
+        readonly sections: readonly ["edit"];
+        readonly usage: readonly ["  set-joint-origin --urdf <path> --joint <name> --xyz \"0 0 0\" --rpy \"0 0 0\" [--out <path>]"];
     };
     readonly "set-joint-type": {
         readonly sections: readonly ["edit"];
@@ -120,6 +132,10 @@ export declare const COMMAND_CATALOG: {
     readonly "merge-urdf": {
         readonly sections: readonly ["edit"];
         readonly usage: readonly ["  merge-urdf --urdf <path> --attach <path[,path]> [--name <robot>] [--spacing <n>] [--out <path>]"];
+    };
+    readonly "replace-subrobot": {
+        readonly sections: readonly ["edit"];
+        readonly usage: readonly ["  replace-subrobot --urdf <path> --replace-root <link> --replacement <path> --replacement-root <link> [--mount-parent <link>] [--mount-joint <name>] [--prefix <value>] [--xyz \"0 0 0\"] [--rpy \"0 0 0\"] [--calibrate] [--portable] [--out <path>]"];
     };
     readonly "mesh-to-assets": {
         readonly sections: readonly ["optimize"];

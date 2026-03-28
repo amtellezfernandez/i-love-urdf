@@ -5,6 +5,9 @@ export type RepositoryNamedFileEntry = RepositoryFileEntry & {
 export type RepositoryUrdfCandidate = {
     path: string;
     name: string;
+    displayName: string;
+    fileBase: string;
+    sourceFile: string;
     hasMeshesFolder: boolean;
     meshesFolderPath?: string;
     hasUnsupportedFormats?: boolean;

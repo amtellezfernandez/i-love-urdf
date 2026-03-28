@@ -5,6 +5,7 @@ import {
   runGalleryForCurrentUrdf,
   type GalleryRepoSource,
 } from "../gallery/galleryGeneration";
+import { renderRepoMediaBatch, type RepoMediaRenderAssetKind } from "../gallery/repoMediaRender";
 import { resolveGitHubAccessToken } from "../node/githubCliAuth";
 import { inspectGitHubRepositoryUrdfs } from "../repository/githubRepositoryInspection";
 import { inspectLocalRepositoryUrdfs } from "../repository/localRepositoryInspection";
@@ -19,6 +20,39 @@ const formatGitHubBatchReference = (params: {
   `https://github.com/${params.owner}/${params.repo}${
     params.ref ? `/tree/${encodeURIComponent(params.ref)}` : ""
   }${params.path ? `/${params.path.replace(/^\/+/, "")}` : ""}`;
+
+const getMultiStringArg = (args: Parameters<SourceCommandHandler>[0], key: string): string[] => {
+  const value = args.get(key);
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return [value.trim()];
+  }
+  return [];
+};
+
+const resolveRenderAssetKinds = (
+  args: Parameters<SourceCommandHandler>[0],
+  helpers: Parameters<SourceCommandHandler>[1]
+): RepoMediaRenderAssetKind[] => {
+  const requested = getMultiStringArg(args, "asset");
+  if (requested.length === 0) {
+    return ["image", "video"];
+  }
+
+  const normalized: RepoMediaRenderAssetKind[] = [];
+  for (const value of requested) {
+    const assetKind = value.toLowerCase();
+    if (assetKind !== "image" && assetKind !== "video") {
+      helpers.fail(`Unsupported --asset value: ${value}`);
+    }
+    if (!normalized.includes(assetKind)) {
+      normalized.push(assetKind);
+    }
+  }
+  return normalized;
+};
 
 export const SOURCE_GALLERY_COMMAND_HANDLERS = {
   "gallery-generate": async (args, helpers) => {
@@ -82,6 +116,47 @@ export const SOURCE_GALLERY_COMMAND_HANDLERS = {
     emitJsonPayload(helpers, undefined, result);
   },
 
+  "gallery-render": async (args, helpers) => {
+    const local = helpers.getOptionalStringArg(args, "local");
+    const github = helpers.getOptionalStringArg(args, "github");
+    if ((local ? 1 : 0) + (github ? 1 : 0) !== 1) {
+      helpers.fail("gallery-render requires exactly one of --local or --github.");
+    }
+
+    const outputRoot = helpers.getOptionalStringArg(args, "out");
+    if (!outputRoot) {
+      helpers.fail("gallery-render requires --out.");
+    }
+    const appUrl = helpers.getOptionalStringArg(args, "app");
+    if (!appUrl) {
+      helpers.fail("gallery-render requires --app.");
+    }
+
+    const candidatePaths = getMultiStringArg(args, "urdf");
+    if (candidatePaths.length === 0) {
+      helpers.fail("gallery-render requires at least one --urdf.");
+    }
+
+    const assetKinds = resolveRenderAssetKinds(args, helpers);
+    const source = local
+      ? {
+          kind: "local" as const,
+          localPath: path.resolve(local),
+        }
+      : (() => {
+          const reference = resolveGitHubRepositoryReference(args, github || "", helpers);
+          return {
+            kind: "github" as const,
+            githubUrl: formatGitHubBatchReference(reference),
+            sourcePath: reference.path,
+            ref: reference.ref,
+          };
+        })();
+
+    const result = await renderRepoMediaBatch(source, appUrl, path.resolve(outputRoot), candidatePaths, assetKinds);
+    emitJsonPayload(helpers, undefined, result);
+  },
+
   "repo-fixes": async (args, helpers) => {
     const local = helpers.getOptionalStringArg(args, "local");
     const github = helpers.getOptionalStringArg(args, "github");
@@ -123,4 +198,4 @@ export const SOURCE_GALLERY_COMMAND_HANDLERS = {
     });
     emitJsonPayload(helpers, undefined, result);
   },
-} satisfies Record<"gallery-generate" | "repo-fixes", SourceCommandHandler>;
+} satisfies Record<"gallery-generate" | "gallery-render" | "repo-fixes", SourceCommandHandler>;

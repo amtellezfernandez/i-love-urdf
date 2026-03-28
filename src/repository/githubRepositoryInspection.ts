@@ -5,10 +5,12 @@ import {
   type FixMissingMeshReferencesResult,
 } from "./fixMissingMeshReferences";
 import {
+  createEmptyRepositoryRepoMetadata,
   inspectRepositoryFiles,
   type InspectRepositoryFilesOptions,
   type RepositoryCandidateInspection,
   type RepositoryInspectionSummary,
+  type RepositoryRepoMetadata,
 } from "./repositoryInspection";
 import { buildPackageNameByPathFromRepositoryFiles } from "./repositoryPackageNames";
 import {
@@ -36,6 +38,30 @@ type GitHubTreeEntry = {
 
 type GitHubDefaultBranchResponse = {
   default_branch?: string;
+};
+
+type GitHubRepositoryOwnerResponse = {
+  login?: string;
+  url?: string;
+};
+
+type GitHubRepositoryApiResponse = GitHubDefaultBranchResponse & {
+  description?: string;
+  homepage?: string;
+  topics?: string[];
+  license?: {
+    spdx_id?: string;
+    name?: string;
+  } | null;
+  owner?: GitHubRepositoryOwnerResponse | null;
+};
+
+type GitHubOwnerProfileResponse = {
+  name?: string;
+  company?: string;
+  blog?: string;
+  twitter_username?: string;
+  email?: string;
 };
 
 type GitHubTreeResponse = {
@@ -102,6 +128,43 @@ export type GitHubRepositoryMeshRepairResult = FixMissingMeshReferencesResult & 
 };
 
 const sanitizeRepoSegment = (value: string): string => value.replace(/\.git$/i, "").trim();
+
+const normalizeOptionalText = (value: unknown): string =>
+  typeof value === "string" ? value.trim() : "";
+
+const humanizeOwnerLabel = (owner: string): string =>
+  owner.replace(/[-_]+/g, " ").trim();
+
+const normalizeLicenseName = (payload: GitHubRepositoryApiResponse): string => {
+  const spdxId = normalizeOptionalText(payload.license?.spdx_id);
+  if (spdxId && spdxId.toUpperCase() !== "NOASSERTION") {
+    return spdxId;
+  }
+  return normalizeOptionalText(payload.license?.name);
+};
+
+const normalizeGitHubTopics = (payload: GitHubRepositoryApiResponse): string[] => {
+  if (!Array.isArray(payload.topics)) {
+    return [];
+  }
+
+  const normalized: string[] = [];
+  for (const topic of payload.topics) {
+    const item = normalizeOptionalText(String(topic).replace(/-/g, " "));
+    if (item && !normalized.includes(item)) {
+      normalized.push(item);
+    }
+  }
+  return normalized;
+};
+
+const normalizeGitHubXHandle = (value: unknown): string => {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized) {
+    return "";
+  }
+  return normalized.startsWith("@") ? normalized : `@${normalized}`;
+};
 
 const buildGitHubHeaders = (accessToken?: string): Headers => {
   const headers = new Headers();
@@ -429,6 +492,62 @@ const getDefaultBranch = async (
   return data.default_branch || "main";
 };
 
+const readGitHubApiJsonOrNull = async <T>(url: string, accessToken?: string): Promise<T | null> => {
+  try {
+    return await readGitHubJson<T>(url, {
+      accessToken,
+      notFoundMessage: "GitHub repository not found.",
+      contextLabel: "reading repository metadata",
+    });
+  } catch {
+    return null;
+  }
+};
+
+export const fetchGitHubRepositoryMetadata = async (
+  reference: GitHubRepositoryReference,
+  accessToken?: string
+): Promise<RepositoryRepoMetadata> => {
+  const ownerLabel = humanizeOwnerLabel(reference.owner);
+  const fallbackMetadata = createEmptyRepositoryRepoMetadata();
+  fallbackMetadata.org = ownerLabel;
+  fallbackMetadata.authorGithub = reference.owner;
+
+  const repoPayload = await readGitHubApiJsonOrNull<GitHubRepositoryApiResponse>(
+    `${GITHUB_API_BASE_URL}/repos/${reference.owner}/${reference.repo}`,
+    accessToken
+  );
+  if (!repoPayload) {
+    return fallbackMetadata;
+  }
+
+  const ownerLogin = normalizeOptionalText(repoPayload.owner?.login) || reference.owner;
+  const ownerProfileUrl = normalizeOptionalText(repoPayload.owner?.url);
+  const ownerProfile = ownerProfileUrl
+    ? await readGitHubApiJsonOrNull<GitHubOwnerProfileResponse>(ownerProfileUrl, accessToken)
+    : null;
+
+  return {
+    org:
+      normalizeOptionalText(ownerProfile?.name) ||
+      normalizeOptionalText(ownerProfile?.company) ||
+      ownerLabel,
+    summary: normalizeOptionalText(repoPayload.description),
+    demo: normalizeOptionalText(repoPayload.homepage),
+    tags: normalizeGitHubTopics(repoPayload),
+    license: normalizeLicenseName(repoPayload),
+    authorWebsite:
+      normalizeOptionalText(ownerProfile?.blog) ||
+      normalizeOptionalText(repoPayload.homepage),
+    authorX: normalizeGitHubXHandle(ownerProfile?.twitter_username),
+    authorLinkedin: "",
+    authorGithub: ownerLogin,
+    contact: normalizeOptionalText(ownerProfile?.email),
+    extra: "",
+    hfDatasets: [],
+  };
+};
+
 const convertTreeToRepositoryFiles = (
   treeEntries: GitHubTreeEntry[],
   pathPrefix: string = "",
@@ -720,6 +839,7 @@ export const inspectGitHubRepositoryUrdfs = async (
       packageNameByPath,
     }
   );
+  const repoMetadata = await fetchGitHubRepositoryMetadata(reference, options.accessToken);
 
   return {
     owner: reference.owner,
@@ -728,6 +848,7 @@ export const inspectGitHubRepositoryUrdfs = async (
     ref,
     repositoryUrl: `https://github.com/${reference.owner}/${reference.repo}`,
     ...summary,
+    repoMetadata,
   };
 };
 

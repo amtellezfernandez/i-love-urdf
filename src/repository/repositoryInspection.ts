@@ -21,6 +21,21 @@ import { normalizeMeshPathForMatch, parseMeshReference } from "../mesh/meshPaths
 
 export type InspectableRepositoryFile = RepositoryNamedFileEntry;
 
+export type RepositoryRepoMetadata = {
+  org: string;
+  summary: string;
+  demo: string;
+  tags: string[];
+  license: string;
+  authorWebsite: string;
+  authorX: string;
+  authorLinkedin: string;
+  authorGithub: string;
+  contact: string;
+  extra: string;
+  hfDatasets: string[];
+};
+
 export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
   inspectionMode: "urdf" | "xacro-source";
   hasRenderableGeometry?: boolean;
@@ -38,6 +53,7 @@ export type RepositoryInspectionSummary = {
   candidateCount: number;
   inspectedCandidateCount: number;
   primaryCandidatePath: string | null;
+  repoMetadata: RepositoryRepoMetadata;
   candidates: RepositoryCandidateInspection[];
 };
 
@@ -55,6 +71,21 @@ type RepositoryTextLoader<T extends InspectableRepositoryFile> = (
   candidate: RepositoryUrdfCandidate,
   file: T
 ) => Promise<string>;
+
+export const createEmptyRepositoryRepoMetadata = (): RepositoryRepoMetadata => ({
+  org: "",
+  summary: "",
+  demo: "",
+  tags: [],
+  license: "",
+  authorWebsite: "",
+  authorX: "",
+  authorLinkedin: "",
+  authorGithub: "",
+  contact: "",
+  extra: "",
+  hfDatasets: [],
+});
 
 const toBaseInspection = (candidate: RepositoryUrdfCandidate): RepositoryCandidateInspection => ({
   ...candidate,
@@ -196,6 +227,7 @@ export const inspectRepositoryFiles = async <T extends InspectableRepositoryFile
     candidateCount: candidates.length,
     inspectedCandidateCount: Math.min(candidates.length, maxCandidatesToInspect),
     primaryCandidatePath: candidates[0]?.path ?? null,
+    repoMetadata: createEmptyRepositoryRepoMetadata(),
     candidates: inspectedCandidates,
   };
 };

@@ -1,5 +1,5 @@
 import { type FixMissingMeshReferencesOptions, type FixMissingMeshReferencesResult } from "./fixMissingMeshReferences";
-import { type InspectRepositoryFilesOptions, type RepositoryCandidateInspection, type RepositoryInspectionSummary } from "./repositoryInspection";
+import { type InspectRepositoryFilesOptions, type RepositoryCandidateInspection, type RepositoryInspectionSummary, type RepositoryRepoMetadata } from "./repositoryInspection";
 export type GitHubRepositoryReference = {
     owner: string;
     repo: string;
@@ -42,6 +42,7 @@ export type GitHubRepositoryMeshRepairResult = FixMissingMeshReferencesResult & 
     repositoryUrl: string;
 };
 export declare const parseGitHubRepositoryReference: (value: string) => GitHubRepositoryReference | null;
+export declare const fetchGitHubRepositoryMetadata: (reference: GitHubRepositoryReference, accessToken?: string) => Promise<RepositoryRepoMetadata>;
 export declare const fetchGitHubRepositoryFiles: (reference: GitHubRepositoryReference, accessToken?: string) => Promise<{
     ref: string;
     files: GitHubRepositoryFile[];

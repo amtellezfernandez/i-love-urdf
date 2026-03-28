@@ -120,6 +120,12 @@ export const COMMAND_CATALOG = {
       "  gallery-generate --local <repo> | --github <owner/repo|url> [--ref <branch>] [--path <subdir>] [--out <path>]",
     ],
   },
+  "gallery-render": {
+    sections: ["analyze"],
+    usage: [
+      "  gallery-render --local <repo> | --github <owner/repo|url> --app <url> --urdf <repo-path> [--urdf <repo-path> ...] [--asset image] [--asset video] --out <path>",
+    ],
+  },
   "guess-orientation": {
     sections: ["analyze"],
     usage: [
@@ -133,6 +139,10 @@ export const COMMAND_CATALOG = {
   "fix-mesh-paths": {
     sections: ["optimize"],
     usage: ["  fix-mesh-paths --urdf <path> [--package <name>] [--out <path>]"],
+  },
+  "bundle-mesh-assets": {
+    sections: ["optimize"],
+    usage: ["  bundle-mesh-assets --urdf <path> [--out <path>]"],
   },
   "mesh-refs": {
     sections: ["analyze"],
@@ -157,6 +167,12 @@ export const COMMAND_CATALOG = {
   "set-joint-axis": {
     sections: ["edit"],
     usage: ['  set-joint-axis --urdf <path> --joint <name> --xyz "0 1 0" [--out <path>]'],
+  },
+  "set-joint-origin": {
+    sections: ["edit"],
+    usage: [
+      '  set-joint-origin --urdf <path> --joint <name> --xyz "0 0 0" --rpy "0 0 0" [--out <path>]',
+    ],
   },
   "set-joint-type": {
     sections: ["edit"],
@@ -218,6 +234,12 @@ export const COMMAND_CATALOG = {
     sections: ["edit"],
     usage: [
       "  merge-urdf --urdf <path> --attach <path[,path]> [--name <robot>] [--spacing <n>] [--out <path>]",
+    ],
+  },
+  "replace-subrobot": {
+    sections: ["edit"],
+    usage: [
+      '  replace-subrobot --urdf <path> --replace-root <link> --replacement <path> --replacement-root <link> [--mount-parent <link>] [--mount-joint <name>] [--prefix <value>] [--xyz "0 0 0"] [--rpy "0 0 0"] [--calibrate] [--portable] [--out <path>]',
     ],
   },
   "mesh-to-assets": {

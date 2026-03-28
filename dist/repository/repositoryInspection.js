@@ -1,11 +1,26 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.inspectRepositoryFiles = exports.inspectRepositoryCandidates = void 0;
+exports.inspectRepositoryFiles = exports.inspectRepositoryCandidates = exports.createEmptyRepositoryRepoMetadata = void 0;
 const repositoryMeshResolution_1 = require("./repositoryMeshResolution");
 const fixMissingMeshReferences_1 = require("./fixMissingMeshReferences");
 const repositoryUrdfDiscovery_1 = require("./repositoryUrdfDiscovery");
 const meshFormats_1 = require("../mesh/meshFormats");
 const meshPaths_1 = require("../mesh/meshPaths");
+const createEmptyRepositoryRepoMetadata = () => ({
+    org: "",
+    summary: "",
+    demo: "",
+    tags: [],
+    license: "",
+    authorWebsite: "",
+    authorX: "",
+    authorLinkedin: "",
+    authorGithub: "",
+    contact: "",
+    extra: "",
+    hfDatasets: [],
+});
+exports.createEmptyRepositoryRepoMetadata = createEmptyRepositoryRepoMetadata;
 const toBaseInspection = (candidate) => ({
     ...candidate,
     inspectionMode: candidate.isXacro ? "xacro-source" : "urdf",
@@ -104,6 +119,7 @@ const inspectRepositoryFiles = async (files, readText, options = {}) => {
         candidateCount: candidates.length,
         inspectedCandidateCount: Math.min(candidates.length, maxCandidatesToInspect),
         primaryCandidatePath: candidates[0]?.path ?? null,
+        repoMetadata: (0, exports.createEmptyRepositoryRepoMetadata)(),
         candidates: inspectedCandidates,
     };
 };

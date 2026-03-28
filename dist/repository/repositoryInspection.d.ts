@@ -1,6 +1,20 @@
 import { type PackageNameByPath } from "./repositoryMeshResolution";
 import { type RepositoryNamedFileEntry, type RepositoryUrdfCandidate, type XacroArgumentDefinition } from "./repositoryUrdfDiscovery";
 export type InspectableRepositoryFile = RepositoryNamedFileEntry;
+export type RepositoryRepoMetadata = {
+    org: string;
+    summary: string;
+    demo: string;
+    tags: string[];
+    license: string;
+    authorWebsite: string;
+    authorX: string;
+    authorLinkedin: string;
+    authorGithub: string;
+    contact: string;
+    extra: string;
+    hfDatasets: string[];
+};
 export type RepositoryCandidateInspection = RepositoryUrdfCandidate & {
     inspectionMode: "urdf" | "xacro-source";
     hasRenderableGeometry?: boolean;
@@ -17,6 +31,7 @@ export type RepositoryInspectionSummary = {
     candidateCount: number;
     inspectedCandidateCount: number;
     primaryCandidatePath: string | null;
+    repoMetadata: RepositoryRepoMetadata;
     candidates: RepositoryCandidateInspection[];
 };
 export type InspectRepositoryCandidatesOptions = {
@@ -28,6 +43,7 @@ export type InspectRepositoryFilesOptions = InspectRepositoryCandidatesOptions &
     packageNameByPath?: PackageNameByPath;
 };
 type RepositoryTextLoader<T extends InspectableRepositoryFile> = (candidate: RepositoryUrdfCandidate, file: T) => Promise<string>;
+export declare const createEmptyRepositoryRepoMetadata: () => RepositoryRepoMetadata;
 export declare const inspectRepositoryCandidates: <T extends InspectableRepositoryFile>(candidates: RepositoryUrdfCandidate[], files: T[], readText: RepositoryTextLoader<T>, options?: InspectRepositoryCandidatesOptions & {
     packageNameByPath?: PackageNameByPath;
 }) => Promise<RepositoryCandidateInspection[]>;

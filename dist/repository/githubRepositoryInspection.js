@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairGitHubRepositoryMeshReferences = exports.inspectGitHubRepositoryUrdfs = exports.fetchGitHubFileBytes = exports.fetchGitHubTextFile = exports.fetchGitHubRepositoryFiles = exports.parseGitHubRepositoryReference = void 0;
+exports.repairGitHubRepositoryMeshReferences = exports.inspectGitHubRepositoryUrdfs = exports.fetchGitHubFileBytes = exports.fetchGitHubTextFile = exports.fetchGitHubRepositoryFiles = exports.fetchGitHubRepositoryMetadata = exports.parseGitHubRepositoryReference = void 0;
 const repositoryMeshResolution_1 = require("./repositoryMeshResolution");
 const fixMissingMeshReferences_1 = require("./fixMissingMeshReferences");
 const repositoryInspection_1 = require("./repositoryInspection");
@@ -15,6 +15,35 @@ const GITHUB_FETCH_TIMEOUT_MS = 20000;
 const PUBLIC_MIRROR_FETCH_TIMEOUT_MS = 20000;
 const GITHUB_NETWORK_ERROR_PATTERN = /Failed to fetch|NetworkError|fetch failed|Load failed|ECONNREFUSED|ERR_CONNECTION_REFUSED|ERR_NETWORK/i;
 const sanitizeRepoSegment = (value) => value.replace(/\.git$/i, "").trim();
+const normalizeOptionalText = (value) => typeof value === "string" ? value.trim() : "";
+const humanizeOwnerLabel = (owner) => owner.replace(/[-_]+/g, " ").trim();
+const normalizeLicenseName = (payload) => {
+    const spdxId = normalizeOptionalText(payload.license?.spdx_id);
+    if (spdxId && spdxId.toUpperCase() !== "NOASSERTION") {
+        return spdxId;
+    }
+    return normalizeOptionalText(payload.license?.name);
+};
+const normalizeGitHubTopics = (payload) => {
+    if (!Array.isArray(payload.topics)) {
+        return [];
+    }
+    const normalized = [];
+    for (const topic of payload.topics) {
+        const item = normalizeOptionalText(String(topic).replace(/-/g, " "));
+        if (item && !normalized.includes(item)) {
+            normalized.push(item);
+        }
+    }
+    return normalized;
+};
+const normalizeGitHubXHandle = (value) => {
+    const normalized = normalizeOptionalText(value);
+    if (!normalized) {
+        return "";
+    }
+    return normalized.startsWith("@") ? normalized : `@${normalized}`;
+};
 const buildGitHubHeaders = (accessToken) => {
     const headers = new Headers();
     headers.set("Accept", GITHUB_API_ACCEPT_HEADER);
@@ -236,6 +265,51 @@ const getDefaultBranch = async (owner, repo, accessToken) => {
     });
     return data.default_branch || "main";
 };
+const readGitHubApiJsonOrNull = async (url, accessToken) => {
+    try {
+        return await readGitHubJson(url, {
+            accessToken,
+            notFoundMessage: "GitHub repository not found.",
+            contextLabel: "reading repository metadata",
+        });
+    }
+    catch {
+        return null;
+    }
+};
+const fetchGitHubRepositoryMetadata = async (reference, accessToken) => {
+    const ownerLabel = humanizeOwnerLabel(reference.owner);
+    const fallbackMetadata = (0, repositoryInspection_1.createEmptyRepositoryRepoMetadata)();
+    fallbackMetadata.org = ownerLabel;
+    fallbackMetadata.authorGithub = reference.owner;
+    const repoPayload = await readGitHubApiJsonOrNull(`${GITHUB_API_BASE_URL}/repos/${reference.owner}/${reference.repo}`, accessToken);
+    if (!repoPayload) {
+        return fallbackMetadata;
+    }
+    const ownerLogin = normalizeOptionalText(repoPayload.owner?.login) || reference.owner;
+    const ownerProfileUrl = normalizeOptionalText(repoPayload.owner?.url);
+    const ownerProfile = ownerProfileUrl
+        ? await readGitHubApiJsonOrNull(ownerProfileUrl, accessToken)
+        : null;
+    return {
+        org: normalizeOptionalText(ownerProfile?.name) ||
+            normalizeOptionalText(ownerProfile?.company) ||
+            ownerLabel,
+        summary: normalizeOptionalText(repoPayload.description),
+        demo: normalizeOptionalText(repoPayload.homepage),
+        tags: normalizeGitHubTopics(repoPayload),
+        license: normalizeLicenseName(repoPayload),
+        authorWebsite: normalizeOptionalText(ownerProfile?.blog) ||
+            normalizeOptionalText(repoPayload.homepage),
+        authorX: normalizeGitHubXHandle(ownerProfile?.twitter_username),
+        authorLinkedin: "",
+        authorGithub: ownerLogin,
+        contact: normalizeOptionalText(ownerProfile?.email),
+        extra: "",
+        hfDatasets: [],
+    };
+};
+exports.fetchGitHubRepositoryMetadata = fetchGitHubRepositoryMetadata;
 const convertTreeToRepositoryFiles = (treeEntries, pathPrefix = "", options = {}) => {
     const files = [];
     const directories = new Set();
@@ -430,6 +504,7 @@ const inspectGitHubRepositoryUrdfs = async (reference, options = {}) => {
         },
         packageNameByPath,
     });
+    const repoMetadata = await (0, exports.fetchGitHubRepositoryMetadata)(reference, options.accessToken);
     return {
         owner: reference.owner,
         repo: reference.repo,
@@ -437,6 +512,7 @@ const inspectGitHubRepositoryUrdfs = async (reference, options = {}) => {
         ref,
         repositoryUrl: `https://github.com/${reference.owner}/${reference.repo}`,
         ...summary,
+        repoMetadata,
     };
 };
 exports.inspectGitHubRepositoryUrdfs = inspectGitHubRepositoryUrdfs;

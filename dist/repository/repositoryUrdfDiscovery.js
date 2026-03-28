@@ -17,6 +17,31 @@ const repositoryBasename = (repositoryPath) => {
     const parts = repositoryPath.split("/").filter(Boolean);
     return parts[parts.length - 1]?.toLowerCase() ?? "";
 };
+const trimCompositeExtension = (value) => value.replace(/\.(urdf\.xacro|xacro|urdf)$/i, "");
+const slugifyCandidateName = (value) => value
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+const hashRepositoryPath = (value) => {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+};
+const buildRepositoryCandidateDisplayName = (fileName) => {
+    const trimmed = trimCompositeExtension(fileName.split("/").pop() || fileName);
+    return trimmed || "robot";
+};
+const buildRepositoryCandidateFileBase = (candidatePath) => {
+    const normalized = candidatePath.replace(/\\/g, "/").replace(/^\/+/, "");
+    const name = normalized.split("/").pop() || normalized;
+    const slug = slugifyCandidateName(trimCompositeExtension(name)) || "robot";
+    return `${slug}--${hashRepositoryPath(normalized)}`;
+};
 const stripCandidateExtension = (fileName) => fileName.toLowerCase().replace(/(\.urdf\.xacro|\.xacro|\.urdf)$/i, "");
 const isIgnorableRepositoryMetadataFile = (file) => {
     const loweredName = file.name.toLowerCase();
@@ -203,6 +228,9 @@ const findRepositoryUrdfCandidates = (files) => {
         return {
             path: urdfFile.path,
             name: urdfFile.name,
+            displayName: buildRepositoryCandidateDisplayName(urdfFile.name),
+            fileBase: buildRepositoryCandidateFileBase(urdfFile.path),
+            sourceFile: urdfFile.name,
             hasMeshesFolder: Boolean(meshesFolderPath),
             meshesFolderPath,
             isXacro: (0, xacroContract_1.isXacroPath)(urdfFile.name),

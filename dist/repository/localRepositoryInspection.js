@@ -223,6 +223,7 @@ const inspectLocalRepositoryUrdfs = async (reference, options = {}) => {
         rootPath,
         inspectedPath,
         ...summary,
+        repoMetadata: (0, repositoryInspection_1.createEmptyRepositoryRepoMetadata)(),
     };
 };
 exports.inspectLocalRepositoryUrdfs = inspectLocalRepositoryUrdfs;
