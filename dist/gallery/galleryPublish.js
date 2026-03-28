@@ -103,13 +103,28 @@ const buildPreviewManifestEntry = (item) => {
         : candidatePath.endsWith(".xacro")
             ? "xacro"
             : "urdf";
-    return {
+    const entry = {
         repoKey: normalizeOptionalText(item.galleryRepoKey),
         fileBase: normalizeOptionalText(item.galleryFileBase),
         sourceType,
         tags: [`source:${sourceType}`],
-        png: normalizeOptionalText(item.galleryPngPath),
-        webm: normalizeOptionalText(item.galleryWebmPath),
+    };
+    const pngPath = normalizeOptionalText(item.galleryPngPath);
+    const webmPath = normalizeOptionalText(item.galleryWebmPath);
+    if (pngPath) {
+        entry.png = pngPath;
+    }
+    if (webmPath) {
+        entry.webm = webmPath;
+    }
+    return entry;
+};
+const mergePreviewManifestEntry = (existingEntry, item) => {
+    const mergedEntry = existingEntry ? { ...existingEntry } : {};
+    const generatedEntry = buildPreviewManifestEntry(item);
+    return {
+        ...mergedEntry,
+        ...generatedEntry,
     };
 };
 const buildDraftText = (spec) => {
@@ -179,7 +194,11 @@ const buildGalleryPublishDraft = async (spec) => {
         .filter((entry) => normalizeRepoPath(String(entry.repoKey || "")) !== repoKey);
     repoEntries.push(selectedRepoEntry);
     repoEntries.sort((left, right) => String(left.repoKey || "").localeCompare(String(right.repoKey || "")));
-    const generatedPreviewEntries = generatedItems.map((item) => buildPreviewManifestEntry(item));
+    const previewEntryByKey = new Map(catalog.previewEntries.map((entry) => [
+        `${normalizeOptionalText(entry.repoKey)}::${normalizeOptionalText(entry.fileBase)}`,
+        entry,
+    ]));
+    const generatedPreviewEntries = generatedItems.map((item) => mergePreviewManifestEntry(previewEntryByKey.get(`${normalizeOptionalText(item.galleryRepoKey)}::${normalizeOptionalText(item.galleryFileBase)}`), item));
     const generatedKeys = new Set(generatedPreviewEntries.map((entry) => `${entry.repoKey}::${entry.fileBase}`));
     const previewEntries = catalog.previewEntries
         .map((entry) => ({ ...entry }))

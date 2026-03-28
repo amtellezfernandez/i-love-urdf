@@ -180,13 +180,29 @@ const buildPreviewManifestEntry = (item: dict): dict => {
     : candidatePath.endsWith(".xacro")
       ? "xacro"
       : "urdf";
-  return {
+  const entry: dict = {
     repoKey: normalizeOptionalText(item.galleryRepoKey),
     fileBase: normalizeOptionalText(item.galleryFileBase),
     sourceType,
     tags: [`source:${sourceType}`],
-    png: normalizeOptionalText(item.galleryPngPath),
-    webm: normalizeOptionalText(item.galleryWebmPath),
+  };
+  const pngPath = normalizeOptionalText(item.galleryPngPath);
+  const webmPath = normalizeOptionalText(item.galleryWebmPath);
+  if (pngPath) {
+    entry.png = pngPath;
+  }
+  if (webmPath) {
+    entry.webm = webmPath;
+  }
+  return entry;
+};
+
+const mergePreviewManifestEntry = (existingEntry: dict | undefined, item: dict): dict => {
+  const mergedEntry = existingEntry ? { ...existingEntry } : {};
+  const generatedEntry = buildPreviewManifestEntry(item);
+  return {
+    ...mergedEntry,
+    ...generatedEntry,
   };
 };
 
@@ -260,7 +276,20 @@ export const buildGalleryPublishDraft = async (spec: GalleryPublishSpec): Promis
   repoEntries.push(selectedRepoEntry);
   repoEntries.sort((left, right) => String(left.repoKey || "").localeCompare(String(right.repoKey || "")));
 
-  const generatedPreviewEntries = generatedItems.map((item) => buildPreviewManifestEntry(item));
+  const previewEntryByKey = new Map(
+    catalog.previewEntries.map((entry) => [
+      `${normalizeOptionalText(entry.repoKey)}::${normalizeOptionalText(entry.fileBase)}`,
+      entry,
+    ])
+  );
+  const generatedPreviewEntries = generatedItems.map((item) =>
+    mergePreviewManifestEntry(
+      previewEntryByKey.get(
+        `${normalizeOptionalText(item.galleryRepoKey)}::${normalizeOptionalText(item.galleryFileBase)}`
+      ),
+      item
+    )
+  );
   const generatedKeys = new Set(
     generatedPreviewEntries.map((entry) => `${entry.repoKey}::${entry.fileBase}`)
   );
