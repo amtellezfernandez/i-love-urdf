@@ -126,6 +126,10 @@ export const COMMAND_CATALOG = {
       "  gallery-render --local <repo> | --github <owner/repo|url> --app <url> --urdf <repo-path> [--urdf <repo-path> ...] [--asset image] [--asset video] --out <path>",
     ],
   },
+  "gallery-build-publish": {
+    sections: ["analyze"],
+    usage: ["  gallery-build-publish --spec <path> [--out <path>]"],
+  },
   "guess-orientation": {
     sections: ["analyze"],
     usage: [

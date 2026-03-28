@@ -5,6 +5,7 @@ import {
   runGalleryForCurrentUrdf,
   type GalleryRepoSource,
 } from "../gallery/galleryGeneration";
+import { buildGalleryPublishDraft, type GalleryPublishSpec } from "../gallery/galleryPublish";
 import { renderRepoMediaBatch, type RepoMediaRenderAssetKind } from "../gallery/repoMediaRender";
 import { resolveGitHubAccessToken } from "../node/githubCliAuth";
 import { inspectGitHubRepositoryUrdfs } from "../repository/githubRepositoryInspection";
@@ -157,6 +158,17 @@ export const SOURCE_GALLERY_COMMAND_HANDLERS = {
     emitJsonPayload(helpers, undefined, result);
   },
 
+  "gallery-build-publish": async (args, helpers) => {
+    const specPath = helpers.getOptionalStringArg(args, "spec");
+    if (!specPath) {
+      helpers.fail("gallery-build-publish requires --spec.");
+    }
+
+    const spec = JSON.parse(fs.readFileSync(path.resolve(specPath), "utf8")) as GalleryPublishSpec;
+    const result = await buildGalleryPublishDraft(spec);
+    emitJsonPayload(helpers, helpers.getOptionalStringArg(args, "out"), result);
+  },
+
   "repo-fixes": async (args, helpers) => {
     const local = helpers.getOptionalStringArg(args, "local");
     const github = helpers.getOptionalStringArg(args, "github");
@@ -198,4 +210,4 @@ export const SOURCE_GALLERY_COMMAND_HANDLERS = {
     });
     emitJsonPayload(helpers, undefined, result);
   },
-} satisfies Record<"gallery-generate" | "gallery-render" | "repo-fixes", SourceCommandHandler>;
+} satisfies Record<"gallery-generate" | "gallery-render" | "gallery-build-publish" | "repo-fixes", SourceCommandHandler>;

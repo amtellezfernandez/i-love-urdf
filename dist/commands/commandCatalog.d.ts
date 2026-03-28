@@ -45,6 +45,10 @@ export declare const COMMAND_CATALOG: {
         readonly sections: readonly ["analyze"];
         readonly usage: readonly ["  gallery-render --local <repo> | --github <owner/repo|url> --app <url> --urdf <repo-path> [--urdf <repo-path> ...] [--asset image] [--asset video] --out <path>"];
     };
+    readonly "gallery-build-publish": {
+        readonly sections: readonly ["analyze"];
+        readonly usage: readonly ["  gallery-build-publish --spec <path> [--out <path>]"];
+    };
     readonly "guess-orientation": {
         readonly sections: readonly ["analyze"];
         readonly usage: readonly ["  guess-orientation --urdf <path> [--target-up <x|y|z>] [--target-forward <x|y|z>]"];

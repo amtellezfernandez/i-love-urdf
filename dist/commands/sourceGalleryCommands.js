@@ -4,6 +4,7 @@ exports.SOURCE_GALLERY_COMMAND_HANDLERS = void 0;
 const fs = require("node:fs");
 const path = require("node:path");
 const galleryGeneration_1 = require("../gallery/galleryGeneration");
+const galleryPublish_1 = require("../gallery/galleryPublish");
 const repoMediaRender_1 = require("../gallery/repoMediaRender");
 const githubCliAuth_1 = require("../node/githubCliAuth");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
@@ -123,6 +124,15 @@ exports.SOURCE_GALLERY_COMMAND_HANDLERS = {
             })();
         const result = await (0, repoMediaRender_1.renderRepoMediaBatch)(source, appUrl, path.resolve(outputRoot), candidatePaths, assetKinds);
         (0, sourceCommandRuntime_1.emitJsonPayload)(helpers, undefined, result);
+    },
+    "gallery-build-publish": async (args, helpers) => {
+        const specPath = helpers.getOptionalStringArg(args, "spec");
+        if (!specPath) {
+            helpers.fail("gallery-build-publish requires --spec.");
+        }
+        const spec = JSON.parse(fs.readFileSync(path.resolve(specPath), "utf8"));
+        const result = await (0, galleryPublish_1.buildGalleryPublishDraft)(spec);
+        (0, sourceCommandRuntime_1.emitJsonPayload)(helpers, helpers.getOptionalStringArg(args, "out"), result);
     },
     "repo-fixes": async (args, helpers) => {
         const local = helpers.getOptionalStringArg(args, "local");
