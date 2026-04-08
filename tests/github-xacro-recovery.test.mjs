@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 import { rootDir } from "./helpers/loadDist.mjs";
@@ -10,6 +11,20 @@ import { rootDir } from "./helpers/loadDist.mjs";
 const { expandFetchedGitHubRepositoryXacro } = await import(
   pathToFileURL(path.join(rootDir, "dist", "xacro", "xacroNode.js")).href
 );
+
+const PYTHON_EXECUTABLE_CANDIDATES = process.platform === "win32"
+  ? ["py", "python", "python3"]
+  : ["python3", "python", "py"];
+
+const resolveTestPythonExecutable = () =>
+  PYTHON_EXECUTABLE_CANDIDATES.find((candidate) => {
+    try {
+      const result = spawnSync(candidate, ["--version"], { stdio: "ignore" });
+      return result.status === 0;
+    } catch {
+      return false;
+    }
+  }) ?? null;
 
 const helperScript = `#!/usr/bin/env python3
 import json
@@ -39,7 +54,13 @@ else:
     }))
 `;
 
-test("expandFetchedGitHubRepositoryXacro retries local packages without remote dependency scans", async () => {
+test("expandFetchedGitHubRepositoryXacro retries local packages without remote dependency scans", async (t) => {
+  const pythonExecutable = resolveTestPythonExecutable();
+  if (!pythonExecutable) {
+    t.skip("requires a Python executable on PATH");
+    return;
+  }
+
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-github-xacro-recovery-"));
   const helperPath = path.join(tempRoot, "fake_xacro_helper.py");
   const counterPath = path.join(tempRoot, "attempts.txt");
@@ -117,7 +138,7 @@ test("expandFetchedGitHubRepositoryXacro retries local packages without remote d
       ],
       {
         helperScriptPath: helperPath,
-        pythonExecutable: "python3",
+        pythonExecutable,
       }
     );
 
