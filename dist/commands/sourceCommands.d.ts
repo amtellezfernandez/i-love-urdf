@@ -10,6 +10,8 @@ declare const SOURCE_COMMAND_HANDLERS: {
     readonly "inspect-repo": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
     readonly "repair-mesh-refs": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
     readonly "gallery-generate": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
+    readonly "gallery-render": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
+    readonly "gallery-build-publish": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
     readonly "repo-fixes": (args: CliArgMap, helpers: SourceCommandHelpers) => Promise<void>;
 };
 export type SourceCommandName = keyof typeof SOURCE_COMMAND_HANDLERS;

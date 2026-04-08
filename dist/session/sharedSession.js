@@ -226,9 +226,15 @@ const attachShellToSharedSession = (state, sessionId) => {
     return snapshot;
 };
 exports.attachShellToSharedSession = attachShellToSharedSession;
-const buildStudioSessionUrl = (sessionId) => {
+const buildStudioSessionUrl = (sessionId, options = {}) => {
     const studioUrl = new URL((0, studioRuntime_1.getStudioWebUrl)());
     studioUrl.searchParams.set("ilu_session", sessionId);
+    if (options.focusJoint?.trim()) {
+        studioUrl.searchParams.set("ilu_focus_joint", options.focusJoint.trim());
+    }
+    if (options.calibrateMode) {
+        studioUrl.searchParams.set("ilu_calibrate", "1");
+    }
     return studioUrl.toString();
 };
 exports.buildStudioSessionUrl = buildStudioSessionUrl;

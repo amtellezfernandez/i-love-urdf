@@ -24,5 +24,8 @@ export declare const persistShellSharedSession: (state: ShellState, options?: {
     fileNameHint?: string;
 }) => IluSharedSessionSnapshot | null;
 export declare const attachShellToSharedSession: (state: ShellState, sessionId: string) => IluSharedSessionSnapshot;
-export declare const buildStudioSessionUrl: (sessionId: string) => string;
+export declare const buildStudioSessionUrl: (sessionId: string, options?: {
+    focusJoint?: string;
+    calibrateMode?: boolean;
+}) => string;
 export declare const openVisualizerForShellState: (state: ShellState) => Promise<AutoAutomationResult>;

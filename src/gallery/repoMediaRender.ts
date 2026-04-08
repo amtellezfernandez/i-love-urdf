@@ -45,13 +45,44 @@ const loadPlaywright = async (): Promise<any> => {
   }
 };
 
+type GalleryRenderStateSnapshot = {
+  phase?: string;
+  ready?: boolean;
+  cameraApplied?: boolean;
+  error?: string | null;
+};
+
+export const isThumbnailRenderReady = (input: {
+  renderState?: GalleryRenderStateSnapshot | null;
+  thumbError?: string | null;
+  readyAttribute?: string | null;
+}): boolean => {
+  const renderError =
+    typeof input.renderState?.error === "string" && input.renderState.error.trim()
+      ? input.renderState.error
+      : "";
+  const thumbError = typeof input.thumbError === "string" && input.thumbError.trim() ? input.thumbError : "";
+  if (thumbError || renderError) {
+    throw new Error(thumbError || renderError);
+  }
+  if (input.renderState) {
+    return (
+      input.renderState.ready === true &&
+      input.renderState.cameraApplied === true &&
+      input.renderState.phase === "ready"
+    );
+  }
+  return input.readyAttribute === "1";
+};
+
 const waitForThumbReady = async (page: any) => {
   await page.waitForFunction(
     () => {
-      if ((window as any).__URDF_THUMB_ERROR__) {
-        throw new Error((window as any).__URDF_THUMB_ERROR__);
-      }
-      return document.body?.getAttribute("data-urdf-thumb-ready") === "1";
+      return isThumbnailRenderReady({
+        renderState: (window as any).__URDF_GALLERY_RENDER_STATE__,
+        thumbError: (window as any).__URDF_THUMB_ERROR__,
+        readyAttribute: document.body?.getAttribute("data-urdf-thumb-ready"),
+      });
     },
     { timeout: READY_TIMEOUT_MS }
   );

@@ -102,6 +102,7 @@ export const ROOT_TASKS = [
   { name: "check", summary: "Run health, validation, and orientation checks." },
   { name: "convert", summary: "Convert XACRO and URDF files into other formats." },
   { name: "fix", summary: "Repair mesh paths, mesh refs, and basic URDF issues." },
+  { name: "preview", summary: "Select a source for gallery card generation." },
 ] as const satisfies readonly RootTaskDefinition[];
 
 export const ROOT_SHELL_COMMANDS = [
@@ -305,6 +306,29 @@ export const ROOT_TASK_ACTIONS = {
       command: "normalize-axes",
       sessionLabel: "fix",
       openPending: { key: "urdf", slashName: "file", onlyIfMissing: true },
+    },
+  ],
+  preview: [
+    {
+      name: "repo",
+      summary: "Select a GitHub repo and generate cards for every robot in it.",
+      command: "load-source",
+      sessionLabel: "preview",
+      openPending: { key: "github", slashName: "repo" },
+    },
+    {
+      name: "folder",
+      summary: "Select a local folder and generate cards for every URDF in it.",
+      command: "load-source",
+      sessionLabel: "preview",
+      openPending: { key: "path", slashName: "folder" },
+    },
+    {
+      name: "urdf",
+      summary: "Select one URDF file and generate a single card from it.",
+      command: "load-source",
+      sessionLabel: "preview",
+      openPending: { key: "path", slashName: "urdf" },
     },
   ],
 } as const satisfies Record<RootTaskName, readonly RootTaskActionDefinition[]>;

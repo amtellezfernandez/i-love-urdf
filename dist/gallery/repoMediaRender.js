@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderRepoMediaBatch = void 0;
+exports.renderRepoMediaBatch = exports.isThumbnailRenderReady = void 0;
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const FRAME_COUNT = 28;
@@ -20,12 +20,29 @@ const loadPlaywright = async () => {
         throw new Error("playwright is required for gallery rendering. Install it and retry.");
     }
 };
+const isThumbnailRenderReady = (input) => {
+    const renderError = typeof input.renderState?.error === "string" && input.renderState.error.trim()
+        ? input.renderState.error
+        : "";
+    const thumbError = typeof input.thumbError === "string" && input.thumbError.trim() ? input.thumbError : "";
+    if (thumbError || renderError) {
+        throw new Error(thumbError || renderError);
+    }
+    if (input.renderState) {
+        return (input.renderState.ready === true &&
+            input.renderState.cameraApplied === true &&
+            input.renderState.phase === "ready");
+    }
+    return input.readyAttribute === "1";
+};
+exports.isThumbnailRenderReady = isThumbnailRenderReady;
 const waitForThumbReady = async (page) => {
     await page.waitForFunction(() => {
-        if (window.__URDF_THUMB_ERROR__) {
-            throw new Error(window.__URDF_THUMB_ERROR__);
-        }
-        return document.body?.getAttribute("data-urdf-thumb-ready") === "1";
+        return (0, exports.isThumbnailRenderReady)({
+            renderState: window.__URDF_GALLERY_RENDER_STATE__,
+            thumbError: window.__URDF_THUMB_ERROR__,
+            readyAttribute: document.body?.getAttribute("data-urdf-thumb-ready"),
+        });
     }, { timeout: READY_TIMEOUT_MS });
 };
 const startCanvasRecording = async (canvasHandle) => {

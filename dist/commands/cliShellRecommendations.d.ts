@@ -60,6 +60,9 @@ export declare const detectSuggestedAction: (state: Pick<ShellState, "loadedSour
         targetUpAxis?: string | null;
         targetForwardAxis?: string | null;
         confidence?: number;
+        report?: {
+            conflicts?: string[] | null;
+        } | null;
         suggestedApplyOrientation?: {
             sourceUpAxis?: string | null;
             sourceForwardAxis?: string | null;

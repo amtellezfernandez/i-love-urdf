@@ -6,6 +6,7 @@ declare const EDIT_COMMAND_HANDLERS: {
     readonly "apply-orientation": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "normalize-robot": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "set-joint-axis": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
+    readonly "set-joint-origin": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "set-joint-type": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "set-joint-limits": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "set-joint-velocity": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
@@ -14,6 +15,7 @@ declare const EDIT_COMMAND_HANDLERS: {
     readonly "reassign-joint": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "set-material-color": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "merge-urdf": ({ args, helpers, urdfContent, urdfPath, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
+    readonly "replace-subrobot": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => Promise<void>;
     readonly "rename-joint": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "rename-link": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "fix-mesh-paths": ({ args, helpers, urdfPath, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
@@ -22,6 +24,7 @@ declare const EDIT_COMMAND_HANDLERS: {
     readonly "normalize-axes": ({ helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "snap-axes": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     readonly "mesh-to-assets": ({ helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
+    readonly "bundle-mesh-assets": ({ helpers, urdfPath, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
 };
 export type EditCommandName = keyof typeof EDIT_COMMAND_HANDLERS;
 export declare const EDIT_COMMANDS: EditCommandName[];

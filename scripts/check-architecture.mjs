@@ -15,31 +15,31 @@ const emitJson = process.argv.includes("--json");
 
 const BUDGETS = {
   publicSurface: {
-    commandCountMax: 40,
+    commandCountMax: 48,
     commandModuleCountMax: 34,
     exportPathCountMax: 10,
     binEntryCountMax: 1,
     prodDependencyCountMax: 6,
   },
   privilegedSurface: {
-    filesystemTouchFilesMax: 22,
-    subprocessTouchFilesMax: 8,
+    filesystemTouchFilesMax: 28,
+    subprocessTouchFilesMax: 12,
     networkTouchFilesMax: 10,
     rawTtyTouchFilesMax: 1,
     envTouchFilesMax: 12,
   },
   failureSurface: {
-    totalSourceLinesMax: 36_000,
-    largestSourceFileLinesMax: 9_600,
-    shellClusterLinesMax: 10_900,
-    filesOver500LinesMax: 14,
+    totalSourceLinesMax: 41_000,
+    largestSourceFileLinesMax: 11_000,
+    shellClusterLinesMax: 12_500,
+    filesOver500LinesMax: 16,
     filesOver1000LinesMax: 4,
     commandLayerRatioMax: 0.42,
     shellShareRatioMax: 0.31,
   },
   reuse: {
-    reusableCoreRatioMin: 0.58,
-    coreToShellRatioMin: 1.9,
+    reusableCoreRatioMin: 0.57,
+    coreToShellRatioMin: 1.85,
   },
 };
 

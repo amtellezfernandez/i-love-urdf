@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateJointTypeInUrdf = exports.updateJointVelocityInUrdf = exports.updateJointLimitsInUrdf = exports.setJointAxisInUrdf = exports.renameLinkInUrdf = exports.renameJointInUrdf = void 0;
+exports.updateJointTypeInUrdf = exports.updateJointVelocityInUrdf = exports.updateJointLimitsInUrdf = exports.updateJointOriginInUrdf = exports.setJointAxisInUrdf = exports.renameLinkInUrdf = exports.renameJointInUrdf = void 0;
 const urdfParser_1 = require("../parsing/urdfParser");
 const urdfNames_1 = require("../utils/urdfNames");
 const getRobotElement = (document) => document.querySelector("robot");
@@ -164,6 +164,45 @@ const setJointAxisInUrdf = (urdfContent, jointName, axis) => {
     return { success: true, content: (0, urdfParser_1.serializeURDF)(parsed.document) };
 };
 exports.setJointAxisInUrdf = setJointAxisInUrdf;
+const updateJointOriginInUrdf = (urdfContent, jointName, xyz, rpy) => {
+    if (!urdfContent.trim()) {
+        return { success: false, content: urdfContent, error: "No URDF content available" };
+    }
+    const parsed = (0, urdfParser_1.parseURDF)(urdfContent);
+    if (!parsed.isValid) {
+        return { success: false, content: urdfContent, error: parsed.error };
+    }
+    const robot = getRobotElement(parsed.document);
+    if (!robot) {
+        return { success: false, content: urdfContent, error: "No <robot> element found" };
+    }
+    const joint = findNamedDirectChild(robot, "joint", jointName);
+    if (!joint) {
+        return {
+            success: false,
+            content: urdfContent,
+            error: `Joint "${jointName}" not found`,
+        };
+    }
+    let originElement = joint.querySelector("origin");
+    if (!originElement) {
+        originElement = parsed.document.createElement("origin");
+        const parentTag = joint.querySelector("parent");
+        if (parentTag) {
+            joint.insertBefore(originElement, parentTag);
+        }
+        else if (joint.firstChild) {
+            joint.insertBefore(originElement, joint.firstChild);
+        }
+        else {
+            joint.appendChild(originElement);
+        }
+    }
+    originElement.setAttribute("xyz", `${xyz[0]} ${xyz[1]} ${xyz[2]}`);
+    originElement.setAttribute("rpy", `${rpy[0]} ${rpy[1]} ${rpy[2]}`);
+    return { success: true, content: (0, urdfParser_1.serializeURDF)(parsed.document) };
+};
+exports.updateJointOriginInUrdf = updateJointOriginInUrdf;
 const updateJointLimitsInUrdf = (urdfContent, jointName, lowerLimit, upperLimit) => {
     if (!urdfContent.trim()) {
         return { success: false, content: urdfContent, error: "No URDF content available" };

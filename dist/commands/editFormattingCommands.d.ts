@@ -5,4 +5,5 @@ export declare const EDIT_FORMATTING_COMMAND_HANDLERS: {
     "normalize-axes": ({ helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "snap-axes": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "mesh-to-assets": ({ helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
+    "bundle-mesh-assets": ({ helpers, urdfPath, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
 };

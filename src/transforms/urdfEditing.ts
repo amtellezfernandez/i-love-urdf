@@ -218,6 +218,54 @@ export const setJointAxisInUrdf = (
   return { success: true, content: serializeURDF(parsed.document) };
 };
 
+export const updateJointOriginInUrdf = (
+  urdfContent: string,
+  jointName: string,
+  xyz: [number, number, number],
+  rpy: [number, number, number]
+): UrdfTransformResult => {
+  if (!urdfContent.trim()) {
+    return { success: false, content: urdfContent, error: "No URDF content available" };
+  }
+
+  const parsed = parseURDF(urdfContent);
+  if (!parsed.isValid) {
+    return { success: false, content: urdfContent, error: parsed.error };
+  }
+
+  const robot = getRobotElement(parsed.document);
+  if (!robot) {
+    return { success: false, content: urdfContent, error: "No <robot> element found" };
+  }
+
+  const joint = findNamedDirectChild(robot, "joint", jointName);
+  if (!joint) {
+    return {
+      success: false,
+      content: urdfContent,
+      error: `Joint "${jointName}" not found`,
+    };
+  }
+
+  let originElement = joint.querySelector("origin");
+  if (!originElement) {
+    originElement = parsed.document.createElement("origin");
+    const parentTag = joint.querySelector("parent");
+    if (parentTag) {
+      joint.insertBefore(originElement, parentTag);
+    } else if (joint.firstChild) {
+      joint.insertBefore(originElement, joint.firstChild);
+    } else {
+      joint.appendChild(originElement);
+    }
+  }
+
+  originElement.setAttribute("xyz", `${xyz[0]} ${xyz[1]} ${xyz[2]}`);
+  originElement.setAttribute("rpy", `${rpy[0]} ${rpy[1]} ${rpy[2]}`);
+
+  return { success: true, content: serializeURDF(parsed.document) };
+};
+
 export const updateJointLimitsInUrdf = (
   urdfContent: string,
   jointName: string,

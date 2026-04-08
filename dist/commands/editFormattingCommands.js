@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EDIT_FORMATTING_COMMAND_HANDLERS = void 0;
 const index_1 = require("../index");
+const bundleMeshAssets_1 = require("../node/bundleMeshAssets");
 const editCommandRuntime_1 = require("./editCommandRuntime");
 const localMeshReferenceInspection_1 = require("./localMeshReferenceInspection");
 exports.EDIT_FORMATTING_COMMAND_HANDLERS = {
@@ -31,6 +32,15 @@ exports.EDIT_FORMATTING_COMMAND_HANDLERS = {
     },
     "mesh-to-assets": ({ helpers, urdfContent, outPath }) => {
         const result = (0, index_1.updateMeshPathsToAssetsInUrdf)(urdfContent);
+        (0, editCommandRuntime_1.emitWrittenPayload)(helpers, outPath, result.content, result);
+    },
+    "bundle-mesh-assets": ({ helpers, urdfPath, urdfContent, outPath }) => {
+        const targetPath = outPath || urdfPath;
+        const result = (0, bundleMeshAssets_1.bundleMeshAssetsForUrdfFile)({
+            urdfPath,
+            urdfContent,
+            outPath: targetPath,
+        });
         (0, editCommandRuntime_1.emitWrittenPayload)(helpers, outPath, result.content, result);
     },
 };

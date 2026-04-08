@@ -167,6 +167,9 @@ const getOrientationSuggestion = (orientationGuess) => {
     if (confidence < 0.72) {
         return null;
     }
+    if ((orientationGuess.report?.conflicts?.length ?? 0) > 0) {
+        return null;
+    }
     const sourceUpAxis = orientationGuess.suggestedApplyOrientation.sourceUpAxis;
     const sourceForwardAxis = orientationGuess.suggestedApplyOrientation.sourceForwardAxis;
     const targetUpAxis = orientationGuess.suggestedApplyOrientation.targetUpAxis;

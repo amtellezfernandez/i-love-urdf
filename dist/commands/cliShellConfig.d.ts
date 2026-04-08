@@ -68,6 +68,9 @@ export declare const ROOT_TASKS: readonly [{
 }, {
     readonly name: "fix";
     readonly summary: "Repair mesh paths, mesh refs, and basic URDF issues.";
+}, {
+    readonly name: "preview";
+    readonly summary: "Select a source for gallery card generation.";
 }];
 export declare const ROOT_SHELL_COMMANDS: readonly [{
     readonly name: "open";
@@ -298,9 +301,37 @@ export declare const ROOT_TASK_ACTIONS: {
             readonly onlyIfMissing: true;
         };
     }];
+    readonly preview: readonly [{
+        readonly name: "repo";
+        readonly summary: "Select a GitHub repo and generate cards for every robot in it.";
+        readonly command: "load-source";
+        readonly sessionLabel: "preview";
+        readonly openPending: {
+            readonly key: "github";
+            readonly slashName: "repo";
+        };
+    }, {
+        readonly name: "folder";
+        readonly summary: "Select a local folder and generate cards for every URDF in it.";
+        readonly command: "load-source";
+        readonly sessionLabel: "preview";
+        readonly openPending: {
+            readonly key: "path";
+            readonly slashName: "folder";
+        };
+    }, {
+        readonly name: "urdf";
+        readonly summary: "Select one URDF file and generate a single card from it.";
+        readonly command: "load-source";
+        readonly sessionLabel: "preview";
+        readonly openPending: {
+            readonly key: "path";
+            readonly slashName: "urdf";
+        };
+    }];
 };
 export declare const COMMAND_SUMMARY_OVERRIDES: Partial<Record<SupportedCommandName, string>>;
-export declare const URDF_OUTPUT_COMMANDS: Set<"inspect-meshes" | "compress-meshes" | "mesh-refs" | "health-check" | "snap-axes" | "apply-orientation" | "canonicalize-joint-frame" | "pretty-print" | "canonical-order" | "validate" | "analyze" | "robot-type" | "morphology-card" | "gallery-generate" | "guess-orientation" | "diff" | "fix-mesh-paths" | "bundle-mesh-assets" | "normalize-axes" | "set-joint-axis" | "set-joint-origin" | "set-joint-type" | "set-joint-limits" | "set-joint-velocity" | "rotate-90" | "normalize-robot" | "remove-joints" | "reassign-joint" | "set-material-color" | "merge-urdf" | "replace-subrobot" | "mesh-to-assets" | "urdf-to-mjcf" | "urdf-to-usd" | "urdf-to-xacro" | "xacro-to-urdf" | "probe-xacro-runtime" | "setup-xacro-runtime" | "load-source" | "assemble" | "rename-joint" | "rename-link" | "inspect-repo" | "repair-mesh-refs" | "repo-fixes">;
+export declare const URDF_OUTPUT_COMMANDS: Set<"inspect-meshes" | "compress-meshes" | "mesh-refs" | "health-check" | "snap-axes" | "apply-orientation" | "canonicalize-joint-frame" | "pretty-print" | "canonical-order" | "validate" | "analyze" | "robot-type" | "morphology-card" | "gallery-generate" | "gallery-render" | "gallery-build-publish" | "guess-orientation" | "diff" | "fix-mesh-paths" | "bundle-mesh-assets" | "normalize-axes" | "set-joint-axis" | "set-joint-origin" | "set-joint-type" | "set-joint-limits" | "set-joint-velocity" | "rotate-90" | "normalize-robot" | "remove-joints" | "reassign-joint" | "set-material-color" | "merge-urdf" | "replace-subrobot" | "mesh-to-assets" | "urdf-to-mjcf" | "urdf-to-usd" | "urdf-to-xacro" | "xacro-to-urdf" | "probe-xacro-runtime" | "setup-xacro-runtime" | "load-source" | "assemble" | "rename-joint" | "rename-link" | "inspect-repo" | "repair-mesh-refs" | "repo-fixes">;
 export declare const ADVANCED_OPTION_KEYS: Set<string>;
 export declare const SESSION_OPTION_ORDER: {
     readonly assemble: readonly ["urdf", "attach", "name"];

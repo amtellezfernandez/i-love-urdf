@@ -210,6 +210,9 @@ const getOrientationSuggestion = (orientationGuess: {
   targetUpAxis?: string | null;
   targetForwardAxis?: string | null;
   confidence?: number;
+  report?: {
+    conflicts?: string[] | null;
+  } | null;
   suggestedApplyOrientation?: {
     sourceUpAxis?: string | null;
     sourceForwardAxis?: string | null;
@@ -232,6 +235,10 @@ const getOrientationSuggestion = (orientationGuess: {
       ? orientationGuess.confidence
       : 0;
   if (confidence < 0.72) {
+    return null;
+  }
+
+  if ((orientationGuess.report?.conflicts?.length ?? 0) > 0) {
     return null;
   }
 
@@ -264,6 +271,9 @@ export const detectSuggestedAction = (
       targetUpAxis?: string | null;
       targetForwardAxis?: string | null;
       confidence?: number;
+      report?: {
+        conflicts?: string[] | null;
+      } | null;
       suggestedApplyOrientation?: {
         sourceUpAxis?: string | null;
         sourceForwardAxis?: string | null;

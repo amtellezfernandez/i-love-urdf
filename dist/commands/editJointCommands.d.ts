@@ -1,5 +1,6 @@
 export declare const EDIT_JOINT_COMMAND_HANDLERS: {
     "set-joint-axis": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
+    "set-joint-origin": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "set-joint-type": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "set-joint-limits": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "set-joint-velocity": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
@@ -8,6 +9,7 @@ export declare const EDIT_JOINT_COMMAND_HANDLERS: {
     "reassign-joint": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "set-material-color": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "merge-urdf": ({ args, helpers, urdfContent, urdfPath, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
+    "replace-subrobot": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => Promise<void>;
     "rename-joint": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
     "rename-link": ({ args, helpers, urdfContent, outPath }: import("./editCommandRuntime").EditCommandContext) => void;
 };

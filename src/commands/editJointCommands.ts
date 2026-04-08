@@ -1,10 +1,13 @@
 import * as path from "node:path";
+import * as fs from "node:fs";
 import {
   mergeUrdfs,
   removeJointsFromUrdf,
+  replaceSubrobotInUrdf,
   renameJointInUrdf,
   renameLinkInUrdf,
   setJointAxisInUrdf,
+  updateJointOriginInUrdf,
   updateJointLimitsInUrdf,
   updateJointLinksInUrdf,
   updateJointTypeInUrdf,
@@ -12,6 +15,8 @@ import {
   updateMaterialColorInUrdf,
 } from "../index";
 import { canonicalizeJointFrames } from "../transforms/canonicalizeJointFrames";
+import { openStudioForReplaceSubrobotCalibration, stageReplaceSubrobotCalibrationSession } from "../session/replaceSubrobotCalibrationSession";
+import { bundleMeshAssetsForUrdfFile } from "../node/bundleMeshAssets";
 import {
   emitJson,
   emitWrittenPayload,
@@ -25,6 +30,16 @@ export const EDIT_JOINT_COMMAND_HANDLERS = {
       urdfContent,
       helpers.requireStringArg(args, "joint"),
       helpers.parseTripletArg(helpers.requireStringArg(args, "xyz"), "joint axis")
+    );
+    emitWrittenPayload(helpers, outPath, result.content, result);
+  },
+
+  "set-joint-origin": ({ args, helpers, urdfContent, outPath }) => {
+    const result = updateJointOriginInUrdf(
+      urdfContent,
+      helpers.requireStringArg(args, "joint"),
+      helpers.parseTripletArg(helpers.requireStringArg(args, "xyz"), "joint origin xyz"),
+      helpers.parseTripletArg(helpers.requireStringArg(args, "rpy"), "joint origin rpy")
     );
     emitWrittenPayload(helpers, outPath, result.content, result);
   },
@@ -136,6 +151,126 @@ export const EDIT_JOINT_COMMAND_HANDLERS = {
     emitWrittenPayload(helpers, outPath, result.content, result);
   },
 
+  "replace-subrobot": async ({ args, helpers, urdfContent, outPath }) => {
+    const replacementPath = helpers.requireStringArg(args, "replacement");
+    const mountXyz = helpers.getOptionalStringArg(args, "xyz");
+    const mountRpy = helpers.getOptionalStringArg(args, "rpy");
+    const result = replaceSubrobotInUrdf(urdfContent, {
+      targetRootLink: helpers.requireStringArg(args, "replace-root"),
+      replacementUrdfContent: helpers.readText(replacementPath),
+      replacementRootLink: helpers.requireStringArg(args, "replacement-root"),
+      mountParentLink: helpers.getOptionalStringArg(args, "mount-parent"),
+      mountJointName: helpers.getOptionalStringArg(args, "mount-joint"),
+      prefix: helpers.getOptionalStringArg(args, "prefix"),
+      mount:
+        mountXyz || mountRpy
+          ? {
+              xyz: mountXyz ? helpers.parseTripletArg(mountXyz, "mount xyz") : undefined,
+              rpy: mountRpy ? helpers.parseTripletArg(mountRpy, "mount rpy") : undefined,
+            }
+          : undefined,
+    });
+    if (!result.success) {
+      emitWrittenPayload(helpers, outPath, result.content, result);
+      return;
+    }
+
+    if (!args.has("calibrate")) {
+      if (!args.has("portable")) {
+        emitWrittenPayload(helpers, outPath, result.content, result);
+        return;
+      }
+
+      const bundleOutPath =
+        outPath ||
+        helpers.requireStringArg(args, "urdf").replace(/\.(urdf\.xacro|xacro|urdf)$/i, ".portable.urdf");
+      const bundled = bundleMeshAssetsForUrdfFile({
+        urdfPath: helpers.requireStringArg(args, "urdf"),
+        urdfContent: result.content,
+        outPath: bundleOutPath,
+        extraSearchRoots: [replacementPath],
+      });
+      fs.mkdirSync(path.dirname(bundleOutPath), { recursive: true });
+      fs.writeFileSync(bundleOutPath, bundled.content, "utf8");
+      emitJson({
+        ...result,
+        outPath: bundleOutPath,
+        portable: true,
+        portableBundle: bundled,
+      });
+      return;
+    }
+
+    const calibration = stageReplaceSubrobotCalibrationSession({
+      fileNameHint: path.basename(outPath || helpers.requireStringArg(args, "urdf")).replace(
+        /\.(urdf\.xacro|xacro)$/i,
+        ".urdf"
+      ),
+      hostUrdfPath: helpers.requireStringArg(args, "urdf"),
+      replacementUrdfPath: replacementPath,
+      urdfContent: result.content,
+    });
+    helpers.writeOutIfRequested(outPath, result.content);
+
+    try {
+      const visualizer = await openStudioForReplaceSubrobotCalibration(calibration.sessionId, {
+      focusJoint: result.mountJointName,
+      calibrateMode: true,
+      });
+      const started = visualizer.started;
+      const visualizerStart =
+        "code" in started
+          ? {
+              ok: false as const,
+              code: started.code,
+              reason: started.reason,
+              studioRoot: started.studioRoot,
+            }
+          : {
+              ok: true as const,
+              studioRoot: started.studioRoot,
+            };
+      emitJson({
+        ...result,
+        outPath: outPath || null,
+        portable: args.has("portable"),
+        calibrationSessionId: calibration.sessionId,
+        calibrationWorkspaceRoot: calibration.workspaceRoot,
+        calibrationWorkingUrdfPath: calibration.workingUrdfPath,
+        calibrationCopiedFiles: calibration.copiedFiles,
+        studioUrl: visualizer.studioUrl,
+        visualizerOpened: visualizer.opened,
+        portableFinalizeCommand:
+          args.has("portable") && outPath
+            ? `ilu bundle-mesh-assets --urdf ${JSON.stringify(calibration.workingUrdfPath)} --out ${JSON.stringify(outPath)}`
+            : null,
+        visualizerStart,
+      });
+    } catch (error: unknown) {
+      emitJson({
+        ...result,
+        outPath: outPath || null,
+        portable: args.has("portable"),
+        calibrationSessionId: calibration.sessionId,
+        calibrationWorkspaceRoot: calibration.workspaceRoot,
+        calibrationWorkingUrdfPath: calibration.workingUrdfPath,
+        calibrationCopiedFiles: calibration.copiedFiles,
+        studioUrl: calibration.studioUrl,
+        visualizerOpened: false,
+        portableFinalizeCommand:
+          args.has("portable") && outPath
+            ? `ilu bundle-mesh-assets --urdf ${JSON.stringify(calibration.workingUrdfPath)} --out ${JSON.stringify(outPath)}`
+            : null,
+        visualizerStart: {
+          ok: false,
+          code: "startup-failed",
+          reason: error instanceof Error ? error.message : "Failed to open Studio calibration session.",
+          studioRoot: null,
+        },
+      });
+    }
+  },
+
   "rename-joint": ({ args, helpers, urdfContent, outPath }) => {
     const result = renameJointInUrdf(
       urdfContent,
@@ -155,6 +290,7 @@ export const EDIT_JOINT_COMMAND_HANDLERS = {
   },
 } satisfies Record<
   | "set-joint-axis"
+  | "set-joint-origin"
   | "set-joint-type"
   | "set-joint-limits"
   | "set-joint-velocity"
@@ -163,6 +299,7 @@ export const EDIT_JOINT_COMMAND_HANDLERS = {
   | "reassign-joint"
   | "set-material-color"
   | "merge-urdf"
+  | "replace-subrobot"
   | "rename-joint"
   | "rename-link",
   EditCommandHandler

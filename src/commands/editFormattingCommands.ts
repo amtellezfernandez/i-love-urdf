@@ -5,6 +5,7 @@ import {
   snapJointAxes,
   updateMeshPathsToAssetsInUrdf,
 } from "../index";
+import { bundleMeshAssetsForUrdfFile } from "../node/bundleMeshAssets";
 import { emitWrittenPayload, type EditCommandHandler } from "./editCommandRuntime";
 import { fixLocalMeshPaths } from "./localMeshReferenceInspection";
 
@@ -42,12 +43,23 @@ export const EDIT_FORMATTING_COMMAND_HANDLERS = {
     const result = updateMeshPathsToAssetsInUrdf(urdfContent);
     emitWrittenPayload(helpers, outPath, result.content, result);
   },
+
+  "bundle-mesh-assets": ({ helpers, urdfPath, urdfContent, outPath }) => {
+    const targetPath = outPath || urdfPath;
+    const result = bundleMeshAssetsForUrdfFile({
+      urdfPath,
+      urdfContent,
+      outPath: targetPath,
+    });
+    emitWrittenPayload(helpers, outPath, result.content, result);
+  },
 } satisfies Record<
   | "fix-mesh-paths"
   | "canonical-order"
   | "pretty-print"
   | "normalize-axes"
   | "snap-axes"
-  | "mesh-to-assets",
+  | "mesh-to-assets"
+  | "bundle-mesh-assets",
   EditCommandHandler
 >;
