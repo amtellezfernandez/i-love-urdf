@@ -16,6 +16,7 @@ import {
 import {
   buildDependencyRepositoryNameCandidates,
   collectPackageNamesFromText,
+  findPackageXmlForPackageName,
   repositoryContainsPackage,
   resolveRepositoryXacroTargetPath,
 } from "../repository/repositoryUrdfDiscovery";
@@ -690,6 +691,24 @@ const prefixDependencyFiles = (
   }));
 };
 
+const hasExplicitLocalGitHubPackage = (
+  files: GitHubRepositoryFile[],
+  packageName: string,
+  repositoryName?: string
+): boolean => {
+  if (findPackageXmlForPackageName(files, packageName)) {
+    return true;
+  }
+
+  return Boolean(
+    repositoryName &&
+      files.some(
+        (file) => file.type === "file" && normalizeRepositoryPath(file.path).toLowerCase() === "package.xml"
+      ) &&
+      repositoryContainsPackage(files, packageName, repositoryName)
+  );
+};
+
 const buildGitHubReadKey = (file: GitHubRepositoryFile, fallbackOwner: string, fallbackRepo: string): string =>
   [
     file.sourceOwner || fallbackOwner,
@@ -899,11 +918,25 @@ export const expandFetchedGitHubRepositoryXacro = async (
       }
 
       missingPackages.forEach((packageName) => attemptedRuntimeDependencyPackages.add(packageName));
+      const localPackages = missingPackages.filter((packageName) =>
+        hasExplicitLocalGitHubPackage(resolvedFiles, packageName, reference.repo)
+      );
+      const remotePackages = missingPackages.filter(
+        (packageName) => !localPackages.includes(packageName)
+      );
+
+      if (localPackages.length > 0) {
+        await resolveStaticSupportDependencies();
+        if (remotePackages.length === 0) {
+          continue;
+        }
+      }
+
       const dependencyFiles = await fetchMissingGitHubDependencyFiles({
         owner: reference.owner,
         ref,
         accessToken: options.accessToken,
-        packageNames: missingPackages,
+        packageNames: remotePackages,
         existingFiles: resolvedFiles,
         skipExistingCheck: true,
         repositoryCache: dependencyRepositoryCache,

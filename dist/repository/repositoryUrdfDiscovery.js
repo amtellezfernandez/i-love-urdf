@@ -417,11 +417,13 @@ const repositoryContainsPackage = (files, packageName, repositoryName) => {
 };
 exports.repositoryContainsPackage = repositoryContainsPackage;
 const findPackageXmlForPackageName = (files, packageName) => {
-    const needle = `/${packageName.toLowerCase()}/package.xml`;
+    const packageXmlPath = `${packageName.toLowerCase()}/package.xml`;
+    const needle = `/${packageXmlPath}`;
     for (const file of files) {
         if (file.type !== "file")
             continue;
-        if (file.path.toLowerCase().endsWith(needle)) {
+        const lowerPath = file.path.toLowerCase();
+        if (lowerPath === packageXmlPath || lowerPath.endsWith(needle)) {
             return file;
         }
     }
