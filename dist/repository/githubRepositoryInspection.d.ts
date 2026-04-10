@@ -1,5 +1,27 @@
 import { type FixMissingMeshReferencesOptions, type FixMissingMeshReferencesResult } from "./fixMissingMeshReferences";
 import { type InspectRepositoryFilesOptions, type RepositoryCandidateInspection, type RepositoryInspectionSummary, type RepositoryRepoMetadata } from "./repositoryInspection";
+type GitHubDefaultBranchResponse = {
+    default_branch?: string;
+};
+type GitHubRepositoryOwnerResponse = {
+    login?: string;
+    url?: string;
+};
+type GitHubRepositoryApiResponse = GitHubDefaultBranchResponse & {
+    description?: string;
+    homepage?: string;
+    topics?: string[];
+    license?: {
+        spdx_id?: string;
+        name?: string;
+    } | null;
+    owner?: GitHubRepositoryOwnerResponse | null;
+};
+type FetchGitHubRepositoryMetadataOptions = {
+    accessToken?: string;
+    repositoryPayload?: GitHubRepositoryApiResponse | null;
+    includeOwnerProfile?: boolean;
+};
 export type GitHubRepositoryReference = {
     owner: string;
     repo: string;
@@ -42,12 +64,15 @@ export type GitHubRepositoryMeshRepairResult = FixMissingMeshReferencesResult & 
     repositoryUrl: string;
 };
 export declare const parseGitHubRepositoryReference: (value: string) => GitHubRepositoryReference | null;
-export declare const fetchGitHubRepositoryMetadata: (reference: GitHubRepositoryReference, accessToken?: string) => Promise<RepositoryRepoMetadata>;
+export declare function fetchGitHubRepositoryMetadata(reference: GitHubRepositoryReference, accessToken?: string): Promise<RepositoryRepoMetadata>;
+export declare function fetchGitHubRepositoryMetadata(reference: GitHubRepositoryReference, options?: FetchGitHubRepositoryMetadataOptions): Promise<RepositoryRepoMetadata>;
 export declare const fetchGitHubRepositoryFiles: (reference: GitHubRepositoryReference, accessToken?: string) => Promise<{
     ref: string;
     files: GitHubRepositoryFile[];
+    repositoryPayload: GitHubRepositoryApiResponse | null;
 }>;
 export declare const fetchGitHubTextFile: (owner: string, repo: string, filePath: string, blobSha?: string, accessToken?: string, ref?: string, downloadUrl?: string | null) => Promise<string>;
 export declare const fetchGitHubFileBytes: (owner: string, repo: string, filePath: string, blobSha?: string, accessToken?: string, ref?: string, downloadUrl?: string | null) => Promise<Uint8Array>;
 export declare const inspectGitHubRepositoryUrdfs: (reference: GitHubRepositoryReference, options?: InspectGitHubRepositoryOptions) => Promise<GitHubRepositoryInspectionResult>;
 export declare const repairGitHubRepositoryMeshReferences: (reference: GitHubRepositoryReference, options?: RepairGitHubRepositoryOptions) => Promise<GitHubRepositoryMeshRepairResult>;
+export {};

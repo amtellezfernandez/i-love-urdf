@@ -18,6 +18,7 @@ import {
   resolveRepositoryScopeFromFiles,
   resolveRepositoryScopedPathFromFiles,
 } from "./repositoryPathScope";
+import { findRepositoryUrdfCandidates, type RepositoryUrdfCandidate } from "./repositoryUrdfDiscovery";
 
 const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_ACCEPT_HEADER = "application/vnd.github.v3+json";
@@ -26,6 +27,7 @@ const JSDELIVR_DATA_BASE_URL = "https://data.jsdelivr.com/v1";
 const JSDELIVR_CDN_BASE_URL = "https://cdn.jsdelivr.net";
 const GITHUB_FETCH_TIMEOUT_MS = 20_000;
 const PUBLIC_MIRROR_FETCH_TIMEOUT_MS = 20_000;
+const DEFAULT_INCLUDE_OWNER_PROFILE_IN_REPOSITORY_METADATA = true;
 const GITHUB_NETWORK_ERROR_PATTERN =
   /Failed to fetch|NetworkError|fetch failed|Load failed|ECONNREFUSED|ERR_CONNECTION_REFUSED|ERR_NETWORK/i;
 
@@ -63,6 +65,17 @@ type GitHubOwnerProfileResponse = {
   twitter_username?: string;
   email?: string;
 };
+
+type FetchGitHubRepositoryMetadataOptions = {
+  accessToken?: string;
+  repositoryPayload?: GitHubRepositoryApiResponse | null;
+  includeOwnerProfile?: boolean;
+};
+
+type FetchGitHubRepositoryMetadataArg =
+  | string
+  | FetchGitHubRepositoryMetadataOptions
+  | undefined;
 
 type GitHubTreeResponse = {
   tree?: GitHubTreeEntry[];
@@ -126,6 +139,8 @@ export type GitHubRepositoryMeshRepairResult = FixMissingMeshReferencesResult & 
   urdfPath: string;
   repositoryUrl: string;
 };
+
+const DEFAULT_MAX_CANDIDATES_TO_INSPECT = 12;
 
 const sanitizeRepoSegment = (value: string): string => value.replace(/\.git$/i, "").trim();
 
@@ -227,6 +242,20 @@ const isRecoverableGitHubError = (error: unknown): boolean => {
     GITHUB_NETWORK_ERROR_PATTERN.test(error.message)
   );
 };
+
+const resolveMaxCandidatesToInspect = (value: unknown): number =>
+  Math.max(0, Number(value ?? DEFAULT_MAX_CANDIDATES_TO_INSPECT) || DEFAULT_MAX_CANDIDATES_TO_INSPECT);
+
+const resolveScopedRepositoryCandidates = (
+  files: GitHubRepositoryFile[],
+  scope: ReturnType<typeof resolveRepositoryScopeFromFiles>,
+  candidateFilter?: (candidate: RepositoryUrdfCandidate) => boolean
+): RepositoryUrdfCandidate[] =>
+  findRepositoryUrdfCandidates(files).filter((candidate) => {
+    const matchesRequestedScope = matchesRepositoryScope(candidate.path, scope);
+    const matchesCallerFilter = candidateFilter ? candidateFilter(candidate) : true;
+    return matchesRequestedScope && matchesCallerFilter;
+  });
 
 const fetchGitHubResponse = async (
   url: string,
@@ -476,22 +505,6 @@ export const parseGitHubRepositoryReference = (
   }
 };
 
-const getDefaultBranch = async (
-  owner: string,
-  repo: string,
-  accessToken?: string
-): Promise<string> => {
-  const data = await readGitHubJson<GitHubDefaultBranchResponse>(
-    `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}`,
-    {
-      accessToken,
-      notFoundMessage: "GitHub repository not found.",
-      contextLabel: "reading repository metadata",
-    }
-  );
-  return data.default_branch || "main";
-};
-
 const readGitHubApiJsonOrNull = async <T>(url: string, accessToken?: string): Promise<T | null> => {
   try {
     return await readGitHubJson<T>(url, {
@@ -504,28 +517,58 @@ const readGitHubApiJsonOrNull = async <T>(url: string, accessToken?: string): Pr
   }
 };
 
-export const fetchGitHubRepositoryMetadata = async (
+const readGitHubRepositoryApiPayloadOrNull = async (
+  owner: string,
+  repo: string,
+  accessToken?: string
+): Promise<GitHubRepositoryApiResponse | null> =>
+  readGitHubApiJsonOrNull<GitHubRepositoryApiResponse>(
+    `${GITHUB_API_BASE_URL}/repos/${owner}/${repo}`,
+    accessToken
+  );
+
+const resolveFetchGitHubRepositoryMetadataOptions = (
+  value: FetchGitHubRepositoryMetadataArg
+): FetchGitHubRepositoryMetadataOptions => {
+  if (typeof value === "string") {
+    return { accessToken: value };
+  }
+  return value ?? {};
+};
+
+export function fetchGitHubRepositoryMetadata(
   reference: GitHubRepositoryReference,
   accessToken?: string
-): Promise<RepositoryRepoMetadata> => {
+): Promise<RepositoryRepoMetadata>;
+export function fetchGitHubRepositoryMetadata(
+  reference: GitHubRepositoryReference,
+  options?: FetchGitHubRepositoryMetadataOptions
+): Promise<RepositoryRepoMetadata>;
+export async function fetchGitHubRepositoryMetadata(
+  reference: GitHubRepositoryReference,
+  accessTokenOrOptions: FetchGitHubRepositoryMetadataArg = {}
+): Promise<RepositoryRepoMetadata> {
+  const options = resolveFetchGitHubRepositoryMetadataOptions(accessTokenOrOptions);
   const ownerLabel = humanizeOwnerLabel(reference.owner);
   const fallbackMetadata = createEmptyRepositoryRepoMetadata();
   fallbackMetadata.org = ownerLabel;
   fallbackMetadata.authorGithub = reference.owner;
 
-  const repoPayload = await readGitHubApiJsonOrNull<GitHubRepositoryApiResponse>(
-    `${GITHUB_API_BASE_URL}/repos/${reference.owner}/${reference.repo}`,
-    accessToken
-  );
+  const repoPayload =
+    options.repositoryPayload ??
+    (await readGitHubRepositoryApiPayloadOrNull(reference.owner, reference.repo, options.accessToken));
   if (!repoPayload) {
     return fallbackMetadata;
   }
 
   const ownerLogin = normalizeOptionalText(repoPayload.owner?.login) || reference.owner;
   const ownerProfileUrl = normalizeOptionalText(repoPayload.owner?.url);
-  const ownerProfile = ownerProfileUrl
-    ? await readGitHubApiJsonOrNull<GitHubOwnerProfileResponse>(ownerProfileUrl, accessToken)
-    : null;
+  const includeOwnerProfile =
+    options.includeOwnerProfile ?? DEFAULT_INCLUDE_OWNER_PROFILE_IN_REPOSITORY_METADATA;
+  const ownerProfile =
+    includeOwnerProfile && ownerProfileUrl
+      ? await readGitHubApiJsonOrNull<GitHubOwnerProfileResponse>(ownerProfileUrl, options.accessToken)
+      : null;
 
   return {
     org:
@@ -546,7 +589,7 @@ export const fetchGitHubRepositoryMetadata = async (
     extra: "",
     hfDatasets: [],
   };
-};
+}
 
 const convertTreeToRepositoryFiles = (
   treeEntries: GitHubTreeEntry[],
@@ -687,11 +730,16 @@ const fetchPublicMirrorRepositoryFiles = async (
 export const fetchGitHubRepositoryFiles = async (
   reference: GitHubRepositoryReference,
   accessToken?: string
-): Promise<{ ref: string; files: GitHubRepositoryFile[] }> => {
+): Promise<{ ref: string; files: GitHubRepositoryFile[]; repositoryPayload: GitHubRepositoryApiResponse | null }> => {
   let ref = reference.ref;
+  let repositoryPayload: GitHubRepositoryApiResponse | null = null;
   if (!ref) {
     try {
-      ref = await getDefaultBranch(reference.owner, reference.repo, accessToken);
+      repositoryPayload = await readGitHubRepositoryApiPayloadOrNull(reference.owner, reference.repo, accessToken);
+      if (!repositoryPayload) {
+        throw new Error("GitHub repository not found.");
+      }
+      ref = repositoryPayload.default_branch || "main";
     } catch (error) {
       if (!isRecoverableGitHubError(error)) {
         throw error;
@@ -701,6 +749,7 @@ export const fetchGitHubRepositoryFiles = async (
       return {
         ref: "HEAD",
         files,
+        repositoryPayload: null,
       };
     }
   }
@@ -725,12 +774,14 @@ export const fetchGitHubRepositoryFiles = async (
         repo: reference.repo,
         ref,
       }),
+      repositoryPayload,
     };
   } catch (error) {
     if (isRecoverableGitHubError(error)) {
       return {
         ref,
         files: await fetchPublicMirrorRepositoryFiles(reference, ref, ""),
+        repositoryPayload,
       };
     }
     throw error;
@@ -801,22 +852,36 @@ export const inspectGitHubRepositoryUrdfs = async (
   reference: GitHubRepositoryReference,
   options: InspectGitHubRepositoryOptions = {}
 ): Promise<GitHubRepositoryInspectionResult> => {
-  const { ref, files } = await fetchGitHubRepositoryFiles(reference, options.accessToken);
+  const { ref, files, repositoryPayload } = await fetchGitHubRepositoryFiles(reference, options.accessToken);
   const scope = resolveRepositoryScopeFromFiles(files, reference.path);
   if (!scope) {
     throw new Error("GitHub repository path not found.");
   }
-  const packageNameByPath = await buildPackageNameByPathFromRepositoryFiles(files, (file) =>
-    fetchGitHubTextFile(
-      reference.owner,
-      reference.repo,
-      file.path,
-      file.sha,
-      options.accessToken,
-      ref,
-      file.download_url
-    )
-  );
+  const candidateFilter = (candidate: RepositoryUrdfCandidate) => {
+    const matchesRequestedScope = matchesRepositoryScope(candidate.path, scope);
+    const matchesCallerFilter = options.candidateFilter ? options.candidateFilter(candidate) : true;
+    return matchesRequestedScope && matchesCallerFilter;
+  };
+  const scopedCandidates = resolveScopedRepositoryCandidates(files, scope, options.candidateFilter);
+  const inspectedCandidates = scopedCandidates.slice(0, resolveMaxCandidatesToInspect(options.maxCandidatesToInspect));
+  const needsPackageNameByPath = inspectedCandidates.some((candidate) => !candidate.isXacro);
+  const packageNameByPathPromise = needsPackageNameByPath
+    ? buildPackageNameByPathFromRepositoryFiles(files, (file) =>
+        fetchGitHubTextFile(
+          reference.owner,
+          reference.repo,
+          file.path,
+          file.sha,
+          options.accessToken,
+          ref,
+          file.download_url
+        )
+      )
+    : Promise.resolve(undefined);
+  const repoMetadataPromise = fetchGitHubRepositoryMetadata(reference, {
+    accessToken: options.accessToken,
+    repositoryPayload,
+  });
   const summary = await inspectRepositoryFiles(
     files,
     (_candidate, file) =>
@@ -831,15 +896,11 @@ export const inspectGitHubRepositoryUrdfs = async (
       ),
     {
       ...options,
-      candidateFilter: (candidate) => {
-        const matchesRequestedScope = matchesRepositoryScope(candidate.path, scope);
-        const matchesCallerFilter = options.candidateFilter ? options.candidateFilter(candidate) : true;
-        return matchesRequestedScope && matchesCallerFilter;
-      },
-      packageNameByPath,
+      candidateFilter,
+      packageNameByPath: await packageNameByPathPromise,
     }
   );
-  const repoMetadata = await fetchGitHubRepositoryMetadata(reference, options.accessToken);
+  const repoMetadata = await repoMetadataPromise;
 
   return {
     owner: reference.owner,

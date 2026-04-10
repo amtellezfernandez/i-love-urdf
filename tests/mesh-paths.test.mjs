@@ -63,6 +63,7 @@ const createMockGitHubRepository = () => {
   const owner = "test-owner";
   const repo = "test-repo";
   const ref = "main";
+  const ownerProfileUrl = `https://api.github.com/users/${owner}`;
   const packageName = "AMR_400_Test8_description";
   const urdfPath = "urdf/robot.urdf";
   const urdfContent =
@@ -89,6 +90,7 @@ const createMockGitHubRepository = () => {
     owner,
     repo,
     ref,
+    ownerProfileUrl,
     packageName,
     urdfPath,
     repositoryApiUrl,
@@ -100,7 +102,35 @@ const createMockGitHubRepository = () => {
     responses: new Map([
       [
         repositoryApiUrl,
-        () => new Response(JSON.stringify({ default_branch: ref }), { status: 200 }),
+        () =>
+          new Response(
+            JSON.stringify({
+              default_branch: ref,
+              description: "Scoped test robot",
+              homepage: "https://robots.example/test-repo",
+              topics: ["mobile-base"],
+              license: { spdx_id: "Apache-2.0" },
+              owner: {
+                login: owner,
+                url: ownerProfileUrl,
+              },
+            }),
+            { status: 200 }
+          ),
+      ],
+      [
+        ownerProfileUrl,
+        () =>
+          new Response(
+            JSON.stringify({
+              name: "Test Owner Robotics",
+              company: "@test-owner",
+              blog: "https://robots.example/about",
+              twitter_username: "test_owner",
+              email: "owner@test.example",
+            }),
+            { status: 200 }
+          ),
       ],
       [
         treeApiUrl,
@@ -115,6 +145,60 @@ const createMockGitHubRepository = () => {
           ),
       ],
       [urdfUrl, () => new Response(urdfContent, { status: 200 })],
+    ]),
+  };
+};
+
+const createMockGitHubXacroRepository = () => {
+  const owner = "test-owner";
+  const repo = "test-xacro-repo";
+  const ref = "main";
+  const xacroPath = "robots/demo/robot.urdf.xacro";
+  const xacroContent =
+    `<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="demo_robot">` +
+    `<xacro:arg name="robot_name" default="demo_robot"/>` +
+    `</robot>`;
+
+  const treeEntries = [
+    { path: "package.xml", type: "blob", sha: "pkg-sha", size: 64 },
+    { path: "robots", type: "tree" },
+    { path: "robots/demo", type: "tree" },
+    { path: xacroPath, type: "blob", sha: "xacro-sha", size: xacroContent.length },
+  ];
+
+  const repositoryApiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+  const treeApiUrl = `${repositoryApiUrl}/git/trees/${ref}?recursive=1`;
+  const packageUrl = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${ref}/package.xml`;
+  const xacroUrl = `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${ref}/${xacroPath}`;
+
+  return {
+    owner,
+    repo,
+    ref,
+    xacroPath,
+    packageUrl,
+    repositoryApiUrl,
+    treeApiUrl,
+    reference: { owner, repo },
+    fileReference: { owner, repo, path: xacroPath },
+    responses: new Map([
+      [
+        repositoryApiUrl,
+        () => new Response(JSON.stringify({ default_branch: ref }), { status: 200 }),
+      ],
+      [
+        treeApiUrl,
+        () => new Response(JSON.stringify({ tree: treeEntries }), { status: 200 }),
+      ],
+      [
+        packageUrl,
+        () =>
+          new Response(
+            `<?xml version="1.0"?><package><name>demo_description</name></package>`,
+            { status: 200 }
+          ),
+      ],
+      [xacroUrl, () => new Response(xacroContent, { status: 200 })],
     ]),
   };
 };
@@ -254,6 +338,60 @@ test("GitHub repo inspection and repair keep root package context for scoped fil
   assert.equal(repaired.corrections.length, 1);
   assert.deepEqual(repaired.unresolved, []);
   assert.match(repaired.content, /package:\/\/AMR_400_Test8_description\/meshes\/base\.stl/);
+});
+
+test("GitHub Xacro inspection skips package.xml fetches when no plain URDF candidates are inspected", async (t) => {
+  const fixture = createMockGitHubXacroRepository();
+  const requestedUrls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string" ? input : input.url;
+    requestedUrls.push(url);
+    const responseFactory = fixture.responses.get(url);
+    if (!responseFactory) {
+      return new Response(`Unhandled fetch: ${url}`, { status: 404 });
+    }
+    return responseFactory();
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const inspection = await githubRepositoryLib.inspectGitHubRepositoryUrdfs(fixture.fileReference);
+
+  assert.equal(inspection.candidateCount, 1);
+  assert.equal(inspection.candidates[0].inspectionMode, "xacro-source");
+  assert.equal(requestedUrls.includes(fixture.packageUrl), false);
+});
+
+test("GitHub repository metadata preserves owner enrichment for legacy token callers", async (t) => {
+  const fixture = createMockGitHubRepository();
+  const requestedUrls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string" ? input : input.url;
+    requestedUrls.push(url);
+    const responseFactory = fixture.responses.get(url);
+    if (!responseFactory) {
+      return new Response(`Unhandled fetch: ${url}`, { status: 404 });
+    }
+    return responseFactory();
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const metadata = await githubRepositoryLib.fetchGitHubRepositoryMetadata(
+    fixture.reference,
+    "ghs_test_token"
+  );
+
+  assert.equal(metadata.org, "Test Owner Robotics");
+  assert.equal(metadata.authorWebsite, "https://robots.example/about");
+  assert.equal(metadata.authorX, "@test_owner");
+  assert.equal(metadata.contact, "owner@test.example");
+  assert.equal(metadata.authorGithub, fixture.owner);
+  assert.equal(requestedUrls.includes(fixture.ownerProfileUrl), true);
 });
 
 test("loadSourceFromGitHub keeps mesh repair visibility for scoped file references", async (t) => {
