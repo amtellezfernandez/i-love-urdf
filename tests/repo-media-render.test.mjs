@@ -7,6 +7,7 @@ const {
   isMissingThumbnailTargetError,
   isThumbnailRenderReady,
   resolveRenderableTargetPath,
+  selectResolvedRenderTargetPath,
 } = await import(
   path.join("/home/am/dev/i-love-urdf", "dist", "gallery", "repoMediaRender.js")
 );
@@ -119,4 +120,20 @@ test("resolveRenderableTargetPath does not swallow unrelated errors", async () =
     /network failed/
   );
   assert.equal(isMissingThumbnailTargetError(new Error("network failed")), false);
+});
+
+test("selectResolvedRenderTargetPath picks the real inspected candidate for scoped GitHub renders", () => {
+  assert.equal(
+    selectResolvedRenderTargetPath(
+      {
+        kind: "github",
+        githubUrl: "https://github.com/acme/robots/tree/main/robots/demo",
+        sourcePath: "robots/demo",
+        ref: "main",
+      },
+      "demo.urdf",
+      ["robots/demo/demo.urdf", "robots/other/demo.urdf", "robots/demo/helper.xacro"]
+    ),
+    "robots/demo/demo.urdf"
+  );
 });

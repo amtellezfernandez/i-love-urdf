@@ -1,5 +1,11 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { resolveGitHubAccessToken } from "../node/githubCliAuth";
+import {
+  inspectGitHubRepositoryUrdfs,
+  parseGitHubRepositoryReference,
+} from "../repository/githubRepositoryInspection";
+import { inspectLocalRepositoryUrdfs } from "../repository/localRepositoryInspection";
 
 export type RepoMediaRenderAssetKind = "image" | "video";
 
@@ -67,6 +73,20 @@ const joinRenderTargetPath = (...segments: string[]): string =>
     .filter(Boolean)
     .join("/");
 
+const trimRenderTargetExtension = (value: string): string => {
+  const normalized = normalizeRenderTargetPath(value);
+  if (normalized.toLowerCase().endsWith(".urdf.xacro")) {
+    return normalized.slice(0, -".urdf.xacro".length);
+  }
+  if (normalized.toLowerCase().endsWith(".xacro")) {
+    return normalized.slice(0, -".xacro".length);
+  }
+  if (normalized.toLowerCase().endsWith(".urdf")) {
+    return normalized.slice(0, -".urdf".length);
+  }
+  return normalized;
+};
+
 export const isMissingThumbnailTargetError = (error: unknown): boolean =>
   error instanceof Error && THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message);
 
@@ -101,6 +121,94 @@ export const buildRenderTargetCandidates = (
   }
 
   return Array.from(candidates).filter(Boolean);
+};
+
+const scoreResolvedRenderTargetPath = (
+  source: RepoMediaRenderSource,
+  requestedPath: string,
+  candidatePath: string
+): number => {
+  const normalizedCandidate = normalizeRenderTargetPath(candidatePath).toLowerCase();
+  if (!normalizedCandidate) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const normalizedRequested = normalizeRenderTargetPath(requestedPath).toLowerCase();
+  const requestedVariants = buildRenderTargetCandidates(source, requestedPath).map((value) =>
+    value.toLowerCase()
+  );
+  const requestedBaseName =
+    normalizedRequested.split("/").pop() || normalizedRequested;
+  const requestedStem = trimRenderTargetExtension(requestedBaseName).toLowerCase();
+  const candidateBaseName =
+    normalizedCandidate.split("/").pop() || normalizedCandidate;
+  const candidateStem = trimRenderTargetExtension(candidateBaseName).toLowerCase();
+
+  let score = 0;
+  const exactVariantIndex = requestedVariants.indexOf(normalizedCandidate);
+  if (exactVariantIndex >= 0) {
+    score += 1_000 - exactVariantIndex * 100;
+  }
+  if (requestedVariants.some((variant) => normalizedCandidate.endsWith(`/${variant}`))) {
+    score += 700;
+  }
+  if (candidateBaseName === requestedBaseName) {
+    score += 400;
+  }
+  if (candidateStem === requestedStem) {
+    score += 250;
+  }
+  if (normalizedRequested && normalizedCandidate.endsWith(`/${normalizedRequested}`)) {
+    score += 200;
+  }
+  if (normalizedRequested && normalizedRequested.endsWith(`/${candidateBaseName}`)) {
+    score += 120;
+  }
+  score -= normalizedCandidate.length;
+  return score;
+};
+
+export const selectResolvedRenderTargetPath = (
+  source: RepoMediaRenderSource,
+  requestedPath: string,
+  inspectedCandidatePaths: readonly string[]
+): string | null => {
+  let bestPath: string | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const candidatePath of inspectedCandidatePaths) {
+    const score = scoreResolvedRenderTargetPath(source, requestedPath, candidatePath);
+    if (score > bestScore) {
+      bestScore = score;
+      bestPath = candidatePath;
+    }
+  }
+
+  return bestScore > 0 ? bestPath : null;
+};
+
+const resolveInspectedRenderTargetPath = async (
+  source: RepoMediaRenderSource,
+  requestedPath: string
+): Promise<string | null> => {
+  const inspectedCandidatePaths =
+    source.kind === "github"
+      ? await (async () => {
+          const reference = parseGitHubRepositoryReference(source.githubUrl);
+          if (!reference) {
+            return [];
+          }
+          const inspection = await inspectGitHubRepositoryUrdfs(reference, {
+            accessToken: resolveGitHubAccessToken(undefined),
+          });
+          return inspection.candidates.map((candidate) => candidate.path);
+        })()
+      : await (async () => {
+          const inspection = await inspectLocalRepositoryUrdfs({ path: source.localPath });
+          return inspection.candidates.map((candidate) => candidate.path);
+        })();
+
+  return selectResolvedRenderTargetPath(source, requestedPath, inspectedCandidatePaths);
 };
 
 export const isThumbnailRenderReady = (input: {
@@ -294,10 +402,25 @@ export const renderRepoMediaBatch = async (
       const videoPath = path.join(itemDir, "preview.webm");
       await ensureDir(itemDir);
 
-      await resolveRenderableTargetPath(source, candidatePath, async (targetPath) => {
-        await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "networkidle" });
+      const requestedTargetCandidates = new Set(buildRenderTargetCandidates(source, candidatePath));
+      try {
+        await resolveRenderableTargetPath(source, candidatePath, async (targetPath) => {
+          await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "networkidle" });
+          await waitForThumbReady(page);
+        });
+      } catch (error) {
+        if (!isMissingThumbnailTargetError(error)) {
+          throw error;
+        }
+        const inspectedTargetPath = await resolveInspectedRenderTargetPath(source, candidatePath);
+        if (!inspectedTargetPath || requestedTargetCandidates.has(inspectedTargetPath)) {
+          throw error;
+        }
+        await page.goto(buildRenderUrl(appUrl, source, inspectedTargetPath), {
+          waitUntil: "networkidle",
+        });
         await waitForThumbReady(page);
-      });
+      }
       const canvasHandle = await page.locator("#urdf-thumb-canvas canvas").elementHandle();
       if (!canvasHandle) {
         throw new Error("URDF thumbnail canvas was not found.");

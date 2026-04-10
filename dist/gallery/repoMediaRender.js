@@ -1,8 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderRepoMediaBatch = exports.resolveRenderableTargetPath = exports.isThumbnailRenderReady = exports.buildRenderTargetCandidates = exports.isMissingThumbnailTargetError = void 0;
+exports.renderRepoMediaBatch = exports.resolveRenderableTargetPath = exports.isThumbnailRenderReady = exports.selectResolvedRenderTargetPath = exports.buildRenderTargetCandidates = exports.isMissingThumbnailTargetError = void 0;
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const githubCliAuth_1 = require("../node/githubCliAuth");
+const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
+const localRepositoryInspection_1 = require("../repository/localRepositoryInspection");
 const THUMBNAIL_MISSING_TARGET_ERROR_PATTERN = /Unable to find the requested URDF target in the GitHub repository\./i;
 const FRAME_COUNT = 28;
 const FRAME_DELAY_MS = 50;
@@ -30,6 +33,19 @@ const joinRenderTargetPath = (...segments) => segments
     .map((segment) => normalizeRenderTargetPath(segment))
     .filter(Boolean)
     .join("/");
+const trimRenderTargetExtension = (value) => {
+    const normalized = normalizeRenderTargetPath(value);
+    if (normalized.toLowerCase().endsWith(".urdf.xacro")) {
+        return normalized.slice(0, -".urdf.xacro".length);
+    }
+    if (normalized.toLowerCase().endsWith(".xacro")) {
+        return normalized.slice(0, -".xacro".length);
+    }
+    if (normalized.toLowerCase().endsWith(".urdf")) {
+        return normalized.slice(0, -".urdf".length);
+    }
+    return normalized;
+};
 const isMissingThumbnailTargetError = (error) => error instanceof Error && THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message);
 exports.isMissingThumbnailTargetError = isMissingThumbnailTargetError;
 const buildRenderTargetCandidates = (source, candidatePath) => {
@@ -56,6 +72,71 @@ const buildRenderTargetCandidates = (source, candidatePath) => {
     return Array.from(candidates).filter(Boolean);
 };
 exports.buildRenderTargetCandidates = buildRenderTargetCandidates;
+const scoreResolvedRenderTargetPath = (source, requestedPath, candidatePath) => {
+    const normalizedCandidate = normalizeRenderTargetPath(candidatePath).toLowerCase();
+    if (!normalizedCandidate) {
+        return Number.NEGATIVE_INFINITY;
+    }
+    const normalizedRequested = normalizeRenderTargetPath(requestedPath).toLowerCase();
+    const requestedVariants = (0, exports.buildRenderTargetCandidates)(source, requestedPath).map((value) => value.toLowerCase());
+    const requestedBaseName = normalizedRequested.split("/").pop() || normalizedRequested;
+    const requestedStem = trimRenderTargetExtension(requestedBaseName).toLowerCase();
+    const candidateBaseName = normalizedCandidate.split("/").pop() || normalizedCandidate;
+    const candidateStem = trimRenderTargetExtension(candidateBaseName).toLowerCase();
+    let score = 0;
+    const exactVariantIndex = requestedVariants.indexOf(normalizedCandidate);
+    if (exactVariantIndex >= 0) {
+        score += 1000 - exactVariantIndex * 100;
+    }
+    if (requestedVariants.some((variant) => normalizedCandidate.endsWith(`/${variant}`))) {
+        score += 700;
+    }
+    if (candidateBaseName === requestedBaseName) {
+        score += 400;
+    }
+    if (candidateStem === requestedStem) {
+        score += 250;
+    }
+    if (normalizedRequested && normalizedCandidate.endsWith(`/${normalizedRequested}`)) {
+        score += 200;
+    }
+    if (normalizedRequested && normalizedRequested.endsWith(`/${candidateBaseName}`)) {
+        score += 120;
+    }
+    score -= normalizedCandidate.length;
+    return score;
+};
+const selectResolvedRenderTargetPath = (source, requestedPath, inspectedCandidatePaths) => {
+    let bestPath = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (const candidatePath of inspectedCandidatePaths) {
+        const score = scoreResolvedRenderTargetPath(source, requestedPath, candidatePath);
+        if (score > bestScore) {
+            bestScore = score;
+            bestPath = candidatePath;
+        }
+    }
+    return bestScore > 0 ? bestPath : null;
+};
+exports.selectResolvedRenderTargetPath = selectResolvedRenderTargetPath;
+const resolveInspectedRenderTargetPath = async (source, requestedPath) => {
+    const inspectedCandidatePaths = source.kind === "github"
+        ? await (async () => {
+            const reference = (0, githubRepositoryInspection_1.parseGitHubRepositoryReference)(source.githubUrl);
+            if (!reference) {
+                return [];
+            }
+            const inspection = await (0, githubRepositoryInspection_1.inspectGitHubRepositoryUrdfs)(reference, {
+                accessToken: (0, githubCliAuth_1.resolveGitHubAccessToken)(undefined),
+            });
+            return inspection.candidates.map((candidate) => candidate.path);
+        })()
+        : await (async () => {
+            const inspection = await (0, localRepositoryInspection_1.inspectLocalRepositoryUrdfs)({ path: source.localPath });
+            return inspection.candidates.map((candidate) => candidate.path);
+        })();
+    return (0, exports.selectResolvedRenderTargetPath)(source, requestedPath, inspectedCandidatePaths);
+};
 const isThumbnailRenderReady = (input) => {
     const renderError = typeof input.renderState?.error === "string" && input.renderState.error.trim()
         ? input.renderState.error
@@ -209,10 +290,26 @@ const renderRepoMediaBatch = async (source, appUrl, outputRoot, candidatePaths, 
             const thumbnailPath = path.join(itemDir, "thumbnail.png");
             const videoPath = path.join(itemDir, "preview.webm");
             await ensureDir(itemDir);
-            await (0, exports.resolveRenderableTargetPath)(source, candidatePath, async (targetPath) => {
-                await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "networkidle" });
+            const requestedTargetCandidates = new Set((0, exports.buildRenderTargetCandidates)(source, candidatePath));
+            try {
+                await (0, exports.resolveRenderableTargetPath)(source, candidatePath, async (targetPath) => {
+                    await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "networkidle" });
+                    await waitForThumbReady(page);
+                });
+            }
+            catch (error) {
+                if (!(0, exports.isMissingThumbnailTargetError)(error)) {
+                    throw error;
+                }
+                const inspectedTargetPath = await resolveInspectedRenderTargetPath(source, candidatePath);
+                if (!inspectedTargetPath || requestedTargetCandidates.has(inspectedTargetPath)) {
+                    throw error;
+                }
+                await page.goto(buildRenderUrl(appUrl, source, inspectedTargetPath), {
+                    waitUntil: "networkidle",
+                });
                 await waitForThumbReady(page);
-            });
+            }
             const canvasHandle = await page.locator("#urdf-thumb-canvas canvas").elementHandle();
             if (!canvasHandle) {
                 throw new Error("URDF thumbnail canvas was not found.");
