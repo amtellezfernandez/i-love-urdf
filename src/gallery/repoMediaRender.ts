@@ -26,6 +26,8 @@ export type RepoMediaRenderResult = {
   items: RepoMediaRenderItem[];
 };
 
+const THUMBNAIL_MISSING_TARGET_ERROR_PATTERN =
+  /Unable to find the requested URDF target in the GitHub repository\./i;
 const FRAME_COUNT = 28;
 const FRAME_DELAY_MS = 50;
 const READY_TIMEOUT_MS = 120_000;
@@ -50,6 +52,55 @@ type GalleryRenderStateSnapshot = {
   ready?: boolean;
   cameraApplied?: boolean;
   error?: string | null;
+};
+
+const normalizeRenderTargetPath = (value: string): string =>
+  value
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/u, "")
+    .replace(/\/+/gu, "/");
+
+const joinRenderTargetPath = (...segments: string[]): string =>
+  segments
+    .map((segment) => normalizeRenderTargetPath(segment))
+    .filter(Boolean)
+    .join("/");
+
+export const isMissingThumbnailTargetError = (error: unknown): boolean =>
+  error instanceof Error && THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message);
+
+export const buildRenderTargetCandidates = (
+  source: RepoMediaRenderSource,
+  candidatePath: string
+): string[] => {
+  const normalizedCandidate = normalizeRenderTargetPath(candidatePath);
+  if (!normalizedCandidate) {
+    return [];
+  }
+
+  const segments = normalizedCandidate.split("/").filter(Boolean);
+  const fileName = segments[segments.length - 1] || normalizedCandidate;
+  const trailingPair =
+    segments.length >= 2 ? segments.slice(-2).join("/") : normalizedCandidate;
+  const candidates = new Set<string>([normalizedCandidate, fileName, trailingPair]);
+
+  if (source.kind === "github") {
+    const normalizedSourcePath = normalizeRenderTargetPath(source.sourcePath || "");
+    if (
+      normalizedSourcePath &&
+      normalizedCandidate !== normalizedSourcePath &&
+      !normalizedCandidate.startsWith(`${normalizedSourcePath}/`)
+    ) {
+      candidates.add(joinRenderTargetPath(normalizedSourcePath, normalizedCandidate));
+    }
+    if (normalizedSourcePath) {
+      candidates.add(joinRenderTargetPath(normalizedSourcePath, fileName));
+      candidates.add(joinRenderTargetPath(normalizedSourcePath, trailingPair));
+    }
+  }
+
+  return Array.from(candidates).filter(Boolean);
 };
 
 export const isThumbnailRenderReady = (input: {
@@ -86,6 +137,34 @@ const waitForThumbReady = async (page: any) => {
     },
     { timeout: READY_TIMEOUT_MS }
   );
+};
+
+export const resolveRenderableTargetPath = async (
+  source: RepoMediaRenderSource,
+  candidatePath: string,
+  attemptLoad: (targetPath: string) => Promise<void>
+): Promise<string> => {
+  const targetCandidates = buildRenderTargetCandidates(source, candidatePath);
+  if (targetCandidates.length === 0) {
+    throw new Error("At least one candidate path is required.");
+  }
+
+  let lastError: unknown = null;
+  for (let index = 0; index < targetCandidates.length; index += 1) {
+    const targetPath = targetCandidates[index];
+    try {
+      await attemptLoad(targetPath);
+      return targetPath;
+    } catch (error) {
+      lastError = error;
+      const hasMoreCandidates = index < targetCandidates.length - 1;
+      if (!hasMoreCandidates || !isMissingThumbnailTargetError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Failed to resolve a renderable URDF target.");
 };
 
 const startCanvasRecording = async (canvasHandle: any) => {
@@ -215,8 +294,10 @@ export const renderRepoMediaBatch = async (
       const videoPath = path.join(itemDir, "preview.webm");
       await ensureDir(itemDir);
 
-      await page.goto(buildRenderUrl(appUrl, source, candidatePath), { waitUntil: "networkidle" });
-      await waitForThumbReady(page);
+      await resolveRenderableTargetPath(source, candidatePath, async (targetPath) => {
+        await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "networkidle" });
+        await waitForThumbReady(page);
+      });
       const canvasHandle = await page.locator("#urdf-thumb-canvas canvas").elementHandle();
       if (!canvasHandle) {
         throw new Error("URDF thumbnail canvas was not found.");

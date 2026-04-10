@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderRepoMediaBatch = exports.isThumbnailRenderReady = void 0;
+exports.renderRepoMediaBatch = exports.resolveRenderableTargetPath = exports.isThumbnailRenderReady = exports.buildRenderTargetCandidates = exports.isMissingThumbnailTargetError = void 0;
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const THUMBNAIL_MISSING_TARGET_ERROR_PATTERN = /Unable to find the requested URDF target in the GitHub repository\./i;
 const FRAME_COUNT = 28;
 const FRAME_DELAY_MS = 50;
 const READY_TIMEOUT_MS = 120000;
@@ -20,6 +21,41 @@ const loadPlaywright = async () => {
         throw new Error("playwright is required for gallery rendering. Install it and retry.");
     }
 };
+const normalizeRenderTargetPath = (value) => value
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+/u, "")
+    .replace(/\/+/gu, "/");
+const joinRenderTargetPath = (...segments) => segments
+    .map((segment) => normalizeRenderTargetPath(segment))
+    .filter(Boolean)
+    .join("/");
+const isMissingThumbnailTargetError = (error) => error instanceof Error && THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message);
+exports.isMissingThumbnailTargetError = isMissingThumbnailTargetError;
+const buildRenderTargetCandidates = (source, candidatePath) => {
+    const normalizedCandidate = normalizeRenderTargetPath(candidatePath);
+    if (!normalizedCandidate) {
+        return [];
+    }
+    const segments = normalizedCandidate.split("/").filter(Boolean);
+    const fileName = segments[segments.length - 1] || normalizedCandidate;
+    const trailingPair = segments.length >= 2 ? segments.slice(-2).join("/") : normalizedCandidate;
+    const candidates = new Set([normalizedCandidate, fileName, trailingPair]);
+    if (source.kind === "github") {
+        const normalizedSourcePath = normalizeRenderTargetPath(source.sourcePath || "");
+        if (normalizedSourcePath &&
+            normalizedCandidate !== normalizedSourcePath &&
+            !normalizedCandidate.startsWith(`${normalizedSourcePath}/`)) {
+            candidates.add(joinRenderTargetPath(normalizedSourcePath, normalizedCandidate));
+        }
+        if (normalizedSourcePath) {
+            candidates.add(joinRenderTargetPath(normalizedSourcePath, fileName));
+            candidates.add(joinRenderTargetPath(normalizedSourcePath, trailingPair));
+        }
+    }
+    return Array.from(candidates).filter(Boolean);
+};
+exports.buildRenderTargetCandidates = buildRenderTargetCandidates;
 const isThumbnailRenderReady = (input) => {
     const renderError = typeof input.renderState?.error === "string" && input.renderState.error.trim()
         ? input.renderState.error
@@ -45,6 +81,29 @@ const waitForThumbReady = async (page) => {
         });
     }, { timeout: READY_TIMEOUT_MS });
 };
+const resolveRenderableTargetPath = async (source, candidatePath, attemptLoad) => {
+    const targetCandidates = (0, exports.buildRenderTargetCandidates)(source, candidatePath);
+    if (targetCandidates.length === 0) {
+        throw new Error("At least one candidate path is required.");
+    }
+    let lastError = null;
+    for (let index = 0; index < targetCandidates.length; index += 1) {
+        const targetPath = targetCandidates[index];
+        try {
+            await attemptLoad(targetPath);
+            return targetPath;
+        }
+        catch (error) {
+            lastError = error;
+            const hasMoreCandidates = index < targetCandidates.length - 1;
+            if (!hasMoreCandidates || !(0, exports.isMissingThumbnailTargetError)(error)) {
+                throw error;
+            }
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Failed to resolve a renderable URDF target.");
+};
+exports.resolveRenderableTargetPath = resolveRenderableTargetPath;
 const startCanvasRecording = async (canvasHandle) => {
     await canvasHandle.evaluate((canvas, frameDelayMs) => {
         if (!(canvas instanceof HTMLCanvasElement)) {
@@ -150,8 +209,10 @@ const renderRepoMediaBatch = async (source, appUrl, outputRoot, candidatePaths, 
             const thumbnailPath = path.join(itemDir, "thumbnail.png");
             const videoPath = path.join(itemDir, "preview.webm");
             await ensureDir(itemDir);
-            await page.goto(buildRenderUrl(appUrl, source, candidatePath), { waitUntil: "networkidle" });
-            await waitForThumbReady(page);
+            await (0, exports.resolveRenderableTargetPath)(source, candidatePath, async (targetPath) => {
+                await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "networkidle" });
+                await waitForThumbReady(page);
+            });
             const canvasHandle = await page.locator("#urdf-thumb-canvas canvas").elementHandle();
             if (!canvasHandle) {
                 throw new Error("URDF thumbnail canvas was not found.");

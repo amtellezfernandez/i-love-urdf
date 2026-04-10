@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 
-const { isThumbnailRenderReady } = await import(
+const {
+  buildRenderTargetCandidates,
+  isMissingThumbnailTargetError,
+  isThumbnailRenderReady,
+  resolveRenderableTargetPath,
+} = await import(
   path.join("/home/am/dev/i-love-urdf", "dist", "gallery", "repoMediaRender.js")
 );
 
@@ -60,4 +65,58 @@ test("thumbnail render readiness surfaces structured render errors and falls bac
     }),
     true
   );
+});
+
+test("buildRenderTargetCandidates adds scoped GitHub path fallbacks for relative candidates", () => {
+  assert.deepEqual(
+    buildRenderTargetCandidates(
+      {
+        kind: "github",
+        githubUrl: "https://github.com/acme/robots/tree/main/robots/demo",
+        sourcePath: "robots/demo",
+        ref: "main",
+      },
+      "demo.urdf"
+    ),
+    ["demo.urdf", "robots/demo/demo.urdf"]
+  );
+});
+
+test("resolveRenderableTargetPath retries scoped fallbacks after a missing-target error", async () => {
+  const attemptedTargets = [];
+  const resolved = await resolveRenderableTargetPath(
+    {
+      kind: "github",
+      githubUrl: "https://github.com/acme/robots/tree/main/robots/demo",
+      sourcePath: "robots/demo",
+      ref: "main",
+    },
+    "demo.urdf",
+    async (targetPath) => {
+      attemptedTargets.push(targetPath);
+      if (targetPath === "demo.urdf") {
+        throw new Error("Unable to find the requested URDF target in the GitHub repository.");
+      }
+    }
+  );
+
+  assert.equal(resolved, "robots/demo/demo.urdf");
+  assert.deepEqual(attemptedTargets, ["demo.urdf", "robots/demo/demo.urdf"]);
+});
+
+test("resolveRenderableTargetPath does not swallow unrelated errors", async () => {
+  await assert.rejects(
+    resolveRenderableTargetPath(
+      {
+        kind: "github",
+        githubUrl: "https://github.com/acme/robots",
+      },
+      "demo.urdf",
+      async () => {
+        throw new Error("network failed");
+      }
+    ),
+    /network failed/
+  );
+  assert.equal(isMissingThumbnailTargetError(new Error("network failed")), false);
 });
