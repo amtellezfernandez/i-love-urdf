@@ -35,6 +35,8 @@ export type RepoMediaRenderResult = {
 
 const THUMBNAIL_MISSING_TARGET_ERROR_PATTERN =
   /Unable to find the requested URDF target in the GitHub repository\./i;
+const THUMBNAIL_EMPTY_GEOMETRY_TARGET_ERROR_PATTERN =
+  /Selected URDF\/Xacro expands to no renderable geometry\./i;
 const FRAME_COUNT = 28;
 const FRAME_DELAY_MS = 50;
 const READY_TIMEOUT_MS = 120_000;
@@ -103,6 +105,13 @@ const trimRenderTargetExtension = (value: string): string => {
 
 export const isMissingThumbnailTargetError = (error: unknown): boolean =>
   error instanceof Error && THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message);
+
+export const isRetryableThumbnailTargetError = (error: unknown): boolean =>
+  error instanceof Error &&
+  (
+    THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message) ||
+    THUMBNAIL_EMPTY_GEOMETRY_TARGET_ERROR_PATTERN.test(error.message)
+  );
 
 export const buildRenderTargetCandidates = (
   source: RepoMediaRenderSource,
@@ -297,7 +306,7 @@ export const resolveRenderableTargetPath = async (
     } catch (error) {
       lastError = error;
       const hasMoreCandidates = index < targetCandidates.length - 1;
-      if (!hasMoreCandidates || !isMissingThumbnailTargetError(error)) {
+      if (!hasMoreCandidates || !isRetryableThumbnailTargetError(error)) {
         throw error;
       }
     }
@@ -440,7 +449,7 @@ export const renderRepoMediaBatch = async (
           await waitForThumbReady(page);
         });
       } catch (error) {
-        if (!isMissingThumbnailTargetError(error)) {
+        if (!isRetryableThumbnailTargetError(error)) {
           throw error;
         }
         const inspectedTargetPath = await resolveInspectedRenderTargetPath(source, candidatePath);

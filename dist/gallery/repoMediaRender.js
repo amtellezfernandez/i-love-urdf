@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderRepoMediaBatch = exports.resolveRenderableTargetPath = exports.createThumbnailRenderReadyPredicate = exports.isThumbnailRenderReady = exports.selectResolvedRenderTargetPath = exports.buildRenderTargetCandidates = exports.isMissingThumbnailTargetError = void 0;
+exports.renderRepoMediaBatch = exports.resolveRenderableTargetPath = exports.createThumbnailRenderReadyPredicate = exports.isThumbnailRenderReady = exports.selectResolvedRenderTargetPath = exports.buildRenderTargetCandidates = exports.isRetryableThumbnailTargetError = exports.isMissingThumbnailTargetError = void 0;
 const fs = require("node:fs/promises");
 const node_module_1 = require("node:module");
 const path = require("node:path");
@@ -8,6 +8,7 @@ const githubCliAuth_1 = require("../node/githubCliAuth");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
 const localRepositoryInspection_1 = require("../repository/localRepositoryInspection");
 const THUMBNAIL_MISSING_TARGET_ERROR_PATTERN = /Unable to find the requested URDF target in the GitHub repository\./i;
+const THUMBNAIL_EMPTY_GEOMETRY_TARGET_ERROR_PATTERN = /Selected URDF\/Xacro expands to no renderable geometry\./i;
 const FRAME_COUNT = 28;
 const FRAME_DELAY_MS = 50;
 const READY_TIMEOUT_MS = 120000;
@@ -61,6 +62,10 @@ const trimRenderTargetExtension = (value) => {
 };
 const isMissingThumbnailTargetError = (error) => error instanceof Error && THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message);
 exports.isMissingThumbnailTargetError = isMissingThumbnailTargetError;
+const isRetryableThumbnailTargetError = (error) => error instanceof Error &&
+    (THUMBNAIL_MISSING_TARGET_ERROR_PATTERN.test(error.message) ||
+        THUMBNAIL_EMPTY_GEOMETRY_TARGET_ERROR_PATTERN.test(error.message));
+exports.isRetryableThumbnailTargetError = isRetryableThumbnailTargetError;
 const buildRenderTargetCandidates = (source, candidatePath) => {
     const normalizedCandidate = normalizeRenderTargetPath(candidatePath);
     if (!normalizedCandidate) {
@@ -206,7 +211,7 @@ const resolveRenderableTargetPath = async (source, candidatePath, attemptLoad) =
         catch (error) {
             lastError = error;
             const hasMoreCandidates = index < targetCandidates.length - 1;
-            if (!hasMoreCandidates || !(0, exports.isMissingThumbnailTargetError)(error)) {
+            if (!hasMoreCandidates || !(0, exports.isRetryableThumbnailTargetError)(error)) {
                 throw error;
             }
         }
@@ -327,7 +332,7 @@ const renderRepoMediaBatch = async (source, appUrl, outputRoot, candidatePaths, 
                 });
             }
             catch (error) {
-                if (!(0, exports.isMissingThumbnailTargetError)(error)) {
+                if (!(0, exports.isRetryableThumbnailTargetError)(error)) {
                     throw error;
                 }
                 const inspectedTargetPath = await resolveInspectedRenderTargetPath(source, candidatePath);

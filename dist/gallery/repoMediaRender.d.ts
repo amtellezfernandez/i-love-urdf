@@ -24,6 +24,7 @@ type GalleryRenderStateSnapshot = {
     error?: string | null;
 };
 export declare const isMissingThumbnailTargetError: (error: unknown) => boolean;
+export declare const isRetryableThumbnailTargetError: (error: unknown) => boolean;
 export declare const buildRenderTargetCandidates: (source: RepoMediaRenderSource, candidatePath: string) => string[];
 export declare const selectResolvedRenderTargetPath: (source: RepoMediaRenderSource, requestedPath: string, inspectedCandidatePaths: readonly string[]) => string | null;
 export declare const isThumbnailRenderReady: (input: {

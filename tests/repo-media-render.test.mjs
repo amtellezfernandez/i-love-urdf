@@ -6,6 +6,7 @@ const {
   buildRenderTargetCandidates,
   createThumbnailRenderReadyPredicate,
   isMissingThumbnailTargetError,
+  isRetryableThumbnailTargetError,
   isThumbnailRenderReady,
   resolveRenderableTargetPath,
   selectResolvedRenderTargetPath,
@@ -143,6 +144,30 @@ test("resolveRenderableTargetPath retries scoped fallbacks after a missing-targe
   assert.deepEqual(attemptedTargets, ["demo.urdf", "robots/demo/demo.urdf"]);
 });
 
+test("resolveRenderableTargetPath retries scoped fallbacks after an empty-geometry target error", async () => {
+  const attemptedTargets = [];
+  const resolved = await resolveRenderableTargetPath(
+    {
+      kind: "github",
+      githubUrl: "https://github.com/acme/robots/tree/main/robots/demo",
+      sourcePath: "robots/demo",
+      ref: "main",
+    },
+    "demo.urdf",
+    async (targetPath) => {
+      attemptedTargets.push(targetPath);
+      if (targetPath === "demo.urdf") {
+        throw new Error(
+          "Selected URDF/Xacro expands to no renderable geometry. Pick a top-level robot model file."
+        );
+      }
+    }
+  );
+
+  assert.equal(resolved, "robots/demo/demo.urdf");
+  assert.deepEqual(attemptedTargets, ["demo.urdf", "robots/demo/demo.urdf"]);
+});
+
 test("resolveRenderableTargetPath does not swallow unrelated errors", async () => {
   await assert.rejects(
     resolveRenderableTargetPath(
@@ -158,6 +183,13 @@ test("resolveRenderableTargetPath does not swallow unrelated errors", async () =
     /network failed/
   );
   assert.equal(isMissingThumbnailTargetError(new Error("network failed")), false);
+  assert.equal(isRetryableThumbnailTargetError(new Error("network failed")), false);
+  assert.equal(
+    isRetryableThumbnailTargetError(
+      new Error("Selected URDF/Xacro expands to no renderable geometry. Pick a top-level robot model file.")
+    ),
+    true
+  );
 });
 
 test("selectResolvedRenderTargetPath picks the real inspected candidate for scoped GitHub renders", () => {
