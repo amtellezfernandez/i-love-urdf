@@ -1,7 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderRepoMediaBatch = exports.resolveRenderableTargetPath = exports.isThumbnailRenderReady = exports.selectResolvedRenderTargetPath = exports.buildRenderTargetCandidates = exports.isMissingThumbnailTargetError = void 0;
+exports.renderRepoMediaBatch = exports.resolveRenderableTargetPath = exports.createThumbnailRenderReadyPredicate = exports.isThumbnailRenderReady = exports.selectResolvedRenderTargetPath = exports.buildRenderTargetCandidates = exports.isMissingThumbnailTargetError = void 0;
 const fs = require("node:fs/promises");
+const node_module_1 = require("node:module");
 const path = require("node:path");
 const githubCliAuth_1 = require("../node/githubCliAuth");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
@@ -17,11 +18,23 @@ const ensureDir = async (targetPath) => {
     await fs.mkdir(targetPath, { recursive: true });
 };
 const loadPlaywright = async () => {
+    const requireCandidates = [
+        (0, node_module_1.createRequire)(__filename),
+        (0, node_module_1.createRequire)(path.join(process.cwd(), "__playwright_resolver__.js")),
+    ];
+    for (const requireCandidate of requireCandidates) {
+        try {
+            return requireCandidate("playwright");
+        }
+        catch {
+            // Try the next resolution root before falling back to dynamic import.
+        }
+    }
     try {
         return await Function("return import('playwright');")();
     }
     catch {
-        throw new Error("playwright is required for gallery rendering. Install it and retry.");
+        throw new Error("playwright is required for gallery rendering. Install it in i-love-urdf or run the CLI from a workspace that has playwright installed.");
     }
 };
 const normalizeRenderTargetPath = (value) => value
@@ -154,14 +167,30 @@ const isThumbnailRenderReady = (input) => {
 };
 exports.isThumbnailRenderReady = isThumbnailRenderReady;
 const waitForThumbReady = async (page) => {
-    await page.waitForFunction(() => {
-        return (0, exports.isThumbnailRenderReady)({
-            renderState: window.__URDF_GALLERY_RENDER_STATE__,
-            thumbError: window.__URDF_THUMB_ERROR__,
-            readyAttribute: document.body?.getAttribute("data-urdf-thumb-ready"),
-        });
-    }, { timeout: READY_TIMEOUT_MS });
+    await page.waitForFunction((0, exports.createThumbnailRenderReadyPredicate)(), { timeout: READY_TIMEOUT_MS });
 };
+const createThumbnailRenderReadyPredicate = () => {
+    return () => {
+        const renderState = window.__URDF_GALLERY_RENDER_STATE__;
+        const renderError = typeof renderState?.error === "string" && renderState.error.trim()
+            ? renderState.error
+            : "";
+        const thumbErrorValue = window.__URDF_THUMB_ERROR__;
+        const thumbError = typeof thumbErrorValue === "string" && thumbErrorValue.trim()
+            ? thumbErrorValue
+            : "";
+        if (thumbError || renderError) {
+            throw new Error(thumbError || renderError);
+        }
+        if (renderState) {
+            return (renderState.ready === true &&
+                renderState.cameraApplied === true &&
+                renderState.phase === "ready");
+        }
+        return document.body?.getAttribute("data-urdf-thumb-ready") === "1";
+    };
+};
+exports.createThumbnailRenderReadyPredicate = createThumbnailRenderReadyPredicate;
 const resolveRenderableTargetPath = async (source, candidatePath, attemptLoad) => {
     const targetCandidates = (0, exports.buildRenderTargetCandidates)(source, candidatePath);
     if (targetCandidates.length === 0) {

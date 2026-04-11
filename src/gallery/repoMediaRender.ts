@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import * as path from "node:path";
 import { resolveGitHubAccessToken } from "../node/githubCliAuth";
 import {
@@ -46,10 +47,23 @@ const ensureDir = async (targetPath: string) => {
 };
 
 const loadPlaywright = async (): Promise<any> => {
+  const requireCandidates = [
+    createRequire(__filename),
+    createRequire(path.join(process.cwd(), "__playwright_resolver__.js")),
+  ];
+  for (const requireCandidate of requireCandidates) {
+    try {
+      return requireCandidate("playwright");
+    } catch {
+      // Try the next resolution root before falling back to dynamic import.
+    }
+  }
   try {
     return await Function("return import('playwright');")();
   } catch {
-    throw new Error("playwright is required for gallery rendering. Install it and retry.");
+    throw new Error(
+      "playwright is required for gallery rendering. Install it in i-love-urdf or run the CLI from a workspace that has playwright installed."
+    );
   }
 };
 
@@ -235,16 +249,33 @@ export const isThumbnailRenderReady = (input: {
 };
 
 const waitForThumbReady = async (page: any) => {
-  await page.waitForFunction(
-    () => {
-      return isThumbnailRenderReady({
-        renderState: (window as any).__URDF_GALLERY_RENDER_STATE__,
-        thumbError: (window as any).__URDF_THUMB_ERROR__,
-        readyAttribute: document.body?.getAttribute("data-urdf-thumb-ready"),
-      });
-    },
-    { timeout: READY_TIMEOUT_MS }
-  );
+  await page.waitForFunction(createThumbnailRenderReadyPredicate(), { timeout: READY_TIMEOUT_MS });
+};
+
+export const createThumbnailRenderReadyPredicate = () => {
+  return () => {
+    const renderState = (window as any).__URDF_GALLERY_RENDER_STATE__ as GalleryRenderStateSnapshot | undefined;
+    const renderError =
+      typeof renderState?.error === "string" && renderState.error.trim()
+        ? renderState.error
+        : "";
+    const thumbErrorValue = (window as any).__URDF_THUMB_ERROR__;
+    const thumbError =
+      typeof thumbErrorValue === "string" && thumbErrorValue.trim()
+        ? thumbErrorValue
+        : "";
+    if (thumbError || renderError) {
+      throw new Error(thumbError || renderError);
+    }
+    if (renderState) {
+      return (
+        renderState.ready === true &&
+        renderState.cameraApplied === true &&
+        renderState.phase === "ready"
+      );
+    }
+    return document.body?.getAttribute("data-urdf-thumb-ready") === "1";
+  };
 };
 
 export const resolveRenderableTargetPath = async (

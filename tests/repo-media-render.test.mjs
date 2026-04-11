@@ -4,6 +4,7 @@ import path from "node:path";
 
 const {
   buildRenderTargetCandidates,
+  createThumbnailRenderReadyPredicate,
   isMissingThumbnailTargetError,
   isThumbnailRenderReady,
   resolveRenderableTargetPath,
@@ -66,6 +67,43 @@ test("thumbnail render readiness surfaces structured render errors and falls bac
     }),
     true
   );
+});
+
+test("thumbnail wait predicate is self-contained for Playwright browser evaluation", () => {
+  const predicate = createThumbnailRenderReadyPredicate();
+  const predicateSource = Function.prototype.toString.call(predicate);
+  assert.doesNotMatch(predicateSource, /exports|isThumbnailRenderReady/);
+
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+  try {
+    globalThis.window = {
+      __URDF_GALLERY_RENDER_STATE__: {
+        phase: "ready",
+        ready: true,
+        cameraApplied: true,
+        error: null,
+      },
+      __URDF_THUMB_ERROR__: "",
+    };
+    globalThis.document = {
+      body: {
+        getAttribute: () => "0",
+      },
+    };
+    assert.equal(predicate(), true);
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
+    }
+    if (previousDocument === undefined) {
+      delete globalThis.document;
+    } else {
+      globalThis.document = previousDocument;
+    }
+  }
 });
 
 test("buildRenderTargetCandidates adds scoped GitHub path fallbacks for relative candidates", () => {
