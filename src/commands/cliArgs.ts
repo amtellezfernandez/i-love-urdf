@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as process from "node:process";
-import type { CliArgMap, CliCommandHelpers } from "./commandHelpers";
+import type { CliArgMap, CliArgValue, CliCommandHelpers } from "./commandHelpers";
 import { SUPPORTED_COMMANDS, type CommandName, type SupportedCommandName } from "./commandCatalog";
 
 export type ParsedCliArgs = {
@@ -30,18 +30,31 @@ const fail = (message: string): never => {
   process.exit(2);
 };
 
+const coerceArgValues = (value: CliArgValue | CliArgValue[] | undefined): CliArgValue[] => {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+};
+
+const getStringArgValues = (args: CliArgMap, key: string): string[] =>
+  coerceArgValues(args.get(key)).filter(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+
+const getLastStringArg = (args: CliArgMap, key: string): string | undefined => {
+  const values = getStringArgValues(args, key);
+  return values[values.length - 1];
+};
+
 const requireStringArg = (args: CliArgMap, key: string): string => {
-  const value = args.get(key);
-  if (!value || value === true) {
+  const value = getLastStringArg(args, key);
+  if (!value) {
     fail(`Missing required argument --${key}`);
   }
-  return String(value);
+  return value;
 };
 
 const getOptionalStringArg = (args: CliArgMap, key: string): string | undefined => {
-  const value = args.get(key);
-  if (!value || value === true) return undefined;
-  return String(value);
+  return getLastStringArg(args, key);
 };
 
 const getOptionalNumberArg = (args: CliArgMap, key: string): number | undefined => {
@@ -56,25 +69,34 @@ const getOptionalNumberArg = (args: CliArgMap, key: string): number | undefined 
 };
 
 const getDelimitedStringArg = (args: CliArgMap, primaryKey: string, fallbackKey?: string): string[] => {
-  const value =
-    getOptionalStringArg(args, primaryKey) ??
-    (fallbackKey ? getOptionalStringArg(args, fallbackKey) : undefined);
-  if (!value) return [];
+  const values = getStringArgValues(args, primaryKey);
+  if (values.length === 0 && fallbackKey) {
+    values.push(...getStringArgValues(args, fallbackKey));
+  }
+  if (values.length === 0) return [];
 
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  return values.flatMap((value) =>
+    value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+  );
 };
 
 const getKeyValueArg = (args: CliArgMap, primaryKey: string, fallbackKey?: string): Record<string, string> => {
-  const value =
-    getOptionalStringArg(args, primaryKey) ??
-    (fallbackKey ? getOptionalStringArg(args, fallbackKey) : undefined);
-  if (!value) return {};
+  const values = getStringArgValues(args, primaryKey);
+  if (values.length === 0 && fallbackKey) {
+    values.push(...getStringArgValues(args, fallbackKey));
+  }
+  if (values.length === 0) return {};
 
   const result: Record<string, string> = {};
-  for (const pair of value.split(",").map((item) => item.trim()).filter((item) => item.length > 0)) {
+  for (const pair of values.flatMap((value) =>
+    value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+  )) {
     const separatorIndex = pair.indexOf("=");
     if (separatorIndex <= 0) {
       fail(`Invalid key=value pair: ${pair}`);
@@ -182,12 +204,20 @@ export const parseArgs = (argv: string[]): ParsedCliArgs => {
 
     const key = token.slice(2);
     const nextToken = rest[index + 1];
+    const appendArg = (value: CliArgValue) => {
+      const previous = args.get(key);
+      if (previous === undefined) {
+        args.set(key, value);
+        return;
+      }
+      args.set(key, [...coerceArgValues(previous), value]);
+    };
     if (!nextToken || nextToken.startsWith("--")) {
-      args.set(key, true);
+      appendArg(true);
       continue;
     }
 
-    args.set(key, nextToken);
+    appendArg(nextToken);
     index += 1;
   }
 

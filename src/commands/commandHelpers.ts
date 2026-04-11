@@ -1,4 +1,5 @@
-export type CliArgMap = Map<string, string | boolean>;
+export type CliArgValue = string | boolean;
+export type CliArgMap = Map<string, CliArgValue | CliArgValue[]>;
 
 export type CliCommandHelpers = {
   fail: (message: string) => never;

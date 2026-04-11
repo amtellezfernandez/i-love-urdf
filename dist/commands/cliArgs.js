@@ -20,18 +20,25 @@ const fail = (message) => {
     console.error(message);
     process.exit(2);
 };
+const coerceArgValues = (value) => {
+    if (value === undefined)
+        return [];
+    return Array.isArray(value) ? value : [value];
+};
+const getStringArgValues = (args, key) => coerceArgValues(args.get(key)).filter((value) => typeof value === "string" && value.length > 0);
+const getLastStringArg = (args, key) => {
+    const values = getStringArgValues(args, key);
+    return values[values.length - 1];
+};
 const requireStringArg = (args, key) => {
-    const value = args.get(key);
-    if (!value || value === true) {
+    const value = getLastStringArg(args, key);
+    if (!value) {
         fail(`Missing required argument --${key}`);
     }
-    return String(value);
+    return value;
 };
 const getOptionalStringArg = (args, key) => {
-    const value = args.get(key);
-    if (!value || value === true)
-        return undefined;
-    return String(value);
+    return getLastStringArg(args, key);
 };
 const getOptionalNumberArg = (args, key) => {
     const value = getOptionalStringArg(args, key);
@@ -44,22 +51,29 @@ const getOptionalNumberArg = (args, key) => {
     return parsed;
 };
 const getDelimitedStringArg = (args, primaryKey, fallbackKey) => {
-    const value = getOptionalStringArg(args, primaryKey) ??
-        (fallbackKey ? getOptionalStringArg(args, fallbackKey) : undefined);
-    if (!value)
+    const values = getStringArgValues(args, primaryKey);
+    if (values.length === 0 && fallbackKey) {
+        values.push(...getStringArgValues(args, fallbackKey));
+    }
+    if (values.length === 0)
         return [];
-    return value
+    return values.flatMap((value) => value
         .split(",")
         .map((item) => item.trim())
-        .filter((item) => item.length > 0);
+        .filter((item) => item.length > 0));
 };
 const getKeyValueArg = (args, primaryKey, fallbackKey) => {
-    const value = getOptionalStringArg(args, primaryKey) ??
-        (fallbackKey ? getOptionalStringArg(args, fallbackKey) : undefined);
-    if (!value)
+    const values = getStringArgValues(args, primaryKey);
+    if (values.length === 0 && fallbackKey) {
+        values.push(...getStringArgValues(args, fallbackKey));
+    }
+    if (values.length === 0)
         return {};
     const result = {};
-    for (const pair of value.split(",").map((item) => item.trim()).filter((item) => item.length > 0)) {
+    for (const pair of values.flatMap((value) => value
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0))) {
         const separatorIndex = pair.indexOf("=");
         if (separatorIndex <= 0) {
             fail(`Invalid key=value pair: ${pair}`);
@@ -144,11 +158,19 @@ const parseArgs = (argv) => {
         }
         const key = token.slice(2);
         const nextToken = rest[index + 1];
+        const appendArg = (value) => {
+            const previous = args.get(key);
+            if (previous === undefined) {
+                args.set(key, value);
+                return;
+            }
+            args.set(key, [...coerceArgValues(previous), value]);
+        };
         if (!nextToken || nextToken.startsWith("--")) {
-            args.set(key, true);
+            appendArg(true);
             continue;
         }
-        args.set(key, nextToken);
+        appendArg(nextToken);
         index += 1;
     }
     return { rawCommand, command, args, positionals };
