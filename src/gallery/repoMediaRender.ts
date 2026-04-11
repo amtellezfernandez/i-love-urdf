@@ -405,7 +405,7 @@ export const renderRepoMediaBatch = async (
       const requestedTargetCandidates = new Set(buildRenderTargetCandidates(source, candidatePath));
       try {
         await resolveRenderableTargetPath(source, candidatePath, async (targetPath) => {
-          await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "networkidle" });
+          await page.goto(buildRenderUrl(appUrl, source, targetPath), { waitUntil: "domcontentloaded" });
           await waitForThumbReady(page);
         });
       } catch (error) {
@@ -417,7 +417,7 @@ export const renderRepoMediaBatch = async (
           throw error;
         }
         await page.goto(buildRenderUrl(appUrl, source, inspectedTargetPath), {
-          waitUntil: "networkidle",
+          waitUntil: "domcontentloaded",
         });
         await waitForThumbReady(page);
       }
