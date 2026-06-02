@@ -23,6 +23,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 20.19.6
+          package-manager-cache: false
 
       - name: Enable Corepack
         run: corepack enable
@@ -69,6 +70,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 20.19.6
+          package-manager-cache: false
 
       - name: Enable Corepack
         run: corepack enable
@@ -146,6 +148,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Publish npm Package
         env:
