@@ -45,7 +45,7 @@ This adds the real-repository verification pass.
 ## CI gates
 
 - [CI workflow](../.github/workflows/ci.yml): Linux multi-Node verification plus macOS and Windows build, install, test, and smoke gates
-- [Release workflow](../.github/workflows/release.yml): macOS and Windows readiness gates, then release-grade Linux verification, real-repo checks, generated release notes, packed tarball artifact, GitHub Release creation, and npm publish when `NPM_TOKEN` is configured
+- [Release workflow](../.github/workflows/release.yml): macOS and Windows readiness gates, then release-grade Linux verification, real-repo checks, generated release notes, packed tarball artifact, GitHub Release creation, and npm publish through npm trusted publishing or `NPM_TOKEN`
 
 ## Release notes
 

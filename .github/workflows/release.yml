@@ -158,18 +158,15 @@ jobs:
           fi
 
       - name: Setup Node For npm Publish
-        if: ${{ secrets.NPM_TOKEN != '' }}
         uses: actions/setup-node@v4
         with:
-          node-version: 20.19.6
-          registry-url: https://registry.npmjs.org
+          node-version: 24
 
       - name: Publish npm Package
-        if: ${{ secrets.NPM_TOKEN != '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish .release-artifacts/*.tgz --provenance --access public
-
-      - name: Skip npm Publish
-        if: ${{ secrets.NPM_TOKEN == '' }}
-        run: echo "NPM_TOKEN not configured; skipped npm publish."
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          fi
+          npm publish .release-artifacts/*.tgz --access public

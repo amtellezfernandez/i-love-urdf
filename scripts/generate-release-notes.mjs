@@ -61,7 +61,7 @@ const notes = [
   "",
   "## Distribution",
   "- GitHub Release includes the packed npm tarball for this tag.",
-  "- npm publish is attempted automatically when `NPM_TOKEN` is configured for the release workflow.",
+  "- npm publish runs automatically through npm trusted publishing or `NPM_TOKEN`.",
 ];
 
 process.stdout.write(`${notes.join("\n")}\n`);
