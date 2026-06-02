@@ -9,8 +9,24 @@ import AdmZip from "adm-zip";
 import { installDomGlobals } from "./install-dom-globals.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const SMOKE_TRANSCRIPT_FAILURE_PREVIEW_LENGTH = 4000;
 
 const importLocalModule = (modulePath) => import(pathToFileURL(modulePath).href);
+
+const transcriptIncludesPath = (transcript, filePath) => {
+  const slashNormalizedTranscript = transcript.replace(/\\/g, "/");
+  const slashNormalizedPath = filePath.replace(/\\/g, "/");
+  return (
+    transcript.includes(filePath) ||
+    transcript.includes(JSON.stringify(filePath)) ||
+    slashNormalizedTranscript.includes(slashNormalizedPath)
+  );
+};
+
+const buildTranscriptAssertionError = (message, transcript) => {
+  const excerpt = transcript.slice(-SMOKE_TRANSCRIPT_FAILURE_PREVIEW_LENGTH);
+  return `${message}\n--- transcript excerpt ---\n${excerpt}`;
+};
 
 const resolveBootstrapPythonCommand = () => {
   const candidates =
@@ -1726,11 +1742,13 @@ if (
   !healthShortcutTranscript.includes("URDF file path") ||
   !healthShortcutTranscript.includes("validation passed") ||
   !healthShortcutTranscript.includes("health check passed") ||
-  !healthShortcutTranscript.includes(droppedUrdfPath) ||
+  !transcriptIncludesPath(healthShortcutTranscript, droppedUrdfPath) ||
   healthShortcutTranscript.includes("  /file") ||
   healthShortcutTranscript.includes("[ready] /run")
 ) {
-  throw new Error("ilu shell direct-health input smoke test failed");
+  throw new Error(
+    buildTranscriptAssertionError("ilu shell direct-health input smoke test failed", healthShortcutTranscript)
+  );
 }
 
 const invalidValidateTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
