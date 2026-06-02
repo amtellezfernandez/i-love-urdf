@@ -4,11 +4,13 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import AdmZip from "adm-zip";
 import { installDomGlobals } from "./install-dom-globals.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const importLocalModule = (modulePath) => import(pathToFileURL(modulePath).href);
 
 const resolveBootstrapPythonCommand = () => {
   const candidates =
@@ -49,14 +51,16 @@ execFileSync(process.execPath, [path.join(root, "scripts", "build-package.mjs")]
   cwd: root,
 });
 
-const lib = await import(path.join(root, "dist", "index.js"));
-const browserLib = await import(path.join(root, "dist", "browser.mjs"));
-const localLib = await import(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
-const loadSourceNode = await import(path.join(root, "dist", "sources", "loadSourceNode.js"));
-const xacroNode = await import(path.join(root, "dist", "xacro", "xacroNode.js"));
-const meshNode = await import(path.join(root, "dist", "mesh", "meshNode.js"));
-const urdfNode = await import(path.join(root, "dist", "node", "urdfNode.js"));
-const commandConsistency = await import(path.join(root, "dist", "commands", "commandConsistency.js"));
+const lib = await importLocalModule(path.join(root, "dist", "index.js"));
+const browserLib = await importLocalModule(path.join(root, "dist", "browser.mjs"));
+const localLib = await importLocalModule(path.join(root, "dist", "repository", "localRepositoryInspection.js"));
+const loadSourceNode = await importLocalModule(path.join(root, "dist", "sources", "loadSourceNode.js"));
+const xacroNode = await importLocalModule(path.join(root, "dist", "xacro", "xacroNode.js"));
+const meshNode = await importLocalModule(path.join(root, "dist", "mesh", "meshNode.js"));
+const urdfNode = await importLocalModule(path.join(root, "dist", "node", "urdfNode.js"));
+const commandConsistency = await importLocalModule(
+  path.join(root, "dist", "commands", "commandConsistency.js")
+);
 const cliPath = path.join(root, "dist", "cli.js");
 
 installDomGlobals();
