@@ -10,6 +10,7 @@ const corepackCommand = process.platform === "win32" ? "corepack.cmd" : "corepac
 const AUDIT_TIMEOUT_MS = 45_000;
 const AUDIT_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1_000;
+const useCommandShimShell = process.platform === "win32";
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -29,6 +30,7 @@ const runAuditCommand = async () => {
     const result = spawnSync(corepackCommand, ["pnpm", "audit", "--prod", "--json"], {
       cwd: root,
       encoding: "utf8",
+      shell: useCommandShimShell,
       timeout: AUDIT_TIMEOUT_MS,
     });
 

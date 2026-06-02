@@ -506,6 +506,7 @@ const getNpmCommand = () => {
         argsPrefix: [],
     };
 };
+const shouldRunCommandThroughShell = (command) => process.platform === "win32" && /\.cmd$/i.test(command);
 const collectCommandOutputLines = (output) => output
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -547,6 +548,7 @@ const installStudio = () => {
             URDF_STUDIO_SKIP_TOKENS: "1",
         },
         encoding: "utf8",
+        shell: shouldRunCommandThroughShell(command),
         stdio: ["ignore", "pipe", "pipe"],
         maxBuffer: STUDIO_INSTALL_MAX_BUFFER,
     });

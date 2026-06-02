@@ -680,6 +680,9 @@ const getNpmCommand = () => {
   };
 };
 
+const shouldRunCommandThroughShell = (command: string): boolean =>
+  process.platform === "win32" && /\.cmd$/i.test(command);
+
 const collectCommandOutputLines = (output: string): string[] =>
   output
     .split(/\r?\n/)
@@ -723,6 +726,7 @@ export const installStudio = (): InstallStudioResult => {
       URDF_STUDIO_SKIP_TOKENS: "1",
     },
     encoding: "utf8",
+    shell: shouldRunCommandThroughShell(command),
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: STUDIO_INSTALL_MAX_BUFFER,
   });
