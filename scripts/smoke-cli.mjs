@@ -1891,6 +1891,7 @@ if (
   !xacroRetryTranscript.includes("validation passed") ||
   !xacroRetryTranscript.includes("health check passed")
 ) {
+  console.error(xacroRetryTranscript);
   throw new Error("ilu shell xacro setup retry smoke test failed");
 }
 
