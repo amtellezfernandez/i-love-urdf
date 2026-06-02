@@ -26,7 +26,7 @@ const COMMON_PACKAGE_FOLDERS = new Set([
 const normalizeRepositoryPath = (path) => {
     if (!path)
         return "";
-    return path.replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
+    return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
 };
 exports.normalizeRepositoryPath = normalizeRepositoryPath;
 const extractPackageNameFromPackageXml = (content) => {

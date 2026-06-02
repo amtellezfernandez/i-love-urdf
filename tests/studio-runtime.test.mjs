@@ -44,9 +44,13 @@ const createStudioRepo = (dirPath, includeLauncher = true) => {
 };
 
 const createStudioSetup = (dirPath) => {
+  const pythonPath = process.platform === "win32"
+    ? path.join(dirPath, ".venv", "Scripts", "python.exe")
+    : path.join(dirPath, ".venv", "bin", "python3");
+
   fs.mkdirSync(path.join(dirPath, "node_modules"), { recursive: true });
-  fs.mkdirSync(path.join(dirPath, ".venv", "bin"), { recursive: true });
-  fs.writeFileSync(path.join(dirPath, ".venv", "bin", "python3"), "", "utf8");
+  fs.mkdirSync(path.dirname(pythonPath), { recursive: true });
+  fs.writeFileSync(pythonPath, "", "utf8");
 };
 
 test("default Studio repo candidates use the public urdf-studio repo", () => {
@@ -196,7 +200,12 @@ test("stopManagedStudio stops the detached ilu-managed runtime and clears its st
   }
 });
 
-test("stopManagedStudioImmediately adopts a matching launcher process even without a runtime file", async () => {
+test("stopManagedStudioImmediately adopts a matching launcher process even without a runtime file", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("Unix process-list adoption is not available on Windows");
+    return;
+  }
+
   const tempDir = createTempDir("ilu-studio-adopt-");
   const runtimeFile = path.join(tempDir, "studio-runtime.json");
   const previousRuntimeFile = process.env.ILU_STUDIO_RUNTIME_FILE;
