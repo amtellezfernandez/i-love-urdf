@@ -10,6 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 const packageName = packageJson.name;
 const packageVersion = packageJson.version;
+const expectedCliBinPath = "dist/cli.js";
 const buildScriptPath = path.join(root, "scripts", "build-package.mjs");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-install-check-"));
 const keepTemp = process.env.ILU_KEEP_INSTALL_TMP === "1";
@@ -48,6 +49,9 @@ const collectExportTargetPaths = (value) => {
     new Set(Object.values(value).flatMap((entry) => collectExportTargetPaths(entry)))
   );
 };
+
+const normalizePackagePath = (value) =>
+  typeof value === "string" ? value.replace(/\\/g, "/").replace(/^\.\//, "") : "";
 
 const buildEnv = (envOverrides = undefined, { scrubNpmEnv = false } = {}) => {
   const env = { ...process.env, ...(envOverrides ?? {}) };
@@ -130,7 +134,7 @@ const assertInstalledPackage = (prefix, label) => {
     installedPackageJson.bin &&
       typeof installedPackageJson.bin === "object" &&
       Object.keys(installedPackageJson.bin).length === 1 &&
-      installedPackageJson.bin.ilu === "./dist/cli.js",
+      normalizePackagePath(installedPackageJson.bin.ilu) === expectedCliBinPath,
     `${label}: installed package bin map mismatch`
   );
 

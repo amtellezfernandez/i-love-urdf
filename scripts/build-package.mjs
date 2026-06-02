@@ -74,7 +74,7 @@ const listFiles = (targetDir) => {
     if (entry.isDirectory()) {
       return listFiles(entryPath);
     }
-    return [path.relative(distDir, entryPath)];
+    return [path.relative(distDir, entryPath).replaceAll(path.sep, "/")];
   });
 };
 
