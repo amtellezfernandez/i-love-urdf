@@ -8,6 +8,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": [
+    "NOTICE",
     "dist"
   ],
   "bin": {
@@ -54,7 +55,7 @@
     "url": "https://github.com/amtellezfernandez/i-love-urdf/issues"
   },
   "homepage": "https://github.com/amtellezfernandez/i-love-urdf",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "AGPL-3.0-only",
   "publishConfig": {
     "access": "public"
   },
