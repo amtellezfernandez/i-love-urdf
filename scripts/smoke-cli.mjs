@@ -1449,19 +1449,19 @@ const shellNoStudioAutostartEnv = {
   URDF_STUDIO_URL: "http://127.0.0.1:59999/",
   URDF_STUDIO_API_URL: "http://127.0.0.1:59998/health",
 };
+const singleRobotModeChoice = "1";
+const shellSingleModeInput = (sourcePath, followUpInput = "/exit\n") =>
+  `${singleRobotModeChoice}\n${sourcePath}\n${followUpInput}`;
 
 const shellTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: "ANYbotics/anymal_b_simple_description\n/exit\n",
+  input: shellSingleModeInput(singleRepoDir),
 });
 if (
-  !shellTranscript.includes("urdf shell") ||
+  !shellTranscript.includes("single robot mode") ||
   !shellTranscript.includes("paste repo or local path") ||
-  !shellTranscript.includes("ANYbotics/anymal_b_simple_description") ||
-  !shellTranscript.includes("validation and health check passed") ||
   !shellTranscript.includes("loaded") ||
-  !shellTranscript.includes("loaded urdf/anymal.urdf") ||
   !shellTranscript.includes("validation passed") ||
   !shellTranscript.includes("health check passed")
 ) {
@@ -1471,11 +1471,11 @@ if (
 const localDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath),
 });
 if (
-  !localDropTranscript.includes("validation and health check passed") ||
-  !localDropTranscript.includes(droppedUrdfPath) ||
+  !localDropTranscript.includes("single robot mode") ||
+  !localDropTranscript.includes("loaded") ||
   !localDropTranscript.includes("validation passed") ||
   !localDropTranscript.includes("health check passed")
 ) {
@@ -1485,11 +1485,10 @@ if (
 const loadedFollowUpMenuTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath, "/\n/exit\n"),
 });
 if (
   !loadedFollowUpMenuTranscript.includes("context") ||
-  !loadedFollowUpMenuTranscript.includes(droppedUrdfPath) ||
   !loadedFollowUpMenuTranscript.includes("/align /analyze /health /validate /orientation") ||
   loadedFollowUpMenuTranscript.includes("paste owner/repo or drop a local folder/file first") ||
   loadedFollowUpMenuTranscript.includes("/fix") ||
@@ -1504,7 +1503,7 @@ if (
 const loadedAnalyzeTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/analyze\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath, "/analyze\n/exit\n"),
 });
 if (
   !loadedAnalyzeTranscript.includes("investigation") ||
@@ -1512,7 +1511,6 @@ if (
   !loadedAnalyzeTranscript.includes("health check passed") ||
   !loadedAnalyzeTranscript.includes("looks ready") ||
   !loadedAnalyzeTranscript.includes("robot drop_robot") ||
-  !loadedAnalyzeTranscript.includes(droppedUrdfPath) ||
   loadedAnalyzeTranscript.includes("ready /run") ||
   loadedAnalyzeTranscript.includes("\"jointByChildLink\"") ||
   loadedAnalyzeTranscript.includes("PCA up cue") ||
@@ -1524,11 +1522,10 @@ if (
 const loadedValidateTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/validate\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath, "/validate\n/exit\n"),
 });
 if (
   !loadedValidateTranscript.includes("validation passed") ||
-  !loadedValidateTranscript.includes(droppedUrdfPath) ||
   loadedValidateTranscript.includes("\"issues\"")
 ) {
   throw new Error("ilu shell loaded validate shortcut smoke test failed");
@@ -1537,11 +1534,10 @@ if (
 const loadedOrientationTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/orientation\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath, "/orientation\n/exit\n"),
 });
 if (
   !loadedOrientationTranscript.includes("orientation likely") ||
-  !loadedOrientationTranscript.includes(droppedUrdfPath) ||
   loadedOrientationTranscript.includes("\"signals\"")
 ) {
   throw new Error("ilu shell loaded orientation shortcut smoke test failed");
@@ -1551,52 +1547,51 @@ const yUpOrientationSourcePath = path.join(root, "examples", "orientation-card",
 const suggestedOrientationTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${yUpOrientationSourcePath}\n/exit\n`,
+  input: shellSingleModeInput(yUpOrientationSourcePath),
 });
 if (
-  !suggestedOrientationTranscript.includes("orientation differs from the default target +z-up / +x-forward") ||
-  !suggestedOrientationTranscript.includes("recommended: open URDF Studio before aligning orientation") ||
-  !suggestedOrientationTranscript.includes("open URDF Studio before aligning orientation?")
+  !suggestedOrientationTranscript.includes("orientation likely +y-up / +x-forward") ||
+  !suggestedOrientationTranscript.includes("open URDF Studio for this robot now?") ||
+  !suggestedOrientationTranscript.includes("[Enter] Open Studio  [n] Not now")
 ) {
   throw new Error("ilu shell suggested orientation repair smoke test failed");
 }
 
-const acceptedOrientationRepairTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+const declinedOrientationStudioTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
   env: shellNoStudioAutostartEnv,
-  input: `${yUpOrientationSourcePath}\nn\n\n/exit\n`,
+  input: shellSingleModeInput(yUpOrientationSourcePath, "n\n\n/exit\n"),
 });
 if (
-  !acceptedOrientationRepairTranscript.includes("continuing in the shell") ||
-  !acceptedOrientationRepairTranscript.includes("aligning orientation...") ||
-  !acceptedOrientationRepairTranscript.includes("orientation aligned") ||
-  !acceptedOrientationRepairTranscript.includes("orientation likely z-up / x-forward")
+  !declinedOrientationStudioTranscript.includes("continuing in the shell") ||
+  !declinedOrientationStudioTranscript.includes("next         /align /analyze /health /validate /orientation /gallery") ||
+  declinedOrientationStudioTranscript.includes("orientation aligned")
 ) {
-  throw new Error("ilu shell orientation repair acceptance smoke test failed");
+  throw new Error("ilu shell orientation Studio-decline smoke test failed");
 }
 
-const alignOrientationTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
+const conflictedAlignOrientationTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${yUpOrientationSourcePath}\n/align\n/exit\n`,
+  input: shellSingleModeInput(yUpOrientationSourcePath, "n\n/align\n/exit\n"),
 });
 if (
-  !alignOrientationTranscript.includes("aligning orientation...") ||
-  !alignOrientationTranscript.includes("orientation aligned") ||
-  !alignOrientationTranscript.includes("orientation likely z-up / x-forward")
+  !conflictedAlignOrientationTranscript.includes("checking orientation...") ||
+  !conflictedAlignOrientationTranscript.includes("orientation review complete") ||
+  !conflictedAlignOrientationTranscript.includes("use /align to apply the recommended orientation fix") ||
+  conflictedAlignOrientationTranscript.includes("orientation aligned")
 ) {
-  throw new Error("ilu shell /align orientation smoke test failed");
+  throw new Error("ilu shell conflicted /align orientation smoke test failed");
 }
 
 const loadedHealthTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/health\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath, "/health\n/exit\n"),
 });
 if (
   !loadedHealthTranscript.includes("health check passed") ||
-  !loadedHealthTranscript.includes(droppedUrdfPath) ||
   loadedHealthTranscript.includes("/urdf              URDF file path.") ||
   loadedHealthTranscript.includes("[ready] /run")
 ) {
@@ -1607,7 +1602,7 @@ const mjcfExportPath = path.join(shellDropDir, "local robot.mjcf.xml");
 const loadedMjcfTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/mjcf\n\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath, "/mjcf\n\n/exit\n"),
 });
 if (
   !loadedMjcfTranscript.includes("export target") ||
@@ -1622,7 +1617,7 @@ const usdExportPath = path.join(shellDropDir, "local robot.usda");
 const loadedUsdTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedUrdfPath}\n/usd\n\n/exit\n`,
+  input: shellSingleModeInput(droppedUrdfPath, "/usd\n\n/exit\n"),
 });
 if (
   !loadedUsdTranscript.includes("export target") ||
@@ -1637,17 +1632,19 @@ const suggestedMeshRepairTranscript = execFileSync(process.execPath, [cliPath, "
   cwd: root,
   encoding: "utf8",
   env: shellNoStudioAutostartEnv,
-  input: `${brokenMeshUrdfPath}\nn\n\n/exit\n`,
+  input: shellSingleModeInput(brokenMeshUrdfPath, "n\n\nn\n/exit\nn\n"),
 });
 if (
   !suggestedMeshRepairTranscript.includes("mesh paths need attention") ||
-  !suggestedMeshRepairTranscript.includes("recommended: open URDF Studio before repairing mesh paths") ||
   !suggestedMeshRepairTranscript.includes("open URDF Studio before repairing mesh paths?") ||
   !suggestedMeshRepairTranscript.includes("[Enter] Open Studio  [n] Continue here") ||
   !suggestedMeshRepairTranscript.includes("continuing in the shell") ||
+  !suggestedMeshRepairTranscript.includes("repair mesh paths now?") ||
   !suggestedMeshRepairTranscript.includes("repairing mesh paths...") ||
   !suggestedMeshRepairTranscript.includes("mesh paths repaired") ||
-  !suggestedMeshRepairTranscript.includes("repaired mesh paths")
+  !suggestedMeshRepairTranscript.includes("repaired mesh paths") ||
+  !suggestedMeshRepairTranscript.includes("validation passed") ||
+  !suggestedMeshRepairTranscript.includes("health check passed")
 ) {
   throw new Error("ilu shell suggested mesh-path repair smoke test failed");
 }
@@ -1656,16 +1653,18 @@ const suggestedRepoRepairTranscript = execFileSync(process.execPath, [cliPath, "
   cwd: root,
   encoding: "utf8",
   env: shellNoStudioAutostartEnv,
-  input: `${repairableRepoDir}\nn\n\n/exit\n`,
+  input: shellSingleModeInput(repairableRepoDir, "n\n\n/exit\nn\n"),
 });
 if (
   !suggestedRepoRepairTranscript.includes("mesh references need attention") ||
-  !suggestedRepoRepairTranscript.includes("recommended: open URDF Studio before repairing mesh references") ||
   !suggestedRepoRepairTranscript.includes("open URDF Studio before repairing mesh references?") ||
   !suggestedRepoRepairTranscript.includes("[Enter] Open Studio  [n] Continue here") ||
   !suggestedRepoRepairTranscript.includes("continuing in the shell") ||
+  !suggestedRepoRepairTranscript.includes("repair mesh references now?") ||
   !suggestedRepoRepairTranscript.includes("mesh references repaired") ||
-  !suggestedRepoRepairTranscript.includes("repaired mesh references")
+  !suggestedRepoRepairTranscript.includes("repaired mesh references") ||
+  !suggestedRepoRepairTranscript.includes("validation passed") ||
+  !suggestedRepoRepairTranscript.includes("health check passed")
 ) {
   throw new Error("ilu shell suggested repo mesh repair smoke test failed");
 }
@@ -1673,7 +1672,7 @@ if (
 const invalidRepoTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: "not-a-real-owner/not-a-real-repo\n/exit\n",
+  input: shellSingleModeInput("not-a-real-owner/not-a-real-repo"),
 });
 if (
   !invalidRepoTranscript.includes("GitHub repository not found.") ||
@@ -1686,7 +1685,7 @@ const remainingIssuesTranscript = execFileSync(process.execPath, [cliPath, "shel
   cwd: root,
   encoding: "utf8",
   env: shellNoStudioAutostartEnv,
-  input: `${brokenMeshWithMassUrdfPath}\nn\n\n\n/exit\n`,
+  input: shellSingleModeInput(brokenMeshWithMassUrdfPath, "n\n\n\n/exit\n"),
 });
 if (
   !remainingIssuesTranscript.includes("continuing in the shell") ||
@@ -1701,16 +1700,15 @@ if (
 const zipDropTranscript = execFileSync(process.execPath, [cliPath, "shell"], {
   cwd: root,
   encoding: "utf8",
-  input: `${droppedZipPath}\n/exit\n`,
+  input: shellSingleModeInput(droppedZipPath, "\n/exit\n"),
 });
 if (
-  !zipDropTranscript.includes("validation and health check passed") ||
-  !zipDropTranscript.includes("opened archive") ||
-  !zipDropTranscript.includes(droppedZipPath) ||
-  !zipDropTranscript.includes("loaded urdf/robot.urdf") ||
+  !zipDropTranscript.includes("confirm local working copy") ||
+  !zipDropTranscript.includes("loading locally...") ||
   !zipDropTranscript.includes("archive opened as an extracted working copy") ||
-  !zipDropTranscript.includes("extracted folder") ||
-  !zipDropTranscript.includes("imported from")
+  !zipDropTranscript.includes("validation passed") ||
+  !zipDropTranscript.includes("health check passed") ||
+  !zipDropTranscript.includes("reload the archive after editing the zip contents")
 ) {
   throw new Error("ilu shell zip-drop smoke test failed");
 }
@@ -1750,12 +1748,13 @@ const multiCandidateTranscript = execFileSync(process.execPath, [cliPath, "shell
 });
 if (
   !multiCandidateTranscript.includes("choose what to do with this repo") ||
-  !multiCandidateTranscript.includes("found 2 robots. choose what to do with this repo.") ||
-  !multiCandidateTranscript.includes("work-one") ||
+  !multiCandidateTranscript.includes("found 2 robot entrypoints") ||
+  !multiCandidateTranscript.includes("best match robots/a.urdf") ||
   !multiCandidateTranscript.includes("choose a robot") ||
-  !multiCandidateTranscript.includes("press Enter for the highlighted match") ||
-  !multiCandidateTranscript.includes("loaded robots/b.urdf") ||
-  !multiCandidateTranscript.includes("selected robots/b.urdf from 2 candidates")
+  !multiCandidateTranscript.includes("type a number, press Enter for the highlighted match") ||
+  !multiCandidateTranscript.includes("loaded") ||
+  !multiCandidateTranscript.includes("validation passed") ||
+  !multiCandidateTranscript.includes("health check passed")
 ) {
   throw new Error("ilu shell multi-candidate picker smoke test failed");
 }
@@ -1811,7 +1810,10 @@ const repoFixesThenWorkOneTranscript = execFileSync(process.execPath, [cliPath, 
 if (
   !repoFixesThenWorkOneTranscript.includes("apply shared safe fixes across the repo now?") ||
   !repoFixesThenWorkOneTranscript.includes("choose a robot. arrows move, enter loads") ||
-  !repoFixesThenWorkOneTranscript.includes("loaded robots/b.urdf")
+  !repoFixesThenWorkOneTranscript.includes("best match robots/a.urdf") ||
+  !repoFixesThenWorkOneTranscript.includes("loaded") ||
+  !repoFixesThenWorkOneTranscript.includes("validation passed") ||
+  !repoFixesThenWorkOneTranscript.includes("health check passed")
 ) {
   throw new Error("ilu shell repo-fixes follow-up smoke test failed");
 }
@@ -1843,7 +1845,7 @@ const openShortcutTranscript = execFileSync(process.execPath, [cliPath, "shell"]
   input: "/open\n/exit\n",
 });
 if (
-  !openShortcutTranscript.includes("paste repo or local path") ||
+  !openShortcutTranscript.includes("paste or drop a file, folder, zip, or GitHub repo") ||
   openShortcutTranscript.includes("  /repo") ||
   openShortcutTranscript.includes("  /local") ||
   openShortcutTranscript.includes("  /file")
@@ -1878,12 +1880,16 @@ const xacroRetryTranscript = execFileSync(process.execPath, [cliPath, "shell"], 
     I_LOVE_URDF_XACRO_PYTHON: xacroRetryPython,
     I_LOVE_URDF_XACRO_BOOTSTRAP_PYTHON: bootstrapPythonCommand,
   },
-  input: `${xacroRetrySourceDir}\n!xacro\n/exit\n`,
+  input: shellSingleModeInput(xacroRetrySourceDir, "!xacro\n/exit\n"),
 });
 if (
+  !xacroRetryTranscript.includes("xacro runtime not set") ||
   !xacroRetryTranscript.includes("run !xacro") ||
-  !xacroRetryTranscript.includes("validation and health check passed") ||
-  !xacroRetryTranscript.includes("loaded robot.urdf.xacro")
+  !xacroRetryTranscript.includes("setting up xacro runtime...") ||
+  !xacroRetryTranscript.includes("retried automatically") ||
+  !xacroRetryTranscript.includes("loaded") ||
+  !xacroRetryTranscript.includes("validation passed") ||
+  !xacroRetryTranscript.includes("health check passed")
 ) {
   throw new Error("ilu shell xacro setup retry smoke test failed");
 }

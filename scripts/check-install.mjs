@@ -11,6 +11,7 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), 
 const packageName = packageJson.name;
 const packageVersion = packageJson.version;
 const expectedCliBinPath = "dist/cli.js";
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const buildScriptPath = path.join(root, "scripts", "build-package.mjs");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-install-check-"));
 const keepTemp = process.env.ILU_KEEP_INSTALL_TMP === "1";
@@ -78,7 +79,7 @@ const run = (command, args, options = {}) => {
   return options.capture ? result.trim() : undefined;
 };
 
-const runNpm = (args, options = {}) => run("npm", args, { ...options, scrubNpmEnv: true });
+const runNpm = (args, options = {}) => run(npmCommand, args, { ...options, scrubNpmEnv: true });
 
 const expect = (condition, message) => {
   if (!condition) {

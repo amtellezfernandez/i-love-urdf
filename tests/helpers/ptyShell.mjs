@@ -6,38 +6,58 @@ import { spawn, spawnSync } from "node:child_process";
 import { rootDir } from "./loadDist.mjs";
 
 const cliPath = path.join(rootDir, "dist", "cli.js");
+const scriptCommandProbeMarker = "ilu-pty-command-probe";
 
 const shellEscape = (value) => `'${value.replace(/'/g, `'\"'\"'`)}'`;
+
+const probeScriptLauncher = (launcher) => {
+  const result = spawnSync(
+    launcher.command,
+    launcher.argsFor([
+      process.execPath,
+      "-e",
+      `process.stdout.write(${JSON.stringify(scriptCommandProbeMarker)})`,
+    ]),
+    {
+      cwd: rootDir,
+      encoding: "utf8",
+    }
+  );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  return result.status === 0 && output.includes(scriptCommandProbeMarker);
+};
 
 const resolveScriptLauncher = () => {
   if (process.platform === "win32") {
     return null;
   }
 
+  const gnuLauncher = {
+    command: "script",
+    argsFor(commandArgs) {
+      return ["-qec", commandArgs.map(shellEscape).join(" "), "/dev/null"];
+    },
+  };
   const gnuProbe = spawnSync("script", ["-qec", "true", "/dev/null"], {
     cwd: rootDir,
     stdio: "ignore",
   });
-  if (gnuProbe.status === 0) {
-    return {
-      command: "script",
-      argsFor(commandArgs) {
-        return ["-qec", commandArgs.map(shellEscape).join(" "), "/dev/null"];
-      },
-    };
+  if (gnuProbe.status === 0 && probeScriptLauncher(gnuLauncher)) {
+    return gnuLauncher;
   }
 
+  const bsdLauncher = {
+    command: "script",
+    argsFor(commandArgs) {
+      return ["-q", "/dev/null", ...commandArgs];
+    },
+  };
   const bsdProbe = spawnSync("script", ["-q", "/dev/null", "true"], {
     cwd: rootDir,
     stdio: "ignore",
   });
-  if (bsdProbe.status === 0) {
-    return {
-      command: "script",
-      argsFor(commandArgs) {
-        return ["-q", "/dev/null", ...commandArgs];
-      },
-    };
+  if (bsdProbe.status === 0 && probeScriptLauncher(bsdLauncher)) {
+    return bsdLauncher;
   }
 
   return null;
