@@ -35,7 +35,7 @@ test("line shell uses /run for the default repo action instead of reloading a mu
     assert.match(result.stdout, /choose what to do with this repo/i);
     assert.match(result.stdout, /selected \/work-one/i);
     assert.match(result.stdout, /choose a robot\. arrows move, enter loads/i);
-    assert.match(result.stdout, /> a\.urdf\s+urdf/i);
+    assert.match(result.stdout, />\s+\S*a\.urdf\s+urdf/i);
     assert.doesNotMatch(result.stdout, /load this source into local working storage\?/i);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

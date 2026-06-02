@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { rootDir } from "./helpers/loadDist.mjs";
 
 const {
   buildRenderTargetCandidates,
@@ -11,7 +13,7 @@ const {
   resolveRenderableTargetPath,
   selectResolvedRenderTargetPath,
 } = await import(
-  path.join("/home/am/dev/i-love-urdf", "dist", "gallery", "repoMediaRender.js")
+  pathToFileURL(path.join(rootDir, "dist", "gallery", "repoMediaRender.js")).href
 );
 
 const REAL_GITHUB_SOURCE = {

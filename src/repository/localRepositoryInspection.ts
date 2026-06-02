@@ -1,4 +1,5 @@
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   fixMissingMeshReferencesInRepository,
@@ -104,8 +105,12 @@ const pathExists = async (absolutePath: string): Promise<boolean> => {
 
 const findNearestLocalRepositoryRoot = async (startPath: string): Promise<string> => {
   let currentPath = path.resolve(startPath);
+  const tempRootPath = path.resolve(os.tmpdir());
 
   while (true) {
+    if (currentPath === tempRootPath) {
+      break;
+    }
     if (await pathExists(path.join(currentPath, "package.xml"))) {
       return currentPath;
     }
@@ -119,6 +124,9 @@ const findNearestLocalRepositoryRoot = async (startPath: string): Promise<string
 
   currentPath = path.resolve(startPath);
   while (true) {
+    if (currentPath === tempRootPath) {
+      break;
+    }
     if (await pathExists(path.join(currentPath, ".git"))) {
       return currentPath;
     }
@@ -131,6 +139,11 @@ const findNearestLocalRepositoryRoot = async (startPath: string): Promise<string
   }
 
   return path.resolve(startPath);
+};
+
+const isWithinDirectory = (rootPath: string, candidatePath: string): boolean => {
+  const relativePath = path.relative(rootPath, candidatePath);
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 };
 
 export const resolveLocalRepositoryScopedFile = async (
@@ -151,12 +164,28 @@ export const resolveLocalRepositoryScopedFile = async (
   }
 
   const absoluteRequestedPath = path.resolve(scopedBasePath, requestedPath);
-  const [realRootPath, realTargetPath] = await Promise.all([
-    fs.realpath(rootPath),
-    fs.realpath(absoluteRequestedPath),
-  ]);
+  const resolvedRootPath = path.resolve(rootPath);
+  if (!isWithinDirectory(resolvedRootPath, absoluteRequestedPath)) {
+    throw new Error(messages.outsideRoot);
+  }
+
+  const realRootPath = await fs.realpath(resolvedRootPath);
+  let realTargetPath: string;
+  try {
+    realTargetPath = await fs.realpath(absoluteRequestedPath);
+  } catch (error) {
+    if (isSkippableWalkError(error)) {
+      throw new Error(messages.outsideRoot);
+    }
+    throw error;
+  }
+
+  if (!isWithinDirectory(realRootPath, realTargetPath)) {
+    throw new Error(messages.outsideRoot);
+  }
+
   const canonicalRelativePath = normalizeRepositoryPath(path.relative(realRootPath, realTargetPath));
-  if (!canonicalRelativePath || canonicalRelativePath.startsWith("..")) {
+  if (!canonicalRelativePath) {
     throw new Error(messages.outsideRoot);
   }
 

@@ -7,7 +7,7 @@ import {
 } from "../index";
 import { bundleMeshAssetsForUrdfFile } from "../node/bundleMeshAssets";
 import { emitWrittenPayload, type EditCommandHandler } from "./editCommandRuntime";
-import { fixLocalMeshPaths } from "./localMeshReferenceInspection";
+import { fixLocalMeshPaths } from "../mesh/localMeshReferenceInspection";
 
 export const EDIT_FORMATTING_COMMAND_HANDLERS = {
   "fix-mesh-paths": ({ args, helpers, urdfPath, urdfContent, outPath }) => {

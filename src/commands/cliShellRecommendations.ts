@@ -6,7 +6,7 @@ import type {
   ShellState,
   SuggestedActionPrompt,
 } from "./cliShellTypes";
-import { inspectLocalMeshReferences } from "./localMeshReferenceInspection";
+import { inspectLocalMeshReferences } from "../mesh/localMeshReferenceInspection";
 
 export const buildRepairMeshRefsSuggestion = (): SuggestedActionPrompt => ({
   kind: "repair-mesh-refs",

@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.fixLocalMeshPaths = exports.inspectLocalMeshReferences = exports.discoverLocalPackageContext = void 0;
 const fs = require("node:fs");
 const path = require("node:path");
-const meshPaths_1 = require("../mesh/meshPaths");
+const meshPaths_1 = require("./meshPaths");
 const urdfParser_1 = require("../parsing/urdfParser");
 const repositoryMeshResolution_1 = require("../repository/repositoryMeshResolution");
 const xmlDom_1 = require("../xmlDom");

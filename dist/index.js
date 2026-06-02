@@ -69,6 +69,7 @@ __exportStar(require("./utils/rotationMath"), exports);
 __exportStar(require("./spatial/axisFrame"), exports);
 __exportStar(require("./validation/validateUrdf"), exports);
 __exportStar(require("./validation/validateJointLinkReassignment"), exports);
+__exportStar(require("./validation/jointValueConversion"), exports);
 __exportStar(require("./xmlDom"), exports);
 __exportStar(require("./xacro/xacroContract"), exports);
 __exportStar(require("./tasks/loadedSourceTasks"), exports);

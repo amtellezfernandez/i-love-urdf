@@ -52,6 +52,13 @@ export {
   type JointLimits,
 } from "./parsing/parseJointLimits";
 export {
+  convertJointValueWithPlan,
+  JOINT_VALUE_CONVERSION_PARAMS,
+  resolveJointValueConversionPlan,
+  type JointValueConversionPlan,
+  type JointValueRange,
+} from "./validation/jointValueConversion";
+export {
   parseJointHierarchy,
   parseJointHierarchyFromDocument,
   type JointHierarchyNode,

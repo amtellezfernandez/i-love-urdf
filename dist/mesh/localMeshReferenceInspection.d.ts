@@ -1,5 +1,5 @@
-import { type PathCorrection } from "../mesh/fixMeshPaths";
-import { parseMeshReference } from "../mesh/meshPaths";
+import { type PathCorrection } from "./fixMeshPaths";
+import { parseMeshReference } from "./meshPaths";
 type LocalPackageContext = {
     packageName: string | null;
     packageRoot: string | null;

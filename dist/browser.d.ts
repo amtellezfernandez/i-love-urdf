@@ -5,6 +5,7 @@ export { parseLinkData, parseLinkDataFromDocument, type CollisionData, type Iner
 export { parseSensors, parseSensorsFromDocument, type ParsedSensor, type SensorNoise, } from "./parsing/parseSensors";
 export { parseJointAxesFromDocument, parseJointAxesFromURDF, type JointAxisInfo, type JointAxisMap, } from "./parsing/parseJointAxis";
 export { getJointLimits, parseJointLimitsFromDocument, parseJointLimitsFromURDF, type JointLimitInfo, type JointLimits, } from "./parsing/parseJointLimits";
+export { convertJointValueWithPlan, JOINT_VALUE_CONVERSION_PARAMS, resolveJointValueConversionPlan, type JointValueConversionPlan, type JointValueRange, } from "./validation/jointValueConversion";
 export { parseJointHierarchy, parseJointHierarchyFromDocument, type JointHierarchyNode, } from "./parsing/parseJointHierarchy";
 export { parseLinkNames, parseLinkNamesFromDocument, } from "./parsing/parseLinkNames";
 export { getJointLinks, } from "./parsing/getJointLinks";

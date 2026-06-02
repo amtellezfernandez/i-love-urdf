@@ -150,7 +150,7 @@ ptyTest("TTY assembly mode starts with a compact base-source prompt", async () =
 
   assert.equal(result.code, 0);
   assert.match(result.sanitizedOutput, /\/assembly-mode/i);
-  assert.match(result.sanitizedOutput, /paste or drop 1 base source file/i);
+  assert.match(result.sanitizedOutput, /paste or drop 1 base repo, folder, github repo, or urdf file/i);
   assert.doesNotMatch(result.sanitizedOutput, /source\s+none yet/i);
   assert.doesNotMatch(result.sanitizedOutput, /shared local assembly workspace from one or more urdf files/i);
 });
@@ -207,7 +207,7 @@ ptyTest("TTY substitute mode opens a picker for a zipped host source with multip
     });
 
     assert.equal(result.code, 0);
-    assert.match(result.sanitizedOutput, /selected\s+arm\.urdf/i);
+    assert.match(result.sanitizedOutput, /selected\s+\S*arm\.urdf/i);
     assert.match(result.sanitizedOutput, /arm\.urdf/i);
     assert.match(result.sanitizedOutput, /use up\/down, then press Enter to load the highlighted entry/i);
     assert.doesNotMatch(result.sanitizedOutput, /paste or drop 1 replacement source file/i);
@@ -286,8 +286,8 @@ ptyTest("TTY shell lets arrows pick a candidate entrypoint", async () => {
     assert.match(result.sanitizedOutput, /selected \/work-one/i);
     assert.match(result.sanitizedOutput, /opening the robot picker/i);
     assert.match(result.sanitizedOutput, /arrows choose a match, Enter loads it/i);
-    assert.match(result.sanitizedOutput, /selected b\.urdf/i);
-    assert.match(result.sanitizedOutput, /entry\s+b\.urdf/);
+    assert.match(result.sanitizedOutput, /selected\s+\S*b\.urdf/i);
+    assert.match(result.sanitizedOutput, /entry\s+\S*b\.urdf/);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -330,7 +330,7 @@ ptyTest("TTY shell lets work-one bypass the repo-fixes review prompt", async () 
     assert.match(result.sanitizedOutput, /selected \/repo-fixes/i);
     assert.match(result.sanitizedOutput, /apply shared safe fixes across the repo now\?/i);
     assert.match(result.sanitizedOutput, /opening the robot picker/i);
-    assert.match(result.sanitizedOutput, /entry\s+b\.urdf/i);
+    assert.match(result.sanitizedOutput, /entry\s+\S*b\.urdf/i);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

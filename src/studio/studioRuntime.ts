@@ -6,8 +6,8 @@ import * as process from "node:process";
 
 const DEFAULT_WEB_URL = process.env.URDF_STUDIO_URL?.trim() || "http://127.0.0.1:5173/";
 const DEFAULT_API_HEALTH_URL = process.env.URDF_STUDIO_API_URL?.trim() || "http://127.0.0.1:8000/health";
-const DEFAULT_STUDIO_REPO_NAMES = ["urdf-studio-unprod", "urdf-studio"] as const;
-const DEFAULT_STUDIO_REPO_URL = "https://github.com/urdf-studio/urdf-studio-unprod.git";
+const DEFAULT_STUDIO_REPO_NAMES = ["urdf-studio"] as const;
+const DEFAULT_STUDIO_REPO_URL = "https://github.com/amtellezfernandez/urdf-studio.git";
 const STUDIO_START_TIMEOUT_MS = 60_000;
 const STUDIO_STOP_TIMEOUT_MS = 10_000;
 const STUDIO_POLL_INTERVAL_MS = 500;
@@ -242,6 +242,8 @@ export const getStudioWebUrl = (): string => DEFAULT_WEB_URL;
 
 export const getStudioApiHealthUrl = (): string => DEFAULT_API_HEALTH_URL;
 
+export const getDefaultStudioRepoUrl = (): string => DEFAULT_STUDIO_REPO_URL;
+
 export const getDefaultStudioRootCandidates = (): string[] =>
   DEFAULT_STUDIO_REPO_NAMES.map((name) => path.resolve(__dirname, "..", "..", "..", name));
 
@@ -251,7 +253,7 @@ export const getPreferredStudioInstallRoot = (explicitEnv?: string | null): stri
     return path.resolve(explicit);
   }
 
-  return getDefaultStudioRootCandidates()[0] ?? path.resolve(__dirname, "..", "..", "..", "urdf-studio-unprod");
+  return getDefaultStudioRootCandidates()[0] ?? path.resolve(__dirname, "..", "..", "..", "urdf-studio");
 };
 
 export const isStudioRepoRoot = (studioRoot: string): boolean => {
@@ -356,7 +358,7 @@ export const getStudioInstallState = (
       studioRoot: null,
       installRoot,
       reason:
-        "URDF Studio repo not found. Set URDF_STUDIO_REPO or install it next to i-love-urdf as urdf-studio-unprod or urdf-studio.",
+        "URDF Studio repo not found. Set URDF_STUDIO_REPO or install it next to i-love-urdf as urdf-studio.",
     };
   }
 

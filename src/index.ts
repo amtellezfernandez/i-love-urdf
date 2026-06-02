@@ -65,6 +65,7 @@ export * from "./spatial/axisFrame";
 
 export * from "./validation/validateUrdf";
 export * from "./validation/validateJointLinkReassignment";
+export * from "./validation/jointValueConversion";
 export * from "./xmlDom";
 export * from "./xacro/xacroContract";
 export * from "./tasks/loadedSourceTasks";

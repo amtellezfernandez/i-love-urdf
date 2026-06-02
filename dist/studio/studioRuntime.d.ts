@@ -63,6 +63,7 @@ export declare const readManagedStudioRuntime: () => ManagedStudioRuntime | null
 export declare const isManagedStudioRunning: () => boolean;
 export declare const getStudioWebUrl: () => string;
 export declare const getStudioApiHealthUrl: () => string;
+export declare const getDefaultStudioRepoUrl: () => string;
 export declare const getDefaultStudioRootCandidates: () => string[];
 export declare const getPreferredStudioInstallRoot: (explicitEnv?: string | null) => string;
 export declare const isStudioRepoRoot: (studioRoot: string) => boolean;

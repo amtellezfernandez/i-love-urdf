@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { rootDir } from "./helpers/loadDist.mjs";
 
 const shellPathInput = await import(
-  pathToFileURL(path.join(rootDir, "dist", "commands", "shellPathInput.js")).href
+  pathToFileURL(path.join(rootDir, "dist", "shell", "shellPathInput.js")).href
 );
 
 test("normalizeShellInput preserves Windows path separators", () => {

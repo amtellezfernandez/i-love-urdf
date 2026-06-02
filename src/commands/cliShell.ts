@@ -120,7 +120,7 @@ import {
   isWindowsAbsolutePath,
   normalizeFilesystemInput,
   normalizeShellInput,
-} from "./shellPathInput";
+} from "../shell/shellPathInput";
 import {
   handleCommonLineShellCommand,
   handleCommonTtyCommand,
@@ -150,8 +150,9 @@ import {
   type GalleryRepoSource,
 } from "../gallery/galleryGeneration";
 import { buildApplyRepoFixesSuggestion, summarizeRepoFixesPreviewPanel } from "../gallery/repoBatchGuidance";
-import { fixLocalMeshPaths } from "./localMeshReferenceInspection";
+import { fixLocalMeshPaths } from "../mesh/localMeshReferenceInspection";
 import {
+  getDefaultStudioRepoUrl,
   getPreferredStudioInstallRoot,
   installStudio,
   isManagedStudioRunning,
@@ -3958,7 +3959,7 @@ const runInstallVisualizerAction = async (
     const lines = [
       installResult.reason,
       `studio repo ${quoteForPreview(installResult.studioRoot)}`,
-      `clone ${quoteForPreview(`git clone --depth 1 https://github.com/urdf-studio/urdf-studio-unprod.git ${installRoot}`)}`,
+      `clone ${quoteForPreview(`git clone --depth 1 ${getDefaultStudioRepoUrl()} ${installRoot}`)}`,
       `setup ${quoteForPreview(`cd ${installResult.studioRoot} && npm run setup`)}`,
       ...installResult.outputLines,
     ];

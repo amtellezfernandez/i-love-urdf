@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.repairLocalRepositoryMeshReferences = exports.inspectLocalRepositoryUrdfs = exports.collectLocalRepositoryFiles = exports.resolveLocalRepositoryFile = exports.resolveLocalRepositoryReference = exports.resolveLocalRepositoryScopedFile = void 0;
 const fs = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
 const fixMissingMeshReferences_1 = require("./fixMissingMeshReferences");
 const repositoryInspection_1 = require("./repositoryInspection");
@@ -57,7 +58,11 @@ const pathExists = async (absolutePath) => {
 };
 const findNearestLocalRepositoryRoot = async (startPath) => {
     let currentPath = path.resolve(startPath);
+    const tempRootPath = path.resolve(os.tmpdir());
     while (true) {
+        if (currentPath === tempRootPath) {
+            break;
+        }
         if (await pathExists(path.join(currentPath, "package.xml"))) {
             return currentPath;
         }
@@ -69,6 +74,9 @@ const findNearestLocalRepositoryRoot = async (startPath) => {
     }
     currentPath = path.resolve(startPath);
     while (true) {
+        if (currentPath === tempRootPath) {
+            break;
+        }
         if (await pathExists(path.join(currentPath, ".git"))) {
             return currentPath;
         }
@@ -80,18 +88,36 @@ const findNearestLocalRepositoryRoot = async (startPath) => {
     }
     return path.resolve(startPath);
 };
+const isWithinDirectory = (rootPath, candidatePath) => {
+    const relativePath = path.relative(rootPath, candidatePath);
+    return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+};
 const resolveLocalRepositoryScopedFile = async (rootPath, scopedBasePath, requestedPath, messages) => {
     const normalizedRequestedPath = (0, repositoryMeshResolution_1.normalizeRepositoryPath)(requestedPath);
     if (!normalizedRequestedPath) {
         throw new Error(messages.outsideRoot);
     }
     const absoluteRequestedPath = path.resolve(scopedBasePath, requestedPath);
-    const [realRootPath, realTargetPath] = await Promise.all([
-        fs.realpath(rootPath),
-        fs.realpath(absoluteRequestedPath),
-    ]);
+    const resolvedRootPath = path.resolve(rootPath);
+    if (!isWithinDirectory(resolvedRootPath, absoluteRequestedPath)) {
+        throw new Error(messages.outsideRoot);
+    }
+    const realRootPath = await fs.realpath(resolvedRootPath);
+    let realTargetPath;
+    try {
+        realTargetPath = await fs.realpath(absoluteRequestedPath);
+    }
+    catch (error) {
+        if (isSkippableWalkError(error)) {
+            throw new Error(messages.outsideRoot);
+        }
+        throw error;
+    }
+    if (!isWithinDirectory(realRootPath, realTargetPath)) {
+        throw new Error(messages.outsideRoot);
+    }
     const canonicalRelativePath = (0, repositoryMeshResolution_1.normalizeRepositoryPath)(path.relative(realRootPath, realTargetPath));
-    if (!canonicalRelativePath || canonicalRelativePath.startsWith("..")) {
+    if (!canonicalRelativePath) {
         throw new Error(messages.outsideRoot);
     }
     const stats = await readFileStats(realTargetPath, { allowSkip: false });

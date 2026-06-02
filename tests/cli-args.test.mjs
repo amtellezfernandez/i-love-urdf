@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { rootDir } from "./helpers/loadDist.mjs";
 
 const { createCliCommandHelpers, parseArgs } = await import(
-  path.join("/home/am/dev/i-love-urdf", "dist", "commands", "cliArgs.js")
+  pathToFileURL(path.join(rootDir, "dist", "commands", "cliArgs.js")).href
 );
 
 test("parseArgs preserves repeated flags for gallery render inputs", () => {

@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ANALYSIS_MESH_COMMAND_HANDLERS = void 0;
 const meshPrep_1 = require("../mesh/meshPrep");
 const analysisCommandRuntime_1 = require("./analysisCommandRuntime");
-const localMeshReferenceInspection_1 = require("./localMeshReferenceInspection");
+const localMeshReferenceInspection_1 = require("../mesh/localMeshReferenceInspection");
 exports.ANALYSIS_MESH_COMMAND_HANDLERS = {
     "inspect-meshes": (args, helpers) => {
         const meshDir = helpers.requireStringArg(args, "mesh-dir");

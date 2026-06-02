@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.installStudio = exports.ensureStudioRunning = exports.stopManagedStudioImmediately = exports.stopManagedStudio = exports.waitForStudioReady = exports.isStudioReady = exports.getStudioInstallState = exports.resolveStudioRoot = exports.isStudioRepoRoot = exports.getPreferredStudioInstallRoot = exports.getDefaultStudioRootCandidates = exports.getStudioApiHealthUrl = exports.getStudioWebUrl = exports.isManagedStudioRunning = exports.readManagedStudioRuntime = exports.getManagedStudioRuntimePath = void 0;
+exports.installStudio = exports.ensureStudioRunning = exports.stopManagedStudioImmediately = exports.stopManagedStudio = exports.waitForStudioReady = exports.isStudioReady = exports.getStudioInstallState = exports.resolveStudioRoot = exports.isStudioRepoRoot = exports.getPreferredStudioInstallRoot = exports.getDefaultStudioRootCandidates = exports.getDefaultStudioRepoUrl = exports.getStudioApiHealthUrl = exports.getStudioWebUrl = exports.isManagedStudioRunning = exports.readManagedStudioRuntime = exports.getManagedStudioRuntimePath = void 0;
 const node_child_process_1 = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -8,8 +8,8 @@ const path = require("node:path");
 const process = require("node:process");
 const DEFAULT_WEB_URL = process.env.URDF_STUDIO_URL?.trim() || "http://127.0.0.1:5173/";
 const DEFAULT_API_HEALTH_URL = process.env.URDF_STUDIO_API_URL?.trim() || "http://127.0.0.1:8000/health";
-const DEFAULT_STUDIO_REPO_NAMES = ["urdf-studio-unprod", "urdf-studio"];
-const DEFAULT_STUDIO_REPO_URL = "https://github.com/urdf-studio/urdf-studio-unprod.git";
+const DEFAULT_STUDIO_REPO_NAMES = ["urdf-studio"];
+const DEFAULT_STUDIO_REPO_URL = "https://github.com/amtellezfernandez/urdf-studio.git";
 const STUDIO_START_TIMEOUT_MS = 60000;
 const STUDIO_STOP_TIMEOUT_MS = 10000;
 const STUDIO_POLL_INTERVAL_MS = 500;
@@ -148,6 +148,8 @@ const getStudioWebUrl = () => DEFAULT_WEB_URL;
 exports.getStudioWebUrl = getStudioWebUrl;
 const getStudioApiHealthUrl = () => DEFAULT_API_HEALTH_URL;
 exports.getStudioApiHealthUrl = getStudioApiHealthUrl;
+const getDefaultStudioRepoUrl = () => DEFAULT_STUDIO_REPO_URL;
+exports.getDefaultStudioRepoUrl = getDefaultStudioRepoUrl;
 const getDefaultStudioRootCandidates = () => DEFAULT_STUDIO_REPO_NAMES.map((name) => path.resolve(__dirname, "..", "..", "..", name));
 exports.getDefaultStudioRootCandidates = getDefaultStudioRootCandidates;
 const getPreferredStudioInstallRoot = (explicitEnv) => {
@@ -155,7 +157,7 @@ const getPreferredStudioInstallRoot = (explicitEnv) => {
     if (explicit) {
         return path.resolve(explicit);
     }
-    return (0, exports.getDefaultStudioRootCandidates)()[0] ?? path.resolve(__dirname, "..", "..", "..", "urdf-studio-unprod");
+    return (0, exports.getDefaultStudioRootCandidates)()[0] ?? path.resolve(__dirname, "..", "..", "..", "urdf-studio");
 };
 exports.getPreferredStudioInstallRoot = getPreferredStudioInstallRoot;
 const isStudioRepoRoot = (studioRoot) => {
@@ -224,7 +226,7 @@ const getStudioInstallState = (options = {}) => {
             status: "missing-repo",
             studioRoot: null,
             installRoot,
-            reason: "URDF Studio repo not found. Set URDF_STUDIO_REPO or install it next to i-love-urdf as urdf-studio-unprod or urdf-studio.",
+            reason: "URDF Studio repo not found. Set URDF_STUDIO_REPO or install it next to i-love-urdf as urdf-studio.",
         };
     }
     if (!isStudioSetupComplete(studioRoot)) {

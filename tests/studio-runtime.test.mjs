@@ -49,9 +49,9 @@ const createStudioSetup = (dirPath) => {
   fs.writeFileSync(path.join(dirPath, ".venv", "bin", "python3"), "", "utf8");
 };
 
-test("default Studio repo candidates prefer urdf-studio-unprod first", () => {
+test("default Studio repo candidates use the public urdf-studio repo", () => {
   const candidateNames = getDefaultStudioRootCandidates().map((candidate) => path.basename(candidate));
-  assert.deepEqual(candidateNames.slice(0, 2), ["urdf-studio-unprod", "urdf-studio"]);
+  assert.deepEqual(candidateNames, ["urdf-studio"]);
 });
 
 test("preferred Studio install root uses the explicit override when provided", () => {
@@ -115,7 +115,7 @@ test("getStudioInstallState distinguishes missing repos from repos that still ne
       studioRoot: null,
       installRoot: missingDir,
       reason:
-        "URDF Studio repo not found. Set URDF_STUDIO_REPO or install it next to i-love-urdf as urdf-studio-unprod or urdf-studio.",
+        "URDF Studio repo not found. Set URDF_STUDIO_REPO or install it next to i-love-urdf as urdf-studio.",
     });
 
     createStudioRepo(candidateDir, true);

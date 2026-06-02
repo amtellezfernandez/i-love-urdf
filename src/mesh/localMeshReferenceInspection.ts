@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type PathCorrection } from "../mesh/fixMeshPaths";
-import { normalizeMeshPathForMatch, parseMeshReference } from "../mesh/meshPaths";
+import { type PathCorrection } from "./fixMeshPaths";
+import { normalizeMeshPathForMatch, parseMeshReference } from "./meshPaths";
 import { parseURDF, serializeURDF } from "../parsing/urdfParser";
 import { extractPackageNameFromPackageXml } from "../repository/repositoryMeshResolution";
 import { parseXml } from "../xmlDom";

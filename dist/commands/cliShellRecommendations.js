@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getCandidateDetails = exports.detectSuggestedAction = exports.hasAttentionIssues = exports.collectAttentionLines = exports.getHealthStatusLine = exports.getValidationStatusLine = exports.appendSuggestedActionLines = exports.formatAttentionDetail = exports.buildInstallVisualizerSuggestion = exports.buildOpenVisualizerSuggestion = exports.shouldPromptVisualizerBeforeSuggestedAction = exports.buildAlignOrientationSuggestion = exports.buildReviewAttentionSuggestion = exports.buildFixMeshPathsSuggestion = exports.buildRepairMeshRefsSuggestion = void 0;
 const fs = require("node:fs");
 const fixMeshPaths_1 = require("../mesh/fixMeshPaths");
-const localMeshReferenceInspection_1 = require("./localMeshReferenceInspection");
+const localMeshReferenceInspection_1 = require("../mesh/localMeshReferenceInspection");
 const buildRepairMeshRefsSuggestion = () => ({
     kind: "repair-mesh-refs",
     summary: "mesh references need attention",

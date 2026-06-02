@@ -1,6 +1,6 @@
 # ILU
 
-OpenAI Robotics interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.
+Interactive shell for inspecting, validating, repairing, and converting URDF/XACRO robot descriptions.
 
 ```sh
 npm install -g --ignore-scripts --install-links=true i-love-urdf

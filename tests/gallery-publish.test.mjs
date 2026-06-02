@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { rootDir } from "./helpers/loadDist.mjs";
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ilu-gallery-publish-"));
 process.on("exit", () => {
@@ -10,7 +12,7 @@ process.on("exit", () => {
 });
 
 const { buildGalleryPublishDraft } = await import(
-  path.join("/home/am/dev/i-love-urdf", "dist", "gallery", "galleryPublish.js")
+  pathToFileURL(path.join(rootDir, "dist", "gallery", "galleryPublish.js")).href
 );
 
 test("gallery publish draft omits missing webm entries for image-only renders", async () => {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0 - 2026-06-02
+
+- added joint value conversion helpers for servo ticks, degree ranges, and prismatic normalization
+- updated URDF Studio integration defaults to use the public `amtellezfernandez/urdf-studio` repo
+- moved shared mesh and shell helpers out of the command layer to keep architecture budgets meaningful
+- removed workstation-specific test import paths from the package test suite
+
 ## 1.0.0 - 2026-03-23
 
 - split the interactive shell into dedicated type, config, recommendation, and UI helper modules
@@ -7,7 +14,7 @@
 - expanded real-repository verification to TurtleBot3, OpenManipulator, Fanuc, and Bit-Bots in addition to the existing release corpus
 - added `ilu bug-report` to capture `ilu doctor` diagnostics plus optional local repro inputs
 - upgraded tagged releases to generate formal release notes, create a GitHub Release, and publish to npm when `NPM_TOKEN` is configured
-- promoted the package metadata and support surface to the OpenAI Robotics release posture
+- promoted the package metadata and support surface for public release
 
 ## 0.1.11 - 2026-03-23
 

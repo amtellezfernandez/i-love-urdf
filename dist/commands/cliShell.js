@@ -14,7 +14,7 @@ const cliCompletion_1 = require("./cliCompletion");
 const cliShellConfig_1 = require("./cliShellConfig");
 const cliShellRecommendations_1 = require("./cliShellRecommendations");
 const cliShellUi_1 = require("./cliShellUi");
-const shellPathInput_1 = require("./shellPathInput");
+const shellPathInput_1 = require("../shell/shellPathInput");
 const cliShellSharedActions_1 = require("./cliShellSharedActions");
 const cliShellRepoIntent_1 = require("./cliShellRepoIntent");
 const cliUpdate_1 = require("./cliUpdate");
@@ -23,7 +23,7 @@ const assemblySession_1 = require("../session/assemblySession");
 const githubCliAuth_1 = require("../node/githubCliAuth");
 const githubRepositoryInspection_1 = require("../repository/githubRepositoryInspection");
 const repoBatchGuidance_1 = require("../gallery/repoBatchGuidance");
-const localMeshReferenceInspection_1 = require("./localMeshReferenceInspection");
+const localMeshReferenceInspection_1 = require("../mesh/localMeshReferenceInspection");
 const studioRuntime_1 = require("../studio/studioRuntime");
 const clearTransientShellState = (state) => {
     (0, cliShellConfig_1.clearCandidatePicker)(state);
@@ -2802,7 +2802,7 @@ const runInstallVisualizerAction = async (state, suggestedAction) => {
         const lines = [
             installResult.reason,
             `studio repo ${(0, cliShellConfig_1.quoteForPreview)(installResult.studioRoot)}`,
-            `clone ${(0, cliShellConfig_1.quoteForPreview)(`git clone --depth 1 https://github.com/urdf-studio/urdf-studio-unprod.git ${installRoot}`)}`,
+            `clone ${(0, cliShellConfig_1.quoteForPreview)(`git clone --depth 1 ${(0, studioRuntime_1.getDefaultStudioRepoUrl)()} ${installRoot}`)}`,
             `setup ${(0, cliShellConfig_1.quoteForPreview)(`cd ${installResult.studioRoot} && npm run setup`)}`,
             ...installResult.outputLines,
         ];

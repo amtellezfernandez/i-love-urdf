@@ -4,7 +4,7 @@ import {
   readRequiredUrdfInput,
   type AnalysisCommandHandler,
 } from "./analysisCommandRuntime";
-import { inspectLocalMeshReferences } from "./localMeshReferenceInspection";
+import { inspectLocalMeshReferences } from "../mesh/localMeshReferenceInspection";
 
 export const ANALYSIS_MESH_COMMAND_HANDLERS = {
   "inspect-meshes": (args, helpers) => {
