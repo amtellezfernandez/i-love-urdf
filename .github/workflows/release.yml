@@ -154,10 +154,27 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
-            npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          PACKAGE_TARBALL="$(find .release-artifacts -maxdepth 1 -name '*.tgz' -print -quit)"
+          PACKAGE_VERSION="${GITHUB_REF_NAME#v}"
+          PACKAGE_SPEC="i-love-urdf@${PACKAGE_VERSION}"
+
+          if npm view "$PACKAGE_SPEC" version >/dev/null 2>&1; then
+            echo "$PACKAGE_SPEC is already published; skipping npm publish."
+            exit 0
           fi
-          npm publish .release-artifacts/*.tgz --access public
+
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN is required to publish $PACKAGE_SPEC from GitHub Actions."
+            exit 1
+          fi
+
+          if [ -z "$PACKAGE_TARBALL" ]; then
+            echo "::error::Release tarball was not found in .release-artifacts."
+            exit 1
+          fi
+
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          npm publish "$PACKAGE_TARBALL" --access public
 
       - name: Publish GitHub Release
         env:
