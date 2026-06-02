@@ -179,10 +179,11 @@ const createGitSnapshot = () => {
         return true;
       }
 
-      const topLevel = relativePath.split(path.sep)[0];
+      const topLevel = normalizePackagePath(relativePath).split("/")[0];
       return !excludedTopLevel.has(topLevel);
     },
   });
+  fs.rmSync(path.join(snapshotDir, ".git"), { recursive: true, force: true });
 
   run("git", ["init"], { cwd: snapshotDir });
   run("git", ["add", "."], { cwd: snapshotDir });
