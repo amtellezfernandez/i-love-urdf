@@ -162,6 +162,7 @@ const assertInstalledPackage = (prefix, label) => {
   const helpText = run(cliPath, ["--help"], {
     capture: true,
     env: { NO_COLOR: "1" },
+    shell: process.platform === "win32",
   });
   expect(helpText.includes("ILU CLI"), `${label}: CLI help header missing`);
   expect(helpText.includes("load-source"), `${label}: CLI help command list missing`);

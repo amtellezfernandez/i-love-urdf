@@ -11,6 +11,7 @@ import {
 } from "../repository/githubRepositoryInspection";
 import {
   collectLocalRepositoryFiles,
+  isWithinDirectory,
   type LocalRepositoryFile,
 } from "../repository/localRepositoryInspection";
 import {
@@ -632,12 +633,20 @@ export const expandLocalXacroToUrdf = async (
   }
 
   const rootPath = path.resolve(options.rootPath ?? path.dirname(absoluteXacroPath));
-  const relativeXacroPath = normalizeRepositoryPath(path.relative(rootPath, absoluteXacroPath));
-  if (!relativeXacroPath || relativeXacroPath.startsWith("..")) {
+  const [realRootPath, realXacroPath] = await Promise.all([
+    fs.realpath(rootPath),
+    fs.realpath(absoluteXacroPath),
+  ]);
+  if (!isWithinDirectory(realRootPath, realXacroPath)) {
     throw new Error("Local Xacro target must stay inside the selected root path.");
   }
 
-  const files = await collectLocalRepositoryFiles(rootPath);
+  const relativeXacroPath = normalizeRepositoryPath(path.relative(realRootPath, realXacroPath));
+  if (!relativeXacroPath) {
+    throw new Error("Local Xacro target must stay inside the selected root path.");
+  }
+
+  const files = await collectLocalRepositoryFiles(realRootPath);
   const payload = await buildXacroExpandPayloadFromRepository(
     files,
     relativeXacroPath,
@@ -653,9 +662,9 @@ export const expandLocalXacroToUrdf = async (
 
   return {
     source: "local",
-    rootPath,
+    rootPath: realRootPath,
     xacroPath: relativeXacroPath,
-    inspectedPath: absoluteXacroPath,
+    inspectedPath: realXacroPath,
     ...result,
     urdf: stabilized.urdf,
   };

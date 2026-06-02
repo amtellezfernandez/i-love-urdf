@@ -141,7 +141,7 @@ const findNearestLocalRepositoryRoot = async (startPath: string): Promise<string
   return path.resolve(startPath);
 };
 
-const isWithinDirectory = (rootPath: string, candidatePath: string): boolean => {
+export const isWithinDirectory = (rootPath: string, candidatePath: string): boolean => {
   const relativePath = path.relative(rootPath, candidatePath);
   return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 };

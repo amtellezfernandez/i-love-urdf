@@ -402,11 +402,18 @@ const expandLocalXacroToUrdf = async (options) => {
         throw new Error(`Local Xacro target is not a file: ${absoluteXacroPath}`);
     }
     const rootPath = path.resolve(options.rootPath ?? path.dirname(absoluteXacroPath));
-    const relativeXacroPath = (0, repositoryMeshResolution_1.normalizeRepositoryPath)(path.relative(rootPath, absoluteXacroPath));
-    if (!relativeXacroPath || relativeXacroPath.startsWith("..")) {
+    const [realRootPath, realXacroPath] = await Promise.all([
+        fs.realpath(rootPath),
+        fs.realpath(absoluteXacroPath),
+    ]);
+    if (!(0, localRepositoryInspection_1.isWithinDirectory)(realRootPath, realXacroPath)) {
         throw new Error("Local Xacro target must stay inside the selected root path.");
     }
-    const files = await (0, localRepositoryInspection_1.collectLocalRepositoryFiles)(rootPath);
+    const relativeXacroPath = (0, repositoryMeshResolution_1.normalizeRepositoryPath)(path.relative(realRootPath, realXacroPath));
+    if (!relativeXacroPath) {
+        throw new Error("Local Xacro target must stay inside the selected root path.");
+    }
+    const files = await (0, localRepositoryInspection_1.collectLocalRepositoryFiles)(realRootPath);
     const payload = await (0, exports.buildXacroExpandPayloadFromRepository)(files, relativeXacroPath, async (file) => fs.readFile(file.absolutePath), {
         args: options.args,
         useInorder: options.useInorder,
@@ -416,9 +423,9 @@ const expandLocalXacroToUrdf = async (options) => {
     const stabilized = (0, stabilizeExpandedXacroUrdf_1.stabilizeExpandedXacroUrdf)(result.urdf, relativeXacroPath, files);
     return {
         source: "local",
-        rootPath,
+        rootPath: realRootPath,
         xacroPath: relativeXacroPath,
-        inspectedPath: absoluteXacroPath,
+        inspectedPath: realXacroPath,
         ...result,
         urdf: stabilized.urdf,
     };

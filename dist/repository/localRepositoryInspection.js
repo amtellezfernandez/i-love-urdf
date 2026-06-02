@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.repairLocalRepositoryMeshReferences = exports.inspectLocalRepositoryUrdfs = exports.collectLocalRepositoryFiles = exports.resolveLocalRepositoryFile = exports.resolveLocalRepositoryReference = exports.resolveLocalRepositoryScopedFile = void 0;
+exports.repairLocalRepositoryMeshReferences = exports.inspectLocalRepositoryUrdfs = exports.collectLocalRepositoryFiles = exports.resolveLocalRepositoryFile = exports.resolveLocalRepositoryReference = exports.resolveLocalRepositoryScopedFile = exports.isWithinDirectory = void 0;
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -92,6 +92,7 @@ const isWithinDirectory = (rootPath, candidatePath) => {
     const relativePath = path.relative(rootPath, candidatePath);
     return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 };
+exports.isWithinDirectory = isWithinDirectory;
 const resolveLocalRepositoryScopedFile = async (rootPath, scopedBasePath, requestedPath, messages) => {
     const normalizedRequestedPath = (0, repositoryMeshResolution_1.normalizeRepositoryPath)(requestedPath);
     if (!normalizedRequestedPath) {
@@ -99,7 +100,7 @@ const resolveLocalRepositoryScopedFile = async (rootPath, scopedBasePath, reques
     }
     const absoluteRequestedPath = path.resolve(scopedBasePath, requestedPath);
     const resolvedRootPath = path.resolve(rootPath);
-    if (!isWithinDirectory(resolvedRootPath, absoluteRequestedPath)) {
+    if (!(0, exports.isWithinDirectory)(resolvedRootPath, absoluteRequestedPath)) {
         throw new Error(messages.outsideRoot);
     }
     const realRootPath = await fs.realpath(resolvedRootPath);
@@ -113,7 +114,7 @@ const resolveLocalRepositoryScopedFile = async (rootPath, scopedBasePath, reques
         }
         throw error;
     }
-    if (!isWithinDirectory(realRootPath, realTargetPath)) {
+    if (!(0, exports.isWithinDirectory)(realRootPath, realTargetPath)) {
         throw new Error(messages.outsideRoot);
     }
     const canonicalRelativePath = (0, repositoryMeshResolution_1.normalizeRepositoryPath)(path.relative(realRootPath, realTargetPath));

@@ -26,6 +26,7 @@ export type LocalRepositoryMeshRepairResult = FixMissingMeshReferencesResult & {
     inspectedPath: string;
     urdfPath: string;
 };
+export declare const isWithinDirectory: (rootPath: string, candidatePath: string) => boolean;
 export declare const resolveLocalRepositoryScopedFile: (rootPath: string, scopedBasePath: string, requestedPath: string, messages: {
     outsideRoot: string;
     notFile: (absolutePath: string) => string;
