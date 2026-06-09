@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 - 2026-06-09
+
+- exported the Node DOM runtime and mesh bundling helpers as public package subpaths
+- added package export regression coverage for simulator transfer integrations
+
 ## 1.1.0 - 2026-06-02
 
 - added joint value conversion helpers for servo ticks, degree ranges, and prismatic normalization
