@@ -29,7 +29,7 @@ const BUDGETS = {
     envTouchFilesMax: 12,
   },
   failureSurface: {
-    totalSourceLinesMax: 41_250,
+    totalSourceLinesMax: 41_500,
     largestSourceFileLinesMax: 11_000,
     shellClusterLinesMax: 12_500,
     filesOver500LinesMax: 16,

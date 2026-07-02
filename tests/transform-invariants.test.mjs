@@ -35,6 +35,33 @@ const assertCloseVector = (actual, expected, epsilon = 1e-6) => {
   });
 };
 
+const parseXml = (xmlContent) => new DOMParser().parseFromString(xmlContent, "application/xml");
+
+const findMjcfBodyByName = (mjcfContent, bodyName) =>
+  parseXml(mjcfContent).querySelector(`body[name="${bodyName}"]`);
+
+const findMjcfJointByName = (mjcfContent, jointName) =>
+  parseXml(mjcfContent).querySelector(`joint[name="${jointName}"]`);
+
+const findUsdPrimBlock = (usdContent, primName) => {
+  const primStart = usdContent.indexOf(`def Xform "${primName}"`);
+  if (primStart < 0) return null;
+  const blockStart = usdContent.indexOf("{", primStart);
+  if (blockStart < 0) return null;
+  let depth = 0;
+  for (let index = blockStart; index < usdContent.length; index += 1) {
+    const character = usdContent[index];
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return usdContent.slice(primStart, index + 1);
+      }
+    }
+  }
+  return null;
+};
+
 const hierarchyFixtureUrdf = `<?xml version="1.0" encoding="UTF-8"?>
 <robot name="two_link_arm">
   <link name="base_link"/>
@@ -92,6 +119,115 @@ const extensionNoiseUrdf = `<?xml version="1.0" encoding="UTF-8"?>
       <axis xyz="1 0 0"/>
     </joint>
   </gazebo>
+</robot>`;
+
+const invalidFrameInertialUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="invalid_frame_inertial">
+  <link name="base_link"/>
+  <link name="frame_link">
+    <inertial>
+      <mass value="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+  </link>
+  <joint name="frame_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="frame_link"/>
+  </joint>
+</robot>`;
+
+const invalidDynamicInertialUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="invalid_dynamic_inertial">
+  <link name="base_link"/>
+  <link name="arm_link">
+    <inertial>
+      <mass value="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="arm_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="arm_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" velocity="1"/>
+  </joint>
+</robot>`;
+
+const coloredMjcfUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="colored_mjcf">
+  <material name="amber">
+    <color rgba="1.0 0.82 0.12 0.25"/>
+  </material>
+  <link name="base_link">
+    <visual>
+      <material name="amber"/>
+      <geometry>
+        <box size="1 1 1"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>`;
+
+const meshNameCollisionMjcfUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="mesh_name_collision_mjcf">
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <mesh filename="package://robot_a/meshes/shared_link.stl"/>
+      </geometry>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://robot_b/meshes/shared_link.stl"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>`;
+
+const escapedAttributeMjcfUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="robot&amp;one">
+  <link name="base&quot;link">
+    <visual>
+      <geometry>
+        <mesh filename="meshes/a&amp;b.stl"/>
+      </geometry>
+    </visual>
+  </link>
+</robot>`;
+
+const scaleAwareUsdInertialUrdf = `<?xml version="1.0" encoding="UTF-8"?>
+<robot name="scale_aware_usd_inertial">
+  <link name="base_link"/>
+  <link name="arm_link">
+    <inertial>
+      <mass value="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="100" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </visual>
+  </link>
+  <joint name="arm_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="arm_link"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" velocity="1"/>
+  </joint>
 </robot>`;
 
 const mergeFixtureBaseUrdf = `<?xml version="1.0" encoding="UTF-8"?>
@@ -249,6 +385,158 @@ test("analysis, orientation, and USD conversion ignore extension-only link and j
   assert.equal(mjcf.stats.jointsConverted, 1);
   assert.equal(mjcf.mjcfContent.includes("plugin_wheel_link"), false);
   assert.equal(mjcf.mjcfContent.includes("plugin_wheel_joint"), false);
+});
+
+test("MJCF conversion omits invalid inertials for frame-only links", () => {
+  const mjcf = lib.convertURDFToMJCF(invalidFrameInertialUrdf);
+  const frameBody = findMjcfBodyByName(mjcf.mjcfContent, "frame_link");
+
+  assert.equal(
+    mjcf.warnings.includes('Omitted invalid inertial for frame-only link "frame_link" during MJCF export.'),
+    true
+  );
+  assert.deepEqual(mjcf.diagnostics[0], {
+    code: "mjcf.inertial.omitted_frame",
+    severity: "warning",
+    linkName: "frame_link",
+    message: 'Omitted invalid inertial for frame-only link "frame_link" during MJCF export.',
+  });
+  assert.ok(frameBody);
+  assert.equal(frameBody.querySelector("inertial"), null);
+});
+
+test("MJCF conversion regularizes invalid inertials for dynamic bodies", () => {
+  const mjcf = lib.convertURDFToMJCF(invalidDynamicInertialUrdf);
+  const armBody = findMjcfBodyByName(mjcf.mjcfContent, "arm_link");
+  const armJoint = findMjcfJointByName(mjcf.mjcfContent, "arm_joint");
+  const armInertial = armBody?.querySelector("inertial");
+
+  assert.equal(
+    mjcf.warnings.includes('Regularized invalid inertial for link "arm_link" during MJCF export.'),
+    true
+  );
+  assert.deepEqual(mjcf.diagnostics[0], {
+    code: "mjcf.inertial.regularized",
+    severity: "warning",
+    linkName: "arm_link",
+    message: 'Regularized invalid inertial for link "arm_link" during MJCF export.',
+  });
+  assert.equal(armJoint?.getAttribute("type"), "hinge");
+  assert.equal(armInertial?.getAttribute("pos"), "0 0 0");
+  assert.equal(armInertial?.getAttribute("mass"), "0.000000001000");
+  assert.equal(armInertial?.getAttribute("diaginertia"), "0.000001000000 0.000001000000 0.000001000000");
+});
+
+test("USD conversion omits invalid inertials for frame-only links", () => {
+  const usd = lib.convertURDFToUSD(invalidFrameInertialUrdf);
+  const frameLinkPrim = findUsdPrimBlock(usd.usdContent, "frame_link");
+
+  assert.equal(
+    usd.warnings.includes('Omitted invalid inertial for frame-only link "frame_link" during USD export.'),
+    true
+  );
+  assert.deepEqual(usd.diagnostics[0], {
+    code: "usd.inertial.omitted_frame",
+    severity: "warning",
+    linkName: "frame_link",
+    message: 'Omitted invalid inertial for frame-only link "frame_link" during USD export.',
+  });
+  assert.ok(frameLinkPrim);
+  assert.equal(frameLinkPrim.includes("physics:mass"), false);
+  assert.equal(frameLinkPrim.includes("physics:diagonalInertia"), false);
+});
+
+test("USD conversion regularizes invalid inertials for dynamic bodies", () => {
+  const usd = lib.convertURDFToUSD(invalidDynamicInertialUrdf);
+  const armLinkPrim = findUsdPrimBlock(usd.usdContent, "arm_link");
+
+  assert.equal(
+    usd.warnings.includes('Regularized invalid inertial for link "arm_link" during USD export.'),
+    true
+  );
+  assert.deepEqual(usd.diagnostics[0], {
+    code: "usd.inertial.regularized",
+    severity: "warning",
+    linkName: "arm_link",
+    message: 'Regularized invalid inertial for link "arm_link" during USD export.',
+  });
+  assert.ok(armLinkPrim);
+  assert.equal(armLinkPrim.includes("float physics:mass = 0\n"), false);
+  assert.equal(armLinkPrim.includes("float3 physics:diagonalInertia = (0, 0, 0)\n"), false);
+  assert.equal(armLinkPrim.includes("float3 physics:diagonalInertia = (0.000001, 0.000001, 0.000001)"), true);
+});
+
+test("USD conversion regularizes invalid inertials relative to source scale", () => {
+  const usd = lib.convertURDFToUSD(scaleAwareUsdInertialUrdf);
+  const armLinkPrim = findUsdPrimBlock(usd.usdContent, "arm_link");
+
+  assert.ok(armLinkPrim);
+  assert.equal(armLinkPrim.includes("float3 physics:diagonalInertia = (100, 0.0001, 0.0001)"), true);
+});
+
+test("MJCF conversion preserves referenced visual material colors", () => {
+  const mjcf = lib.convertURDFToMJCF(coloredMjcfUrdf);
+  const baseBody = findMjcfBodyByName(mjcf.mjcfContent, "base_link");
+  const geoms = Array.from(baseBody?.querySelectorAll("geom") ?? []);
+  const visualGeom = geoms.find((geom) => geom.getAttribute("group") === "1");
+  const collisionGeom = geoms.find((geom) => geom.getAttribute("group") === "3");
+
+  assert.equal(visualGeom?.getAttribute("rgba"), "1.000000 0.820000 0.120000 1.000000");
+  assert.ok(collisionGeom);
+  assert.equal(collisionGeom?.hasAttribute("rgba"), false);
+});
+
+test("MJCF conversion emits neutral output unless simulator policy is requested", () => {
+  const neutral = parseXml(lib.convertURDFToMJCF(invalidDynamicInertialUrdf).mjcfContent);
+
+  assert.equal(neutral.querySelector("option"), null);
+  assert.equal(neutral.querySelector("default"), null);
+  assert.equal(neutral.querySelector("actuator"), null);
+
+  const withPolicy = parseXml(
+    lib.convertURDFToMJCF(invalidDynamicInertialUrdf, {
+      includeSimulationDefaults: true,
+      includeActuators: true,
+    }).mjcfContent
+  );
+
+  assert.ok(withPolicy.querySelector("option"));
+  assert.ok(withPolicy.querySelector("default"));
+  assert.equal(withPolicy.querySelector('motor[name="arm_joint_motor"]')?.getAttribute("joint"), "arm_joint");
+});
+
+test("MJCF conversion keeps duplicate mesh basenames as distinct assets", () => {
+  const mjcf = lib.convertURDFToMJCF(meshNameCollisionMjcfUrdf);
+  const doc = parseXml(mjcf.mjcfContent);
+  const meshAssets = Array.from(doc.querySelectorAll("asset mesh"));
+  const geoms = Array.from(doc.querySelectorAll("geom[type='mesh']"));
+
+  assert.equal(meshAssets.length, 2);
+  assert.deepEqual(
+    meshAssets.map((mesh) => mesh.getAttribute("name")).sort(),
+    ["robot_a_meshes_shared_link", "robot_b_meshes_shared_link"]
+  );
+  assert.deepEqual(
+    geoms.map((geom) => geom.getAttribute("mesh")).sort(),
+    ["robot_a_meshes_shared_link", "robot_b_meshes_shared_link"]
+  );
+  assert.equal(mjcf.diagnostics.some((diagnostic) => diagnostic.code === "mjcf.mesh.name_collision"), false);
+});
+
+test("MJCF conversion escapes dynamic XML attributes", () => {
+  const mjcf = lib.convertURDFToMJCF(escapedAttributeMjcfUrdf);
+  const doc = parseXml(mjcf.mjcfContent);
+  const root = doc.querySelector("mujoco");
+  const body = doc.querySelector("worldbody body");
+  const mesh = doc.querySelector("asset mesh");
+
+  assert.ok(root);
+  assert.equal(mjcf.mjcfContent.includes('model="robot&amp;one"'), true);
+  assert.equal(mjcf.mjcfContent.includes("robot&amp;amp;one"), false);
+  assert.equal(body?.getAttribute("name"), 'base"link');
+  assert.ok(mesh);
+  assert.equal(mjcf.mjcfContent.includes('file="a&amp;b.stl"'), true);
+  assert.equal(mjcf.mjcfContent.includes("a&amp;amp;b.stl"), false);
 });
 
 test("mergeUrdfs prefixes conflicting names and mounts robots under assembly_root", () => {

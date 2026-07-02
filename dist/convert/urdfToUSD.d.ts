@@ -69,7 +69,14 @@ export type URDFToUSDConversionResult = {
     usdContent: string;
     stage: UsdStage;
     warnings: string[];
+    diagnostics: UsdConversionDiagnostic[];
     stats: UrdfToUsdStats;
+};
+export type UsdConversionDiagnostic = {
+    code: "usd.inertial.omitted_frame" | "usd.inertial.regularized";
+    severity: "warning";
+    linkName: string;
+    message: string;
 };
 export type MapUrdfToUsdPrimOptions = {
     path?: string;
@@ -78,6 +85,7 @@ export type MapUrdfToUsdPrimOptions = {
     includeVisuals?: boolean;
     includeCollisions?: boolean;
     meshResolver?: (request: UsdMeshResolveRequest) => ResolvedUsdMesh | null;
+    incomingJointType?: string | null;
 };
 export type InlineUsdMeshPrimOptions = {
     name: string;
@@ -93,6 +101,7 @@ export declare function createInlineUsdMeshPrim(mesh: InlineUsdMesh, options: In
 export declare function mapUrdfToUsdPrim(link: LinkData, options?: MapUrdfToUsdPrimOptions): {
     prim: UsdPrim;
     warnings: string[];
+    diagnostics: UsdConversionDiagnostic[];
     stats: UrdfToUsdStats;
 };
 export declare function convertURDFToUSD(urdfContent: string, options?: ConvertURDFToUSDOptions): URDFToUSDConversionResult;

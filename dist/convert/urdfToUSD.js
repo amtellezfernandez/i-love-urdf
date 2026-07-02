@@ -13,6 +13,9 @@ const IDENTITY_QUATERNION = [1, 0, 0, 0];
 const X_AXIS = [1, 0, 0];
 const Y_AXIS = [0, 1, 0];
 const Z_AXIS = [0, 0, 1];
+const MIN_USD_MASS = 1e-6;
+const MIN_USD_DIAGONAL_INERTIA = 1e-6;
+const USD_INERTIA_SCALE_FLOOR_RATIO = 1e-6;
 const formatNumber = (value) => {
     if (!Number.isFinite(value))
         return "0";
@@ -26,6 +29,27 @@ const formatQuat = (value) => `(${formatNumber(value[0])}, ${formatNumber(value[
 const formatVec3Array = (values) => `[${values.map((value) => formatVec3(value)).join(", ")}]`;
 const formatNumberArray = (values) => `[${values.map((value) => formatNumber(value)).join(", ")}]`;
 const formatTokenArray = (values) => `[${values.map((value) => formatString(value)).join(", ")}]`;
+const createUsdDiagnostic = (code, linkName, message) => ({
+    code,
+    severity: "warning",
+    linkName,
+    message,
+});
+const hasPositiveUsdDiagonalInertia = (values) => values.length === 3 &&
+    values.every((value) => Number.isFinite(value) && value > MIN_USD_DIAGONAL_INERTIA);
+const shouldOmitInvalidUsdFrameInertial = (link, incomingJointType) => {
+    const hasGeometry = link.visuals.length > 0 || link.collisions.length > 0;
+    return !hasGeometry && (!incomingJointType || incomingJointType === "fixed");
+};
+const regularizeUsdDiagonalInertia = (inertia) => {
+    const baseScale = Math.max(Math.abs(inertia.ixx), Math.abs(inertia.iyy), Math.abs(inertia.izz), Math.abs(inertia.ixy), Math.abs(inertia.ixz), Math.abs(inertia.iyz)) || 1;
+    const floor = Math.max(MIN_USD_DIAGONAL_INERTIA, baseScale * USD_INERTIA_SCALE_FLOOR_RATIO);
+    return [
+        Math.max(Math.abs(inertia.ixx), floor),
+        Math.max(Math.abs(inertia.iyy), floor),
+        Math.max(Math.abs(inertia.izz), floor),
+    ];
+};
 const renderUsdPrim = (prim, indentLevel = 0) => {
     const indent = "  ".repeat(indentLevel);
     const metadata = prim.metadata && prim.metadata.length > 0
@@ -520,6 +544,7 @@ const buildCollisionPrim = (linkName, index, collision, meshResolver, warnings, 
 };
 function mapUrdfToUsdPrim(link, options = {}) {
     const warnings = [];
+    const diagnostics = [];
     const stats = {
         linksConverted: 1,
         jointsConverted: 0,
@@ -534,10 +559,29 @@ function mapUrdfToUsdPrim(link, options = {}) {
     });
     const metadata = [`prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]`];
     if (link.inertial) {
+        const normalizedMass = Number.isFinite(link.inertial.mass) ? link.inertial.mass : 0;
         const inertia = (0, rotationMath_1.fixInertiaThresholds)(link.inertial.inertia);
-        properties.push(`float physics:mass = ${formatNumber(link.inertial.mass)}`);
-        properties.push(`point3f physics:centerOfMass = ${formatVec3(link.inertial.origin.xyz)}`);
-        properties.push(`float3 physics:diagonalInertia = ${formatVec3([inertia.ixx, inertia.iyy, inertia.izz])}`);
+        const diagonalInertia = [inertia.ixx, inertia.iyy, inertia.izz];
+        const hasValidMass = normalizedMass > MIN_USD_MASS;
+        const hasValidInertia = hasPositiveUsdDiagonalInertia(diagonalInertia);
+        if (hasValidMass && hasValidInertia) {
+            properties.push(`float physics:mass = ${formatNumber(normalizedMass)}`);
+            properties.push(`point3f physics:centerOfMass = ${formatVec3(link.inertial.origin.xyz)}`);
+            properties.push(`float3 physics:diagonalInertia = ${formatVec3(diagonalInertia)}`);
+        }
+        else if (shouldOmitInvalidUsdFrameInertial(link, options.incomingJointType)) {
+            const message = `Omitted invalid inertial for frame-only link "${link.name}" during USD export.`;
+            warnings.push(message);
+            diagnostics.push(createUsdDiagnostic("usd.inertial.omitted_frame", link.name, message));
+        }
+        else {
+            const message = `Regularized invalid inertial for link "${link.name}" during USD export.`;
+            warnings.push(message);
+            diagnostics.push(createUsdDiagnostic("usd.inertial.regularized", link.name, message));
+            properties.push(`float physics:mass = ${formatNumber(Math.max(normalizedMass, MIN_USD_MASS))}`);
+            properties.push(`point3f physics:centerOfMass = ${formatVec3(link.inertial.origin.xyz)}`);
+            properties.push(`float3 physics:diagonalInertia = ${formatVec3(regularizeUsdDiagonalInertia(link.inertial.inertia))}`);
+        }
     }
     const children = [];
     if (options.includeVisuals !== false) {
@@ -563,6 +607,7 @@ function mapUrdfToUsdPrim(link, options = {}) {
             children,
         },
         warnings,
+        diagnostics,
         stats,
     };
 }
@@ -681,6 +726,7 @@ function convertURDFToUSD(urdfContent, options = {}) {
     }
     const robot = validation.robot;
     const warnings = [];
+    const diagnostics = [];
     const stats = {
         linksConverted: 0,
         jointsConverted: 0,
@@ -721,8 +767,10 @@ function convertURDFToUSD(urdfContent, options = {}) {
             includeVisuals: options.includeVisuals,
             includeCollisions: options.includeCollisions,
             meshResolver: options.meshResolver,
+            incomingJointType: parentJoint?.type ?? null,
         });
         warnings.push(...mapped.warnings);
+        diagnostics.push(...mapped.diagnostics);
         stats.linksConverted += mapped.stats.linksConverted;
         stats.visualsConverted += mapped.stats.visualsConverted;
         stats.collisionsConverted += mapped.stats.collisionsConverted;
@@ -775,6 +823,7 @@ function convertURDFToUSD(urdfContent, options = {}) {
         usdContent: stage.toUsda(),
         stage,
         warnings,
+        diagnostics,
         stats,
     };
 }

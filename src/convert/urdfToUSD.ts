@@ -89,7 +89,15 @@ export type URDFToUSDConversionResult = {
   usdContent: string;
   stage: UsdStage;
   warnings: string[];
+  diagnostics: UsdConversionDiagnostic[];
   stats: UrdfToUsdStats;
+};
+
+export type UsdConversionDiagnostic = {
+  code: "usd.inertial.omitted_frame" | "usd.inertial.regularized";
+  severity: "warning";
+  linkName: string;
+  message: string;
 };
 
 export type MapUrdfToUsdPrimOptions = {
@@ -99,6 +107,7 @@ export type MapUrdfToUsdPrimOptions = {
   includeVisuals?: boolean;
   includeCollisions?: boolean;
   meshResolver?: (request: UsdMeshResolveRequest) => ResolvedUsdMesh | null;
+  incomingJointType?: string | null;
 };
 
 export type InlineUsdMeshPrimOptions = {
@@ -132,6 +141,9 @@ const IDENTITY_QUATERNION: UsdQuaternion = [1, 0, 0, 0];
 const X_AXIS: Vec3 = [1, 0, 0];
 const Y_AXIS: Vec3 = [0, 1, 0];
 const Z_AXIS: Vec3 = [0, 0, 1];
+const MIN_USD_MASS = 1e-6;
+const MIN_USD_DIAGONAL_INERTIA = 1e-6;
+const USD_INERTIA_SCALE_FLOOR_RATIO = 1e-6;
 
 const formatNumber = (value: number): string => {
   if (!Number.isFinite(value)) return "0";
@@ -155,6 +167,47 @@ const formatNumberArray = (values: readonly number[]): string =>
 
 const formatTokenArray = (values: readonly string[]): string =>
   `[${values.map((value) => formatString(value)).join(", ")}]`;
+
+const createUsdDiagnostic = (
+  code: UsdConversionDiagnostic["code"],
+  linkName: string,
+  message: string
+): UsdConversionDiagnostic => ({
+  code,
+  severity: "warning",
+  linkName,
+  message,
+});
+
+const hasPositiveUsdDiagonalInertia = (values: readonly number[]): boolean =>
+  values.length === 3 &&
+  values.every((value) => Number.isFinite(value) && value > MIN_USD_DIAGONAL_INERTIA);
+
+const shouldOmitInvalidUsdFrameInertial = (
+  link: LinkData,
+  incomingJointType: string | null | undefined
+): boolean => {
+  const hasGeometry = link.visuals.length > 0 || link.collisions.length > 0;
+  return !hasGeometry && (!incomingJointType || incomingJointType === "fixed");
+};
+
+const regularizeUsdDiagonalInertia = (inertia: LinkData["inertial"]["inertia"]): Vec3 => {
+  const baseScale =
+    Math.max(
+      Math.abs(inertia.ixx),
+      Math.abs(inertia.iyy),
+      Math.abs(inertia.izz),
+      Math.abs(inertia.ixy),
+      Math.abs(inertia.ixz),
+      Math.abs(inertia.iyz)
+    ) || 1;
+  const floor = Math.max(MIN_USD_DIAGONAL_INERTIA, baseScale * USD_INERTIA_SCALE_FLOOR_RATIO);
+  return [
+    Math.max(Math.abs(inertia.ixx), floor),
+    Math.max(Math.abs(inertia.iyy), floor),
+    Math.max(Math.abs(inertia.izz), floor),
+  ];
+};
 
 const renderUsdPrim = (prim: UsdPrim, indentLevel: number = 0): string => {
   const indent = "  ".repeat(indentLevel);
@@ -702,8 +755,9 @@ const buildCollisionPrim = (
 export function mapUrdfToUsdPrim(
   link: LinkData,
   options: MapUrdfToUsdPrimOptions = {}
-): { prim: UsdPrim; warnings: string[]; stats: UrdfToUsdStats } {
+): { prim: UsdPrim; warnings: string[]; diagnostics: UsdConversionDiagnostic[]; stats: UrdfToUsdStats } {
   const warnings: string[] = [];
+  const diagnostics: UsdConversionDiagnostic[] = [];
   const stats: UrdfToUsdStats = {
     linksConverted: 1,
     jointsConverted: 0,
@@ -720,12 +774,30 @@ export function mapUrdfToUsdPrim(
   const metadata = [`prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]`];
 
   if (link.inertial) {
+    const normalizedMass = Number.isFinite(link.inertial.mass) ? link.inertial.mass : 0;
     const inertia = fixInertiaThresholds(link.inertial.inertia);
-    properties.push(`float physics:mass = ${formatNumber(link.inertial.mass)}`);
-    properties.push(`point3f physics:centerOfMass = ${formatVec3(link.inertial.origin.xyz)}`);
-    properties.push(
-      `float3 physics:diagonalInertia = ${formatVec3([inertia.ixx, inertia.iyy, inertia.izz])}`
-    );
+    const diagonalInertia: Vec3 = [inertia.ixx, inertia.iyy, inertia.izz];
+    const hasValidMass = normalizedMass > MIN_USD_MASS;
+    const hasValidInertia = hasPositiveUsdDiagonalInertia(diagonalInertia);
+
+    if (hasValidMass && hasValidInertia) {
+      properties.push(`float physics:mass = ${formatNumber(normalizedMass)}`);
+      properties.push(`point3f physics:centerOfMass = ${formatVec3(link.inertial.origin.xyz)}`);
+      properties.push(`float3 physics:diagonalInertia = ${formatVec3(diagonalInertia)}`);
+    } else if (shouldOmitInvalidUsdFrameInertial(link, options.incomingJointType)) {
+      const message = `Omitted invalid inertial for frame-only link "${link.name}" during USD export.`;
+      warnings.push(message);
+      diagnostics.push(createUsdDiagnostic("usd.inertial.omitted_frame", link.name, message));
+    } else {
+      const message = `Regularized invalid inertial for link "${link.name}" during USD export.`;
+      warnings.push(message);
+      diagnostics.push(createUsdDiagnostic("usd.inertial.regularized", link.name, message));
+      properties.push(`float physics:mass = ${formatNumber(Math.max(normalizedMass, MIN_USD_MASS))}`);
+      properties.push(`point3f physics:centerOfMass = ${formatVec3(link.inertial.origin.xyz)}`);
+      properties.push(
+        `float3 physics:diagonalInertia = ${formatVec3(regularizeUsdDiagonalInertia(link.inertial.inertia))}`
+      );
+    }
   }
 
   const children: UsdPrim[] = [];
@@ -751,6 +823,7 @@ export function mapUrdfToUsdPrim(
       children,
     },
     warnings,
+    diagnostics,
     stats,
   };
 }
@@ -894,6 +967,7 @@ export function convertURDFToUSD(
   const robot = validation.robot;
 
   const warnings: string[] = [];
+  const diagnostics: UsdConversionDiagnostic[] = [];
   const stats: UrdfToUsdStats = {
     linksConverted: 0,
     jointsConverted: 0,
@@ -935,8 +1009,10 @@ export function convertURDFToUSD(
       includeVisuals: options.includeVisuals,
       includeCollisions: options.includeCollisions,
       meshResolver: options.meshResolver,
+      incomingJointType: parentJoint?.type ?? null,
     });
     warnings.push(...mapped.warnings);
+    diagnostics.push(...mapped.diagnostics);
     stats.linksConverted += mapped.stats.linksConverted;
     stats.visualsConverted += mapped.stats.visualsConverted;
     stats.collisionsConverted += mapped.stats.collisionsConverted;
@@ -1002,6 +1078,7 @@ export function convertURDFToUSD(
     usdContent: stage.toUsda(),
     stage,
     warnings,
+    diagnostics,
     stats,
   };
 }
